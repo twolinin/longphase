@@ -6,6 +6,7 @@ Long-read phasing has been used for reconstructing diploid genomes, improving va
 ```
 git clone --recurse-submodules https://github.com/twolinin/LongPhase.git
 cd LongPhase
+bash setup.sh
 autoreconf -i
 ./configure
 make
