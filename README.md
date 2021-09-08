@@ -7,9 +7,6 @@ Long-read phasing has been used for reconstructing diploid genomes, improving va
 git clone --recurse-submodules https://github.com/twolinin/LongPhase.git
 cd LongPhase
 bash setup.sh
-autoreconf -i
-./configure
-make
 ```
 
 ---
@@ -20,7 +17,7 @@ LongPhase phase \
 -s SNP.vcf \
 -b alignment.bam \
 -r reference.fasta \
--t 4 \  
+-t 4 \ # number of thread  
 -o output_prefix \
 --ont # or --pb
 ```
@@ -32,7 +29,7 @@ LongPhase phase \
 --sv-file SV.vcf \
 -b alignment.bam \
 -r reference.fasta \
--t 4 \  
+-t 4 \ # number of thread
 -o output_prefix \
 --ont # or --pb
 ```
