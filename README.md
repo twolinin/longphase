@@ -1,7 +1,7 @@
 # LongPhase
 LongPhase is an ultra-fast program for simultaneously phasing SNPs and SVs by using Nanopore and PacBio long reads. It is capable of producing chromosome-scale haplotype blocks by using Nanpore ultra-long reads without the need for additional trios, chromosome conformation, and strand-seq data. 
 
-![image](http://bioinfo.cs.ccu.edu.tw/bioinfo/HG002_60x/phasing_result.png)
+![image](http://bioinfo.cs.ccu.edu.tw/bioinfo/HG002_60x/test2.PNG)
 
 ---
 ### Installation
@@ -91,6 +91,10 @@ An example of SV VCF file
 1       534057  7       N       AAATTCGCGCATATCACGGGTGCCGCCTCTGTGCAGCTCACGAAACGCCATACTACGGTGCTGCTCAGCAGCTACGGAATCGCTATACCTACGCGAGCTGCCTCAGCAGCCAC       .       PASS    IMPRECISE;SVMETHOD=Snifflesv1.0.11;CHR2=1;END=534128;STD_quant_start=25.369041;STD_quant_stop=29.191054;Kurtosis_quant_start=-0.239012;Kurtosis_quant_stop=-1.333733;SVTYPE=INS;RNAMES=0120d560-50f0-4298-8b03-7bd30f3cf139,030ac5d4-e616-4ce9-8ad3-243835335085,0cf1b0d9-2b4d-463d-a658-01b4b040dc63,1c9e982a-8af7-4ba0-8cc2-154a679c72e2,22e11f79-0067-4735-8b69-97d951ca702f,2ca8a6f4-be9d-4df5-80d2-dc1743f97a84,35dff960-22b6-4216-af69-8878b8860362,390d2fb4-9224-41a1-a9fe-6cb3bbe4273a,3e333422-12ca-4f16-afb8-ed7611dcbc2c,3e8ed78a-b857-4941-bbc1-52ca51e26c08,4191371c-49ea-466d-aadc-06f27cdf1050,4aaae789-54fe-4fa5-84b3-5524dc2b3796,581e0cfb-2491-44d7-a2e1-ba1516ba0f2f,59749531-9abf-4ff4-a4a1-31484ba3d32d,5c97b0a9-925e-4153-952d-0f437171d3dc,6067590e-956c-442f-bbb7-cae597d616ad,623804bb-e2fe-415d-96ae-3d06aec63e5d,672244ce-2d5d-45cf-beb2-ddeddae917e8,6b79aa23-7c9c-49dc-9b88-8419c88c7a36,6e60d235-6654-4ef8-9feb-70f12a397721,6fbb55c5-57fc-43bc-8a24-b0058778054c,8e10bf13-9674-489c-924e-182a42e08a34,aa6ba092-4221-4d54-8819-811448c34983,af2169b3-b308-4db5-9675-15ff5f68d8dd,b214fcbd-77de-4dd5-84db-6d2b7e1f3158,c140eaba-e0e7-44e7-9f16-c8c67fd4a2f2,c7835cf7-44c0-44da-b10e-b2468fc8caab,ca4aa84d-34d1-4639-8634-b6a5540129ca,caba4bde-cdc5-4344-9803-a3c158525b0c,e0747feb-60bb-40db-a144-a9b43dd13256,e6992c7d-c00e-40e7-b80b-562094a9b60f,e8bb376c-20e0-4bed-a61f-b82b5c37ef6f,f3242a61-deec-49e7-b99f-335a1ba13791,f87dfdf7-7b68-421b-b395-3769a5fa3ac1,f91a7627-7fdb-4f03-8f33-0ed1649d96fe;SUPTYPE=AL;SVLEN=43;STRANDS=+-;RE=35;REF_strand=44;AF=0.795455    GT:DR:DV:PS     0|1:9:35:382189
 1       545892  8       N       ACACGCGGGCCGTGGCCAGCAGGCGGCGCTGCAGGAGAGGAGATGCCCAGGCCTGGCGGCC   .       PASS    IMPRECISE;SVMETHOD=Snifflesv1.0.11;CHR2=1;END=545893;STD_quant_start=28.919840;STD_quant_stop=28.543200;Kurtosis_quant_start=-0.382251;Kurtosis_quant_stop=-0.130808;SVTYPE=INS;RNAMES=0120d560-50f0-4298-8b03-7bd30f3cf139,030ac5d4-e616-4ce9-8ad3-243835335085,0cf1b0d9-2b4d-463d-a658-01b4b040dc63,22e11f79-0067-4735-8b69-97d951ca702f,2ca8a6f4-be9d-4df5-80d2-dc1743f97a84,3977c988-9901-4e5b-9f9c-b8ebfcce8e93,3e333422-12ca-4f16-afb8-ed7611dcbc2c,4191371c-49ea-466d-aadc-06f27cdf1050,4aaae789-54fe-4fa5-84b3-5524dc2b3796,5933e1b7-1aeb-4437-a875-3befbf703420,623804bb-e2fe-415d-96ae-3d06aec63e5d,672244ce-2d5d-45cf-beb2-ddeddae917e8,6b79aa23-7c9c-49dc-9b88-8419c88c7a36,7842d9f1-9a77-4c9a-ab5b-5a644ed2d355,7ba26d64-d9b0-475f-8d5f-1fa73fc42d93,8e10bf13-9674-489c-924e-182a42e08a34,a2b1b2ef-1e28-465e-8b3f-c44e15990d8b,a45514f1-4aae-40eb-94eb-2969722a7b05,b8181546-6839-49cd-b64f-b65c96369a2b,c140eaba-e0e7-44e7-9f16-c8c67fd4a2f2,c7835cf7-44c0-44da-b10e-b2468fc8caab,ca4aa84d-34d1-4639-8634-b6a5540129ca,d56f0abe-4389-4197-a151-0eb567fb99f0,e6992c7d-c00e-40e7-b80b-562094a9b60f,e8bb376c-20e0-4bed-a61f-b82b5c37ef6f,ec325153-0c55-4ece-8f3c-c432701e6750,f3242a61-deec-49e7-b99f-335a1ba13791,f91a7627-7fdb-4f03-8f33-0ed1649d96fe;SUPTYPE=AL;SVLEN=62;STRANDS=+-;RE=28;REF_strand=51;AF=0.54902        GT:DR:DV:PS     1|0:23:28:382189
 ```
+
+---
+### Data available
+http://bioinfo.cs.ccu.edu.tw/bioinfo/HG002_60x/
 
 ---
 ### Citation
