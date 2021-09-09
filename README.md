@@ -47,7 +47,6 @@ LongPhase phase \
 |-r, --reference=Name|reference fasta.||
 |-t, --threads=Num|number of thread.|1|
 |-d, --distance=Num|phasing two variant if distance less than threshold.|300000|
-|-c, --crossBlock=Num|each block tries to connect with next N blocks.|1|
 
 ---
 ### SNP phasing Result

@@ -111,7 +111,7 @@ std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool
     
     // If two choice have the same weight, 
     // the two edges have the weight is more reliable than one.
-    // i.e. sequencing error
+    // i.e. methylation
     if(isONT){
         if(rr!=0 && aa !=0){
             rr+=1;
