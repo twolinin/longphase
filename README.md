@@ -1,6 +1,8 @@
 # LongPhase
 LongPhase is an ultra-fast program for simultaneously phasing SNPs and SVs by using Nanopore and PacBio long reads. It is capable of producing chromosome-scale haplotype blocks by using Nanpore ultra-long reads without the need for additional trios, chromosome conformation, and strand-seq data. 
 
+![image](http://bioinfo.cs.ccu.edu.tw/bioinfo/HG002_60x/phasing_result.png)
+
 ---
 ### Installation
 LongPhase relies on htslib for parsing BAMs, which will be included by recursive cloning.
