@@ -1,8 +1,6 @@
 # LongPhase
 LongPhase is an ultra-fast program for simultaneously phasing SNPs and SVs by using Nanopore and PacBio long reads. It is capable of producing chromosome-scale haplotype blocks by using Nanpore ultra-long reads without the need for additional trios, chromosome conformation, and strand-seq data. 
 
-![image](http://bioinfo.cs.ccu.edu.tw/bioinfo/HG002_60x/test2.PNG)
-
 ---
 ### Installation
 LongPhase relies on htslib for parsing BAMs, which will be included by recursive cloning.
@@ -15,7 +13,7 @@ bash setup.sh
 
 ---
 ### Usage
-For SNP-only phasing, LongPhase takes input of SNP calling (e.g., SNP.vcf), read-to-reference alignment (e.g., alignment.bam), and a reference genome (e.g., reference.fasta). The users are encouraged to specify the sequencing patform (--ont or --pb) for better performance. An example of SNP phasing usage is shown below.
+For SNP-only phasing, LongPhase takes input of SNP calling (e.g., SNP.vcf), read-to-reference alignment (e.g., alignment.bam), and the reference genome (e.g., reference.fasta). An exampe input of Nanopore HG002 (60x) can be downloaded from [here](http://bioinfo.cs.ccu.edu.tw/bioinfo/HG002_60x/). The users should specify the sequencing patform (--ont for Nanopore and --pb for PacBio). An example of SNP phasing usage is shown below.
 ```
 LongPhase phase \
 -s SNP.vcf \
@@ -54,7 +52,7 @@ The complete list of parameters:
 |-d, --distance=Num|phasing two variant if distance less than threshold.|300000|
 
 ---
-### SNP Phasing Results
+### Output files of SNP-only phasing
 When phasing SNPs alone, LongPhase outputs the results into a VCF file. The alleles of the two haplotypes are stored in the GT field (e.g., 1|0), whereas the left and right alleles of the vertical bar represents the paternal or maternal haplotypes. The last PS field (e.g., 16809) represents the identifier of the block. For instance, the following example illustrates two haplotypes of five phased SNPs, CCCCC and GATGT, in the same block 16809.
 
 ```
@@ -69,7 +67,7 @@ When phasing SNPs alone, LongPhase outputs the results into a VCF file. The alle
 ```
 
 ---
-### SNP and SV co-phasing Result
+### Output files of SNP and SV co-phasing
 When co-phasing SNPs and SVs, two VCFs (one for SNPs and one for SVs) will be outputted. Similarly, the phased SVs are stored in the GT field and the block ID is in the PS field. For instance, the following example illustrates two haplotypes of five SNPs and two SVs, A\<INS\>G\<noSV\>TCC and G\<noSV\>A\<INS\>ATT, which are co-phased in the same block 382189.
 
 An example of SNP VCF file
@@ -93,8 +91,9 @@ An example of SV VCF file
 ```
 
 ---
-### Data available
-http://bioinfo.cs.ccu.edu.tw/bioinfo/HG002_60x/
+### Comparison with other phasing programs
+LongPhase is 10x faster than WhatsHap and Margin and produces much larger blocks when tested on HG002, HG003,and HG004.
+<img src="http://bioinfo.cs.ccu.edu.tw/bioinfo/HG002_60x/test2.PNG" width="600">
 
 ---
 ### Citation
