@@ -359,13 +359,18 @@ bool VairiantGrpah::connectBlockByReadName(int nextBlcok){
 
             }
         }
-
+        
+        // If two choice have the same weight, 
+        // the two edges have the weight is more reliable than one.
+        // i.e. methylation
         if(params->isONT){
             if(rr!=0 && aa !=0){
-                rr+=2;
+                rr+=1;
+                aa+=1;
             }
             if(ra!=0 && ar !=0){
-                ra+=2;
+                ra+=1;
+                ar+=1;
             }
         }
         
