@@ -13,7 +13,7 @@ bash setup.sh
 
 ---
 ### Usage
-For SNP-only phasing, LongPhase takes input of called SNPs (e.g., SNP.vcf), read-to-reference alignment (e.g., alignment.bam), and the reference genome (e.g., reference.fasta). An exampe input of Nanopore HG002 (60x ULR) can be downloaded from [here](http://bioinfo.cs.ccu.edu.tw/bioinfo/HG002_60x/). The users should specify the sequencing patform (--ont for Nanopore and --pb for PacBio). An example of SNP phasing usage is shown below.
+For SNP-only phasing, LongPhase takes input of called SNPs (e.g., SNP.vcf), read-to-reference alignment require an indexed(e.g., alignment.bam, alignment.bai), and the reference genome require an indexed(e.g., reference.fasta, reference.fasta.fai). An exampe input of Nanopore HG002 (60x ULR) can be downloaded from [here](http://bioinfo.cs.ccu.edu.tw/bioinfo/HG002_60x/). The users should specify the sequencing patform (--ont for Nanopore and --pb for PacBio). An example of SNP phasing usage is shown below.
 ```
 LongPhase phase \
 -s SNP.vcf \
