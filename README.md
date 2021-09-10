@@ -93,7 +93,7 @@ An example of SV VCF file
 ---
 ### Comparison with other SNP-phasing programs
 LongPhase is 10x faster than WhatsHap and Margin and produces much larger blocks when tested on HG002, HG003,and HG004.
-<img src="http://bioinfo.cs.ccu.edu.tw/bioinfo/HG002_60x/test2.PNG" width="600">
+<img src="http://bioinfo.cs.ccu.edu.tw/bioinfo/HG002_60x/compare.png" width="600">
 
 ---
 ### Citation
