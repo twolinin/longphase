@@ -6,9 +6,11 @@ LongPhase is an ultra-fast program for simultaneously phasing SNPs and SVs by us
 LongPhase relies on [htslib](https://github.com/samtools/htslib/tree/238fe32d8c7aa05d3ac75d2249c61d8e268be58f) for parsing BAMs, which can be included by recursive submodule cloning.
 
 ```
-git clone --recurse-submodules https://github.com/twolinin/LongPhase.git
+git clone https://github.com/twolinin/LongPhase.git
 cd LongPhase
-bash setup.sh
+autoreconf -i
+./configure
+make -j 4
 ```
 
 ---
