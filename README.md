@@ -19,7 +19,7 @@ LongPhase phase \
 -s SNP.vcf \
 -b alignment.bam \
 -r reference.fasta \
--t 4 \ # number of thread  
+-t 8 \ # number of thread  
 -o output_prefix \
 --ont # or --pb for PacBio Hifi
 ```
@@ -31,7 +31,7 @@ LongPhase phase \
 --sv-file SV.vcf \
 -b alignment.bam \
 -r reference.fasta \
--t 4 \ # number of thread
+-t 8 \ # number of thread
 -o output_prefix \
 --ont # or --pb for PacBio Hifi
 ```
