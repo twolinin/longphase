@@ -75,30 +75,35 @@ VariantParser::VariantParser(std::string variantFile):variantFile(variantFile){
     int ngt = 0;
     int *gt     = NULL;
     
-    int ps_arr = 0;
-    int nps = 0;
-    int *ps    = NULL;
+    //int ps_arr = 0;
+    //int nps = 0;
+    //int *ps    = NULL;
        
     // loop vcf line 
     while (bcf_read(inf, hdr, rec) == 0) {
         // this function directly looking Ref and Alt string length
         if (bcf_is_snp(rec)) {
             ngt = bcf_get_format_int32(hdr, rec, "GT", &gt, &ngt_arr);
+            /*
             nps = bcf_get_format_int32(hdr, rec, "PS", &ps, &ps_arr);
-
             if(nps>0){
                 std::cerr<< "pos " << rec->pos << " already phased\n";
                 std::cerr<< "please check vcf file.\n";
                 exit(1);
             }
-            
+            */
             if(ngt<0){
                 std::cerr<< "pos " << rec->pos << " missing GT value" << "\n";
                 exit(1);
             }
-            
-            // just phase 0/1 GT
-            if ( gt[0] == 2 && gt[1] == 4) {
+
+            // just phase hetero SNP
+            if ( (gt[0] == 2 && gt[1] == 4) || // 0/1
+                 (gt[0] == 4 && gt[1] == 2) || // 1/0
+                 (gt[0] == 2 && gt[1] == 5) || // 0|1
+                 (gt[0] == 4 && gt[1] == 3)    // 1|0 
+                ) {
+                
                 // get chromosome string
                 std::string chr = seqnames[rec->rid];
                 // position is 0-base
@@ -164,13 +169,18 @@ void VariantParser::writeResult(std::string resultPrefix, PhasingResult phasingR
         std::cout<< "Fail to open vcf: " << variantFile << "\n";
     }
     else{
+        bool ps_def = false;
         std::string input;
         while(! originVcf.eof() ){
             std::getline(originVcf, input);
-            
+            // header
             if( input.find("#")!= std::string::npos){
-                // header
-                if(input.find("##")== std::string::npos){
+                // avoid double definition
+                if( input.find("ID=PS")!= std::string::npos){
+                    ps_def = true;
+                }
+                // format line 
+                if(input.find("##")== std::string::npos && ps_def == false){
                     resultVcf <<  "##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase set identifier\">\n";
                 }
                 resultVcf << input << "\n";
@@ -189,9 +199,79 @@ void VariantParser::writeResult(std::string resultPrefix, PhasingResult phasingR
                 PhasingResult::iterator psElementIter =  phasingResult.find(key);
                 std::map<int, RefAlt>::iterator posIter = chrVariant[fields[0]].find(posIdx);
 
+                // PS flag already exist, erase PS info
+                if( fields[8].find("PS")!= std::string::npos ){
+
+                    // find PS flag
+                    int colon_pos = 0;
+                    int ps_pos = fields[8].find("PS");
+                    for(int i =0 ; i< ps_pos ; i++){
+                        if(fields[8][i]==':')
+                            colon_pos++;
+                    }
+                            
+                    // erase PS flag
+                    if( fields[8].find(":",ps_pos+1) != std::string::npos ){
+                        fields[8].erase(ps_pos, 3);
+                    }
+                    else{
+                        fields[8].erase(ps_pos - 1, 3);
+                    }
+                        
+                    // find PS value start
+                    int current_colon = 0;
+                    int ps_start = 0;
+                    for(unsigned int i =0; i < fields[9].length() ; i++){
+                        if( current_colon >= colon_pos )
+                            break;
+                        if(fields[9][i]==':')
+                            current_colon++;  
+                        ps_start++;
+                    }
+                        
+                    // erase PS value
+                    if( fields[9].find(":",ps_start+1) != std::string::npos ){
+                        int ps_end_pos = fields[9].find(":",ps_start+1);
+                        fields[9].erase(ps_start, ps_end_pos - ps_start + 1);
+                    }
+                    else{
+                        fields[9].erase(ps_start-1, fields[9].length() - ps_start + 1);
+                    }
+                }
+                // reset GT flag
+                if( fields[8].find("GT")!= std::string::npos ){
+                    // find GT flag
+                    int colon_pos = 0;
+                    int gt_pos = fields[8].find("GT");
+                    for(int i =0 ; i< gt_pos ; i++){
+                        if(fields[8][i]==':')
+                            colon_pos++;
+                    }
+                    // find GT value start
+                    int current_colon = 0;
+                    int modifu_start = 0;
+                    for(unsigned int i =0; i < fields[9].length() ; i++){
+                        if( current_colon >= colon_pos )
+                            break;
+                        if(fields[9][i]==':')
+                            current_colon++;  
+                        modifu_start++;
+                    }
+                    if(fields[9][modifu_start+1] == '|'){
+                        // direct modify GT value
+                        if(fields[9][modifu_start] > fields[9][modifu_start+2]){
+                            fields[9][modifu_start+1] = fields[9][modifu_start];
+                            fields[9][modifu_start] = fields[9][modifu_start+2];
+                            fields[9][modifu_start+2] =fields[9][modifu_start+1];
+                        }
+                        fields[9][modifu_start+1] = '/';
+                    }
+                    
+                }
+
                 // this pos is phase
                 if( psElementIter != phasingResult.end() && posIter != chrVariant[fields[0]].end()){
-                    
+
                     // add PS flag and value
                     fields[8] = fields[8] + ":PS";
                     fields[9] = fields[9] + ":" + std::to_string((*psElementIter).second.block);
@@ -217,18 +297,21 @@ void VariantParser::writeResult(std::string resultPrefix, PhasingResult phasingR
                     fields[9][modifu_start] = (*psElementIter).second.RAstatus[0];
                     fields[9][modifu_start+1] = '|';
                     fields[9][modifu_start+2] = (*psElementIter).second.RAstatus[2];
-                    
-                    for(std::vector<std::string>::iterator fieldIter = fields.begin(); fieldIter != fields.end(); ++fieldIter){
-                        if( fieldIter != fields.begin() )
-                            resultVcf<< "\t";
-                        resultVcf << (*fieldIter);
-                    }
-                    resultVcf << "\n";
+
                 }
                 // this pos has not been phased
                 else{
-                    resultVcf << input << "\n";
+                    // add PS flag and value
+                    fields[8] = fields[8] + ":PS";
+                    fields[9] = fields[9] + ":.";
                 }
+                
+                for(std::vector<std::string>::iterator fieldIter = fields.begin(); fieldIter != fields.end(); ++fieldIter){
+                    if( fieldIter != fields.begin() )
+                        resultVcf<< "\t";
+                    resultVcf << (*fieldIter);
+                }
+                resultVcf << "\n";
             }
         }
     }
@@ -314,9 +397,10 @@ int VariantParser::homopolimerEnd(int snp_pos, const std::string &ref_string){
 SVParser::SVParser(std::string variantFile, VariantParser snpFile):variantFile(variantFile){
     std::ifstream originVcf(variantFile);
     if(variantFile=="")
-            return;
+        return;
     if(!originVcf.is_open()){
         std::cout<< "Fail to open vcf: " << variantFile << "\n";
+        exit(1);
     }
     else{
         std::string input;
@@ -434,14 +518,21 @@ void SVParser::writeResult(std::string resultPrefix, PhasingResult phasingResult
         std::cout<< "Fail to open vcf: " << variantFile << "\n";
     }
     else{
+        bool ps_def = false;
         std::string input;
         while(! originVcf.eof() ){
             std::getline(originVcf, input);
             if(input.length() == 0)
                 continue;
+
+            // header
             if( input.find("#")!= std::string::npos){
-                // header
-                if(input.find("##")== std::string::npos){
+                // avoid double definition
+                if( input.find("ID=PS")!= std::string::npos){
+                    ps_def = true;
+                }
+                // format line 
+                if(input.find("##")== std::string::npos && ps_def == false){
                     resultVcf <<  "##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase set identifier\">\n";
                 }
                 resultVcf << input << "\n";
@@ -461,6 +552,76 @@ void SVParser::writeResult(std::string resultPrefix, PhasingResult phasingResult
 
                 PhasingResult::iterator psElementIter =  phasingResult.find(key);
                 std::map<int, std::map<std::string ,bool> >::iterator posIter = chrVariant[chr].find(posIdx);
+                
+                // PS flag already exist, erase PS info
+                if( fields[8].find("PS")!= std::string::npos ){
+
+                    // find PS flag
+                    int colon_pos = 0;
+                    int ps_pos = fields[8].find("PS");
+                    for(int i =0 ; i< ps_pos ; i++){
+                        if(fields[8][i]==':')
+                            colon_pos++;
+                    }
+                            
+                    // erase PS flag
+                    if( fields[8].find(":",ps_pos+1) != std::string::npos ){
+                        fields[8].erase(ps_pos, 3);
+                    }
+                    else{
+                        fields[8].erase(ps_pos - 1, 3);
+                    }
+                        
+                    // find PS value start
+                    int current_colon = 0;
+                    int ps_start = 0;
+                    for(unsigned int i =0; i < fields[9].length() ; i++){
+                        if( current_colon >= colon_pos )
+                            break;
+                        if(fields[9][i]==':')
+                            current_colon++;  
+                        ps_start++;
+                    }
+                        
+                    // erase PS value
+                    if( fields[9].find(":",ps_start+1) != std::string::npos ){
+                        int ps_end_pos = fields[9].find(":",ps_start+1);
+                        fields[9].erase(ps_start, ps_end_pos - ps_start + 1);
+                    }
+                    else{
+                        fields[9].erase(ps_start-1, fields[9].length() - ps_start + 1);
+                    }
+                }
+                // reset GT flag
+                if( fields[8].find("GT")!= std::string::npos ){
+                    // find GT flag
+                    int colon_pos = 0;
+                    int gt_pos = fields[8].find("GT");
+                    for(int i =0 ; i< gt_pos ; i++){
+                        if(fields[8][i]==':')
+                            colon_pos++;
+                    }
+                    // find GT value start
+                    int current_colon = 0;
+                    int modifu_start = 0;
+                    for(unsigned int i =0; i < fields[9].length() ; i++){
+                        if( current_colon >= colon_pos )
+                            break;
+                        if(fields[9][i]==':')
+                            current_colon++;  
+                        modifu_start++;
+                    }
+                    if(fields[9][modifu_start+1] == '|'){
+                        // direct modify GT value
+                        if(fields[9][modifu_start] > fields[9][modifu_start+2]){
+                            fields[9][modifu_start+1] = fields[9][modifu_start];
+                            fields[9][modifu_start] = fields[9][modifu_start+2];
+                            fields[9][modifu_start+2] =fields[9][modifu_start+1];
+                        }
+                        fields[9][modifu_start+1] = '/';
+                    }
+                    
+                }
                 
                 // this pos is phase and exist in map
                 if( psElementIter != phasingResult.end() && posIter != chrVariant[chr].end() ){
@@ -490,20 +651,20 @@ void SVParser::writeResult(std::string resultPrefix, PhasingResult phasingResult
                     fields[9][modifu_start] = (*psElementIter).second.RAstatus[0];
                     fields[9][modifu_start+1] = '|';
                     fields[9][modifu_start+2] = (*psElementIter).second.RAstatus[2];
-                    
-                    //std::cout<< pos << "\t" << subNodeHP[tmpA] << "|" << subNodeHP[tmpB] << "\n";
-                    for(std::vector<std::string>::iterator fieldIter = fields.begin(); fieldIter != fields.end(); ++fieldIter){
-                        if( fieldIter != fields.begin() )
-                            resultVcf<< "\t";
-                        resultVcf << (*fieldIter);
-                    }
-                    resultVcf << "\n";
-                    
+
                 }
                 // this pos has not been phased
                 else{
-                    resultVcf << input << "\n";
+                    // add PS flag and value
+                    fields[8] = fields[8] + ":PS";
+                    fields[9] = fields[9] + ":.";
                 }
+                for(std::vector<std::string>::iterator fieldIter = fields.begin(); fieldIter != fields.end(); ++fieldIter){
+                    if( fieldIter != fields.begin() )
+                        resultVcf<< "\t";
+                    resultVcf << (*fieldIter);
+                }
+                resultVcf << "\n";
             }
         }
     }
@@ -573,9 +734,11 @@ void BamParser::direct_detect_alleles(int lastSNPPos, PhasingParameters params, 
 
         if (    aln->core.qual < 20  // mapping quality
              || (flag & 0x4)   != 0  // read unmapped
-             || (flag & 0x100) != 0  // secondary alignment
+             || (flag & 0x100) != 0  // secondary alignment. repeat. 
+                                     // A secondary alignment occurs when a given read could align reasonably well to more than one place.
              || (flag & 0x400) != 0  // duplicate 
-             //|| (flag & 0x800) != 0   // supplementary alignment
+           //|| (flag & 0x800) != 0  // supplementary alignment
+                                     // A chimeric alignment is represented as a set of linear alignments that do not have large overlaps.
              ){ 
             std::string str = bamHdr->target_name[aln->core.tid];
             continue;
