@@ -907,8 +907,9 @@ void BamParser::get_snp(Alignment align, std::vector<ReadVariant> &readVariantVe
                             allele = 1;
                     }
                     else{
-                        std::cout<< "not snp: " <<(*currentVariantIter).first + 1 << "\n";
-                        exit(1);
+                        // skip this position
+                        //std::cout<< "not snp: " <<(*currentVariantIter).first + 1 << "\n";
+                        //exit(1);
                     }            
                     
                     if( allele != -1 ){
