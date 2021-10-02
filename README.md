@@ -8,7 +8,7 @@ You are recommended to download a [linux 64bit binary release](http://bioinfo.cs
 ```
 curl -O http://bioinfo.cs.ccu.edu.tw/bioinfo/HG002_60x/longPhase_linux-x64.gz
 gunzip longPhase_linux-x64.gz
-chmod 755 longPhase_linux-x64.gz
+chmod 755 longPhase_linux-x64
 ```
 
 An executable file, longPhase_linux-x64, can be executed direcetly. If you need to compile a local version, you can clone and compile using the following commands. 
