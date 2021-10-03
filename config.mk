@@ -22,34 +22,34 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
 
-# This is @configure_input@
+# This is config.mk.  Generated from config.mk.in by configure.
 #
 # If you use configure, this file overrides variables and augments rules
 # in the Makefile to reflect your configuration choices.  If you don't run
 # configure, the main Makefile contains suitable conservative defaults.
 
-prefix       = @prefix@
-exec_prefix  = @exec_prefix@
-bindir       = @bindir@
-datarootdir  = @datarootdir@
-mandir       = @mandir@
+prefix       = /usr/local
+exec_prefix  = ${prefix}
+bindir       = ${exec_prefix}/bin
+datarootdir  = ${prefix}/share
+mandir       = ${datarootdir}/man
 
-AWK      = @AWK@
-#CC       = @CC@
-#CPPFLAGS = @CPPFLAGS@
-CFLAGS   = @CFLAGS@
-#LDFLAGS  = @LDFLAGS@
-#LIBS     = @LIBS@
+AWK      = gawk
+#CC       = gcc
+#CPPFLAGS =  -Ihtslib/include
+CFLAGS   = -g -O2
+#LDFLAGS  =  -Lhtslib/lib
+#LIBS     = 
 
-HTSDIR = @HTSDIR@
+HTSDIR = htslib
 include $(HTSDIR)/htslib.mk
 include $(HTSDIR)/htslib_static.mk
 HTSLIB = $(HTSDIR)/libhts.a
 HTSLIB_LIB = $(HTSLIB) $(HTSLIB_static_LIBS)
 #@Hsource@HTSLIB_LDFLAGS = $(HTSLIB_static_LDFLAGS)
 #@Hsource@BGZIP = $(HTSDIR)/bgzip
-#HTSLIB_CPPFLAGS = @HTSLIB_CPPFLAGS@
-#@Hinstall@HTSLIB_LDFLAGS = @HTSLIB_LDFLAGS@
+#HTSLIB_CPPFLAGS = -Ihtslib/include
+#@Hinstall@HTSLIB_LDFLAGS = -Lhtslib/lib
 #HTSLIB_LIB = -lhts
 
 CURSES_LIB = @CURSES_LIB@
