@@ -6,7 +6,7 @@ LongPhase is an ultra-fast program for simultaneously phasing SNPs and SVs by us
 You are recommended to download a [linux 64bit binary release](http://bioinfo.cs.ccu.edu.tw/bioinfo/HG002_60x/longPhase_linux-x64.tar.xz) without compilation. 
 
 ```
-curl -O http://bioinfo.cs.ccu.edu.tw/bioinfo/HG002_60x/longPhase_linux-x64.tar.xz
+curl -O http://bioinfo.cs.ccu.edu.tw/bioinfo/HG002_60x/longphase_linux-x64.tar.xz
 tar -xJf longPhase_linux-x64.tar.xz
 ```
 
