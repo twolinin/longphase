@@ -32,7 +32,7 @@ LIBS     =
 
 OBJ = ParsingBam.o Util.o PhasingProcess.o Phasing.o PhasingGraph.o main.o
 
-PROGRAMS = longPhase
+PROGRAMS = longphase
 
 all: $(PROGRAMS) 
 
