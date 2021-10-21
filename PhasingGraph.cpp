@@ -94,8 +94,6 @@ VariantEdge::VariantEdge(){
 }
 
 //VariantEdge
-
-
 std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool isONT){
     std::pair<int,int> refBestPair  = ref->BestPair(targetPos);
     std::pair<int,int> altBestPair  = alt->BestPair(targetPos);
@@ -275,8 +273,6 @@ std::map<std::string,int> VairiantGrpah::getBlockRead(std::pair<int,std::vector<
     return readTag;
 }
 
-
-
 bool VairiantGrpah::connectBlockByReadName(int nextBlcok){
     bool connect = false;
 
@@ -324,9 +320,6 @@ bool VairiantGrpah::connectBlockByReadName(int nextBlcok){
         
         if( std::abs((*breakNode).first - (*nodeIter).first) > params->distance )
             continue;  
-                
-        // find number of support read
-        //std::pair<int,int> numOfRead = (*edgeIter).second->findNumberOfRead((*breakNode).first);
 
         BlockRead totalRead;
         std::map<std::string,int> frontReadtag = this->getBlockRead((*blockVecIter), totalRead, sampleNum);
@@ -375,9 +368,6 @@ bool VairiantGrpah::connectBlockByReadName(int nextBlcok){
         }
         
         if( rr + aa > ra + ar ){
-            //std::cout<<"block phasing: " << (*breakNode).first << "\t"
-            //<< (*nodeIter).first << "\t|\t" << rr << "\t" << aa << "\t" << ra << "\t" << ar << "\n" ;
-            
             PosAllele refStart = std::make_pair((*breakNode).first, 1);
             PosAllele refEnd   = std::make_pair((*nodeIter).first,  1);
             PosAllele altStart = std::make_pair((*breakNode).first, 2);
@@ -389,9 +379,6 @@ bool VairiantGrpah::connectBlockByReadName(int nextBlcok){
             connect = true;
         }
         else if(rr + aa < ra + ar){
-            //std::cout<<"block phasing: " << (*breakNode).first << "\t"
-            //<< (*nodeIter).first << "\t|\t" << rr << "\t" << aa << "\t" << ra << "\t" << ar << "\n" ;
-            
             PosAllele refStart = std::make_pair((*breakNode).first, 1);
             PosAllele refEnd   = std::make_pair((*nodeIter).first,  2);
             PosAllele altStart = std::make_pair((*breakNode).first, 1);
@@ -505,11 +492,6 @@ void VairiantGrpah::connectBlockByQuality(){
             if( edgeIter==edgeList.end() )
                 continue;
         
-        
-        // find number of support read
-        //std::pair<int,int> numOfRead = (*edgeIter).second->findNumberOfRead((*nextPosIter).first);
-
-
         if( nextPosIter != nodeInfo.end() ){
             nextPosIter = std::next(nextPosIter, 1);
 
@@ -559,7 +541,6 @@ void VairiantGrpah::connectBlockByQuality(){
                 }
             }
         }
-        
     }
 }
 
@@ -638,8 +619,6 @@ void VairiantGrpah::addEdge(std::vector<ReadVariant> &readVariant){
             std::map<int,int>::iterator node1Iter = nodeInfo.find((*variant1Iter).position);
             std::map<int,int>::iterator node2Iter = nodeInfo.find((*variant2Iter).position);
             
-            //if(std::abs((*variant2Iter).position-(*variant1Iter).position) < )
-            
             // add node if not exist
             if( node1Iter == nodeInfo.end() )
                 nodeInfo[(*variant1Iter).position] = (*variant1Iter).quality;
@@ -666,7 +645,7 @@ void VairiantGrpah::writingDotFile(std::string dotPrefix){
     std::ofstream resultVcf(dotPrefix+".dot");
 
     if(!resultVcf.is_open()){
-        std::cout<< "Fail to open write file: " << dotPrefix+".vcf" << "\n";
+        std::cerr<< "Fail to open write file: " << dotPrefix+".vcf" << "\n";
     }
     else{
         resultVcf << "digraph G {\n";
