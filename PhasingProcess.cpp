@@ -33,6 +33,8 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
  
     // loop all chromosome
     for(std::vector<std::string>::iterator chrIter = chrName.begin(); chrIter != chrName.end() ; chrIter++ ){
+        //if((*chrIter)!="1")
+        //    continue;
         
         std::cerr<< "parsing contig/chromosome: " << (*chrIter) << " ... ";
         begin = time(NULL);
@@ -51,23 +53,26 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
         // this method does not store the read information to be used
         BamParser *bamParser = new BamParser((*chrIter), params.bamFile, snpFile, svFile);
         std::string chr_reference = FastaParser.chrString.at(*chrIter);
-        bamParser->direct_detect_alleles(lastSNPpos, params, readVariantVec ,chr_reference) ;
+        bamParser->direct_detect_alleles(lastSNPpos, params, readVariantVec ,chr_reference);
         
         if(params.isONT){
             std::cerr<< "filter SNP ... ";
-            snpFile.filterSNP((*chrIter), readVariantVec);
+            snpFile.filterSNP((*chrIter), readVariantVec, chr_reference);
         }
         
+        //bamParser->svFilter(readVariantVec);
+        
         delete bamParser;
+        
         // bam files are partial file or no read support this chromosome's SNP
         if( readVariantVec.size() == 0 ){
             std::cerr<< "skip\n";
             continue;
         }
-
+    
         std::cerr<< "run algorithm ... ";
         
-        VairiantGrpah *vGraph = new VairiantGrpah(params);
+        VairiantGrpah *vGraph = new VairiantGrpah(chr_reference, params);
         // trans read-snp info to edge info
         vGraph->addEdge(readVariantVec);
         // run man algorithm
@@ -95,11 +100,8 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
         svFile.writeResult(params.resultPrefix, phasingResult);
         std::cerr<< difftime(time(NULL), begin) << "s\n";
     }
-    
-    
-    
-    return;
 
+    return;
 };
 
 PhasingProcess::~PhasingProcess(){

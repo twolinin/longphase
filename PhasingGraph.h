@@ -7,6 +7,7 @@
 
 
 typedef std::pair<int, int> PosAllele;
+typedef std::map<std::string, int> ReadBase;
 
 class SubEdge{
     
@@ -20,6 +21,9 @@ class SubEdge{
         // < next position, quality sum >
         std::map<int, int> refQuality;
         std::map<int, int> altQuality;
+        // < next position, read count >
+        std::map<int, int> refReadCount;
+        std::map<int, int> altReadCount;
 
     public:
         
@@ -27,6 +31,7 @@ class SubEdge{
         ~SubEdge();
         
         int getQuality(PosAllele targetPos);
+        int getAvgQuality(PosAllele targetPos);
         void addSubEdge(int currentQuality, Variant connectNode, std::string readName);
         std::vector<std::string> showEdge(std::string message);
         std::pair<int,int> BestPair(int targetPos);
@@ -35,12 +40,13 @@ class SubEdge{
 
 
 struct VariantEdge{
+    int currPos;
     SubEdge* alt;
     SubEdge* ref;
 
-    VariantEdge();
+    VariantEdge(int currPos);
     // node pair 
-    std::pair<PosAllele,PosAllele> findBestEdgePair(int targetPos, bool isONT);
+    std::pair<PosAllele,PosAllele> findBestEdgePair(int targetPos, bool isONT, double diffRatioThreshold, bool conatinSV, bool debug);
     // number of read of two node. AA and AB combination
     std::pair<int,int> findNumberOfRead(int targetPos);
 };
@@ -56,13 +62,15 @@ class VairiantGrpah{
     
     private:
         PhasingParameters *params;
+        std::string *ref;
         
         // By default, a Map in C++ is sorted in increasing order based on its key.
         // position, edge
         std::map<int,VariantEdge*> edgeList;
-        // TODO: SNP and SV core phasing
+        // record all variant position, include SNP and SV 
         // position, quality
-        std::map<int,int>  nodeInfo;
+        std::map<int,ReadBase> nodeInfo;
+        std::map<int,int> svPosition;
         // phasing result, store final path
         std::map<PosAllele,PosAllele> bestEdgeConnect;
         // the smallest position in the block will be used as the representative of the block
@@ -77,9 +85,12 @@ class VairiantGrpah{
         // store each block and containing positions
         std::map<int,std::vector<int> >  blockVec;
 
-        void findBestEdgeList();
-        std::map<std::string,int> getBlockRead(std::pair<int,std::vector<int> > currentBlockVec, BlockRead &totalRead , int sampleNum);
-        bool connectBlockByReadName(int nextBlcok);
+        // homopolymer map
+        std::map<int,bool> homopolymerMap;
+    
+        void findBestEdgeList(double diffRatioThreshold);
+        std::map<std::string,int> getBlockRead(std::pair<int,std::vector<int> > currentBlockVec, std::map<std::string,int> &readQuality, BlockRead &totalRead , int sampleNum);
+        bool connectBlockByReadName(int nextBlcok, double diffRatioThreshold, bool blockPhasing, bool final);
         void findResultPath();
         void connectBlockByQuality();
         
@@ -89,7 +100,7 @@ class VairiantGrpah{
 
     public:
     
-        VairiantGrpah(PhasingParameters &params);
+        VairiantGrpah(std::string &ref, PhasingParameters &params);
         ~VairiantGrpah();
     
         //void addEdge(Variant node1, Variant node2, std::string readName);

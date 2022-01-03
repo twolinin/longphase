@@ -8,22 +8,27 @@
 
 static const char *CORRECT_USAGE_MESSAGE =
 "Usage: "  " " SUBPROGRAM " [OPTION] ... READSFILE\n"
-"      --help                     display this help and exit.\n"
-"      --dot                      each contig/chromosome will generate dot file. \n"
-"      --ont, --pb                ont: Oxford Nanopore genomic reads.\n"
-"                                 pb: PacBio HiFi/CCS genomic reads.\n"
-"      --sv-file=NAME             input SV vcf file.\n"
-"      -s, --snp-file=NAME        input SNP vcf file.\n"
-"      -b, --bam-file=NAME        input bam file.\n"
-"      -o, --out-prefix=NAME      prefix of phasing result.\n"
-"      -r, --reference=NAME       reference fasta.\n"
-"      -t, --threads=Num          number of thread. \n"
-"      -d, --distance=Num         phasing two variant if distance less than threshold. default:300000\n"
-"      -c, --crossBlock=Num       each block tries to connect with next N blocks. default:1\n"
+"      --help                       display this help and exit.\n\n"
+"require arguments:\n"
+"      -s, --snp-file=NAME          input SNP vcf file.\n"
+"      -b, --bam-file=NAME          input bam file.\n"
+"      --ont, --pb                  ont: Oxford Nanopore genomic reads.\n"
+"                                   pb: PacBio HiFi/CCS genomic reads.\n"
+"optional arguments:\n"
+"      -r, --reference=NAME         reference fasta.\n"
+"      --sv-file=NAME               input SV vcf file.\n"
+"      -t, --threads=Num            number of thread. default:1\n"
+"      -o, --out-prefix=NAME        prefix of phasing result.\n"
+"      --dot                        each contig/chromosome will generate dot file. \n"
+"      -1, --readSimilarRatio=Num   give up phasing pair if the number of reads of the two combinations are similar. default:0.5\n"
+"      -2, --quaSimilarRatio=Num    give up phasing pair if the quality of the two combinations are similar. default:0.7\n"
+"      -3, --blockSimilarRatio=Num  give up phasing pair if the number of block's reads of the two combinations are similar. default:1\n"
+"      -d, --distance=Num           phasing two variant if distance less than threshold. default:300000\n"
+"      -c, --crossBlock=Num         each block tries to connect with next N blocks. default:1\n"
 "\n";
 
 
-static const char* shortopts = "s:b:o:t:r:d:c:";
+static const char* shortopts = "s:b:o:t:r:d:c:1:2:3:";
 
 enum { OPT_HELP = 1 , DOT_FILE, SV_FILE, IS_ONT, IS_PB};
 
@@ -40,6 +45,10 @@ static const struct option longopts[] = {
     { "threads",           required_argument,  NULL, 't' },
     { "distance",          required_argument,  NULL, 'd' },
     { "crossBlock",        required_argument,  NULL, 'c' },
+    
+    { "readSimilarRatio",   required_argument,  NULL, '1' },
+    { "quaSimilarRatio",required_argument,  NULL, '2' },
+    { "blockSimilarRatio",  required_argument,  NULL, '3' },
     { NULL, 0, NULL, 0 }
 };
 
@@ -56,6 +65,10 @@ namespace opt
     static bool generateDot=false;
     static bool isONT=false;
     static bool isPB=false;
+    
+    double readSimilarRatio = 0.5;
+    double quaSimilarRatio = 0.7;
+    double blockSimilarRatio = 1;
 }
 
 void PhasingOptions(int argc, char** argv)
@@ -75,6 +88,11 @@ void PhasingOptions(int argc, char** argv)
         case 'r': arg >> opt::fastaFile; break;  
         case 'd': arg >> opt::distance; break;  
         case 'c': arg >> opt::crossBlock; break;  
+
+        case '1': arg >> opt::readSimilarRatio; break; 
+        case '2': arg >> opt::quaSimilarRatio; break; 
+        case '3': arg >> opt::blockSimilarRatio; break; 
+        
         case DOT_FILE: opt::generateDot=true; break;
         case IS_ONT: opt::isONT=true; break;
         case IS_PB: opt::isPB=true; break;
@@ -157,6 +175,10 @@ int PhasingMain(int argc, char** argv)
     ecParams.generateDot=opt::generateDot;
     ecParams.isONT=opt::isONT;
     ecParams.isPB=opt::isPB;
+    
+    ecParams.readSimilarRatio=opt::readSimilarRatio;
+    ecParams.quaSimilarRatio=opt::quaSimilarRatio;
+    ecParams.blockSimilarRatio=opt::blockSimilarRatio;
     
     PhasingProcess processor(ecParams);
 

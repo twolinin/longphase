@@ -30,6 +30,7 @@ struct Variant{
     int position;
     int allele;
     int quality;
+    bool underHomopolymer;
 };
 
 struct ReadVariant{
@@ -65,7 +66,7 @@ struct less_than_key
 
 std::string getTargetString(std::string line, std::string start_sign, std::string end_sign);
 
-int homopolimerLength(int snp_pos, const std::string &ref_string);
+int homopolymerLength(int snp_pos, const std::string &ref_string);
 
 
 

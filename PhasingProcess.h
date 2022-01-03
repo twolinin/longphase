@@ -17,6 +17,10 @@ struct PhasingParameters
     bool generateDot;
     bool isONT;
     bool isPB;
+    
+    double readSimilarRatio;
+    double quaSimilarRatio;
+    double blockSimilarRatio;
 };
 
 class PhasingProcess

@@ -11,16 +11,16 @@ std::string getTargetString(std::string line, std::string start_sign, std::strin
     return line.substr(start,target_length);
 }
 
-int homopolimerLength(int snp_pos, const std::string &ref_string){
-    int homopolimer_length = 1;
+int homopolymerLength(int snp_pos, const std::string &ref_string){
+    int homopolymer_length = 1;
     char element = ref_string.at(snp_pos);
     int ref_len = ref_string.length();
 
     int pos = snp_pos-1;
     while( ref_string.at(pos) == element ){
         pos--;
-        homopolimer_length++;
-        if(homopolimer_length>=10)
+        homopolymer_length++;
+        if(homopolymer_length>=10)
             break;
     }
 
@@ -29,15 +29,15 @@ int homopolimerLength(int snp_pos, const std::string &ref_string){
     if( pos < ref_len ){
         while( ref_string.at(pos) == element ){
             pos++;
-            homopolimer_length++;
+            homopolymer_length++;
             if( pos >= ref_len)
                 break;
-            if(homopolimer_length>=10)
+            if(homopolymer_length>=10)
             break;
         }
     }
 
-    return homopolimer_length;
+    return homopolymer_length;
 }
 
 

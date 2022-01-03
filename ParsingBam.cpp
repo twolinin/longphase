@@ -331,36 +331,72 @@ bool VariantParser::findSNP(std::string chr, int posistion){
     return true;
 }
 
-void VariantParser::filterSNP(std::string chr, std::vector<ReadVariant> &readVariantVec){
+void VariantParser::filterSNP(std::string chr, std::vector<ReadVariant> &readVariantVec, std::string &chr_reference){
     
-    // pos, allele, strand, True
+    // pos, <allele, <strand, True>
     std::map<int, std::map<int, std::map<int, bool> > > posAlleleStrand;
-
-    // iter all variant
+    std::map< int, bool > methylation;
+    
+    // iter all variant, record the strand contained in each SNP
     for( auto readSNPVecIter : readVariantVec ){
-        // allele on forward or reverse strand
+        // tag allele on forward or reverse strand
         for(auto variantIter : readSNPVecIter.variantVec ){
             posAlleleStrand[variantIter.position][variantIter.allele][readSNPVecIter.is_reverse] = true;
         }
     }
-    
-    std::map< int, bool > methylationSNP;
-    // iter all SNP
+    // iter all SNP, both alleles that require SNP need to appear in the two strand
     for(auto pos: posAlleleStrand){
+        // this position contain two allele, REF allele appear in the two strand, ALT allele appear in the two strand
         if(pos.second.size() == 2 && pos.second[0].size() == 2 && pos.second[1].size() == 2 ){
             // high confident SNP
         }
         else{
-            methylationSNP[pos.first] = true;
+            methylation[pos.first] = true;
         }
     }
+
+    // Filter SNPs that are not easy to phasing due to homopolymer
+    // get variant list
+    std::map<std::string, std::map<int, RefAlt> >::iterator chrIter =  chrVariant.find(chr);
+    std::map< int, bool > errorProneSNP;
     
-    // iter all variant, filter SNP if two or more SNP in the same homopolymer
-    for( std::vector<ReadVariant>::iterator readSNPVecIter = readVariantVec.begin() ; readSNPVecIter != readVariantVec.end() ; readSNPVecIter++ ){
-        for(std::vector<Variant>::iterator variantIter = (*readSNPVecIter).variantVec.begin() ; variantIter != (*readSNPVecIter).variantVec.end() ; ){
-            std::map< int, bool >::iterator delSNPIter = methylationSNP.find((*variantIter).position);
+    if( chrIter != chrVariant.end() ){
+        std::map<int, int> consecutiveAllele;
+        // iter all SNP and tag homopolymer
+        for(std::map<int, RefAlt>::iterator posIter = (*chrIter).second.begin(); posIter != (*chrIter).second.end(); posIter++ ){
+            consecutiveAllele[(*posIter).first] = homopolymerLength((*posIter).first, chr_reference);
+        }
+        std::map<int, RefAlt>::iterator currSNPIter = (*chrIter).second.begin();
+        std::map<int, RefAlt>::iterator nextSNPIter = std::next(currSNPIter,1);
+        // check whether each SNP pair falls in an area that is not easy to phasing
+        while( currSNPIter != (*chrIter).second.end() && nextSNPIter != (*chrIter).second.end() ){
+            int currPos = (*currSNPIter).first;
+            int nextPos = (*nextSNPIter).first;
+            // filter one of SNP if this SNP pair falls in homopolymer and distance<=2
+            if( consecutiveAllele[currPos] >= 3 && consecutiveAllele[nextPos] >= 3 && std::abs(currPos-nextPos)<=2 ){
+                errorProneSNP[nextPos]=true;
+                nextSNPIter = (*chrIter).second.erase(nextSNPIter);
+                continue;
+            }
             
-            if( delSNPIter != methylationSNP.end() ){
+            currSNPIter++;
+            nextSNPIter++;
+        }
+        
+    }
+    
+    
+    // iter all reads
+    for( std::vector<ReadVariant>::iterator readSNPVecIter = readVariantVec.begin() ; readSNPVecIter != readVariantVec.end() ; readSNPVecIter++ ){
+        // iter all SNPs in this read
+        for(std::vector<Variant>::iterator variantIter = (*readSNPVecIter).variantVec.begin() ; variantIter != (*readSNPVecIter).variantVec.end() ; ){
+            std::map< int, bool >::iterator delSNPIter = methylation.find((*variantIter).position);
+            std::map< int, bool >::iterator homoIter = errorProneSNP.find((*variantIter).position);
+            
+            if( delSNPIter != methylation.end() ){
+                variantIter = (*readSNPVecIter).variantVec.erase(variantIter);
+            }
+            else if( homoIter != errorProneSNP.end() ){
                 variantIter = (*readSNPVecIter).variantVec.erase(variantIter);
             }
             else{
@@ -380,7 +416,7 @@ std::map<int, bool> VariantParser::getHomopolymeVariants(std::string chrName){
     return targetVariants;
 }
 
-int VariantParser::homopolimerEnd(int snp_pos, const std::string &ref_string){
+int VariantParser::homopolymerEnd(int snp_pos, const std::string &ref_string){
     char element = ref_string.at(snp_pos);
     int ref_len = ref_string.length();
     int pos = snp_pos;
@@ -737,7 +773,7 @@ void BamParser::direct_detect_alleles(int lastSNPPos, PhasingParameters params, 
              || (flag & 0x100) != 0  // secondary alignment. repeat. 
                                      // A secondary alignment occurs when a given read could align reasonably well to more than one place.
              || (flag & 0x400) != 0  // duplicate 
-           //|| (flag & 0x800) != 0  // supplementary alignment
+             // (flag & 0x800) != 0  // supplementary alignment
                                      // A chimeric alignment is represented as a set of linear alignments that do not have large overlaps.
              ){ 
             std::string str = bamHdr->target_name[aln->core.tid];
@@ -795,29 +831,29 @@ void BamParser::direct_detect_alleles(int lastSNPPos, PhasingParameters params, 
 }
 
 bool BamParser::continueHomopolimer(int snp_pos, const std::string &ref_string){
-    int homopolimer_length = 1;
+    int homopolymer_length = 1;
     char element = ref_string.at(snp_pos);
-    bool neighbor_is_homopolimer = false;
+    bool neighbor_is_homopolymer = false;
     
     int pos = snp_pos-1;
     while( ref_string.at(pos) == element ){
         pos--;
-        homopolimer_length++;
+        homopolymer_length++;
     }
     
-    if( homopolimerLength(pos,ref_string) >= 3 )
-        neighbor_is_homopolimer = true;
+    if( homopolymerLength(pos,ref_string) >= 3 )
+        neighbor_is_homopolymer = true;
         
     pos = snp_pos+1;
     while( ref_string.at(pos) == element ){
         pos++;
-        homopolimer_length++;
+        homopolymer_length++;
     }
     
-    if( homopolimerLength(pos,ref_string) >= 3 )
-        neighbor_is_homopolimer = true;
+    if( homopolymerLength(pos,ref_string) >= 3 )
+        neighbor_is_homopolymer = true;
     
-    if( homopolimer_length >=3 && neighbor_is_homopolimer)
+    if( homopolymer_length >=3 && neighbor_is_homopolymer)
         return true;
     
     return false;
@@ -871,14 +907,35 @@ void BamParser::get_snp(Alignment align, std::vector<ReadVariant> &readVariantVe
             if( currentSVIter != currentSV.end() ){
                 if( (*currentSVIter).first < (*currentVariantIter).first ){
                     std::map<std::string ,bool>::iterator readIter = currentSV[(*currentSVIter).first].find(align.qname);
-                    // If this read does not contain SV, it means this read is the same as reference genome.
+                    // If this read not contain SV, it means this read is the same as reference genome.
                     // default this read the same as ref
                     int allele = 0; 
                     // this read contain SV.
                     if( readIter != currentSV[(*currentSVIter).first].end() )
                         allele = 1;
+                    
+                    // generate SV read count
+                    if(allele==0){
+                        std::map<int, int>::iterator svCountIter = noSV.find((*currentSVIter).first);
+                        if( svCountIter == noSV.end() ){
+                            noSV[(*currentSVIter).first] = 0;
+                        }
+                        else{
+                            noSV[(*currentSVIter).first]++;
+                        }
+                    }
+                    else{
+                        std::map<int, int>::iterator svCountIter = occurSV.find((*currentSVIter).first);
+                        if( svCountIter == occurSV.end() ){
+                            occurSV[(*currentSVIter).first] = 0;
+                        }
+                        else{
+                            occurSV[(*currentSVIter).first]++;
+                        }
+                    }
+                    
                     // push this SV to vector
-                    Variant *tmpVariant = new Variant((*currentSVIter).first, allele, 30);
+                    Variant *tmpVariant = new Variant((*currentSVIter).first, allele, -1 );
                     (*tmpReadResult).variantVec.push_back( (*tmpVariant) );
                     // next SV iter     
                     currentSVIter++;
@@ -933,16 +990,17 @@ void BamParser::get_snp(Alignment align, std::vector<ReadVariant> &readVariantVe
                 // If a reference is given
                 // it will determine whether the SNP falls in the homopolymer
                 // and start the processing of the SNP fall in the alignment GAP
+                
                 if(ref_string != "" && isONT){
                     int del_len = length;
                     if ( ref_pos + del_len + 1 == (*currentVariantIter).first ){
-                        if( homopolimerLength((*currentVariantIter).first , ref_string) >=3 ){
+                        if( homopolymerLength((*currentVariantIter).first , ref_string) >=3 ){
                             // special case
                         }
                     }
                     else if( (*currentVariantIter).first >= ref_pos  && (*currentVariantIter).first < ref_pos + del_len ){
                         // check snp in homopolymer
-                        if( homopolimerLength((*currentVariantIter).first , ref_string) >=3 ){
+                        if( homopolymerLength((*currentVariantIter).first , ref_string) >=3 ){
                             
                             int refAlleleLen = (*currentVariantIter).second.Ref.length();
                             int altAlleleLen = (*currentVariantIter).second.Alt.length();
@@ -996,3 +1054,49 @@ void BamParser::get_snp(Alignment align, std::vector<ReadVariant> &readVariantVe
         if( (*tmpReadResult).variantVec.size() > 0 )
             readVariantVec.push_back((*tmpReadResult));
 }
+
+void BamParser::svFilter(std::vector<ReadVariant> &readVariantVec){
+    
+    std::map< int, bool > lowConfidentSV;
+    
+    for(std::map<int, std::map<std::string ,bool> >::iterator svIter = currentSV.begin() ; svIter != currentSV.end() ; svIter++ ){
+        int currSVPos= (*svIter).first;
+        
+        std::map<int, int>::iterator occurSVIter = occurSV.find(currSVPos);
+        std::map<int, int>::iterator noSVIter = noSV.find(currSVPos);
+        
+        double occurSVNum = occurSVIter != occurSV.end() ? occurSV[currSVPos] : 0;
+        double noSVNum    = noSVIter    != noSV.end()    ? noSV[currSVPos] : 0;
+        
+        std::cout<<"SV\t"<< currSVPos << "\t"<< occurSVNum << "\t" << noSVNum << "\t" << occurSVNum+noSVNum << "\t" << std::min(occurSVNum,noSVNum)/(occurSVNum+noSVNum) << "\n";
+        
+        if( std::min(occurSVNum,noSVNum)/(occurSVNum+noSVNum)<=0.1 ){
+        //if( occurSVNum + noSVNum < 10 || occurSVNum == 0 || noSVNum == 0 ){
+            lowConfidentSV[currSVPos]=true;
+        }
+    }
+    
+    if( currentSV.size() > 0)
+    {
+        // iter all reads
+        for( std::vector<ReadVariant>::iterator readSNPVecIter = readVariantVec.begin() ; readSNPVecIter != readVariantVec.end() ; readSNPVecIter++ ){
+            // iter all SNPs in this read
+            for(std::vector<Variant>::iterator variantIter = (*readSNPVecIter).variantVec.begin() ; variantIter != (*readSNPVecIter).variantVec.end() ; ){
+                std::map< int, bool >::iterator svIter = lowConfidentSV.find((*variantIter).position);
+                
+                if( svIter != lowConfidentSV.end() ){
+                    variantIter = (*readSNPVecIter).variantVec.erase(variantIter);
+                    //std::cout<<"del\t" << (*svIter).first << "\n";
+                }
+                else{
+                    variantIter++;
+                }
+            }
+        }
+    }
+}
+
+
+
+
+

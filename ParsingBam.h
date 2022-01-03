@@ -43,7 +43,7 @@ class VariantParser{
         // chr, variant position (0-base)
         std::map<std::string, std::map<int, bool> > chrVariantHomopolymer;
         
-        int homopolimerEnd(int snp_pos, const std::string &ref_string);
+        int homopolymerEnd(int snp_pos, const std::string &ref_string);
     
     public:
     
@@ -64,7 +64,7 @@ class VariantParser{
         
         bool findSNP(std::string chr, int posistion);
         
-        void filterSNP(std::string chr, std::vector<ReadVariant> &readVariantVec);
+        void filterSNP(std::string chr, std::vector<ReadVariant> &readVariantVec, std::string &chr_reference);
 };
 
 class SVParser{
@@ -112,8 +112,12 @@ class BamParser{
         std::map<int, std::map<std::string ,bool> > currentSV;
         std::map<int, std::map<std::string ,bool> >::iterator firstSVIter;
         void get_snp(Alignment align, std::vector<ReadVariant> &readVariantVec, const std::string &ref_string, bool isONT);
-        //int homopolimerLength(int snp_pos, const std::string &ref_string);
+        //int homopolymerLength(int snp_pos, const std::string &ref_string);
         bool continueHomopolimer(int snp_pos, const std::string &ref_string);
+        
+        // SV occur 
+        std::map<int, int> occurSV;
+        std::map<int, int> noSV;
     
     public:
         BamParser(std::string chrName, std::string inputBamFile, VariantParser snpMap, SVParser svFile);
@@ -121,6 +125,7 @@ class BamParser{
         
         void direct_detect_alleles(int lastSNPPos, PhasingParameters params, std::vector<ReadVariant> &readVariantVec , const std::string &ref_string);
 
+        void svFilter(std::vector<ReadVariant> &readVariantVec);
 };
 
 

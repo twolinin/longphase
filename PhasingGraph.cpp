@@ -12,9 +12,11 @@ void SubEdge::addSubEdge(int currentQuality, Variant connectNode, std::string re
         std::map<int, int>::iterator rqIter = refQuality.find(connectNode.position);
         if( rqIter == refQuality.end() ){
             refQuality[connectNode.position] = currentQuality + connectNode.quality;
+            refReadCount[connectNode.position] = 1;
         }
         else{
             refQuality[connectNode.position] += currentQuality + connectNode.quality;
+            refReadCount[connectNode.position]++;
         }
     }
     if(connectNode.allele == 1 ){
@@ -23,9 +25,11 @@ void SubEdge::addSubEdge(int currentQuality, Variant connectNode, std::string re
         std::map<int, int>::iterator aqIter = altQuality.find(connectNode.position);
         if( aqIter == altQuality.end() ){
             altQuality[connectNode.position] = currentQuality + connectNode.quality;
+            altReadCount[connectNode.position] = 1;
         }
         else{
             altQuality[connectNode.position] += currentQuality + connectNode.quality;
+            altReadCount[connectNode.position]++;
         }
     }
     readCount++;
@@ -58,15 +62,19 @@ std::pair<int,int> SubEdge::BestPair(int targetPos){
 }
 
 std::vector<std::string> SubEdge::getSupportRead(int breakNodePosition){
+
     std::vector<std::string> readVec;
-    for(std::map<int, std::vector<std::string> >::iterator edgeIter = refRead.begin() ; edgeIter != refRead.end() ; edgeIter++ )
-        for(std::vector<std::string>::iterator readIter = (*edgeIter).second.begin() ; readIter != (*edgeIter).second.end() ; readIter++ )
+    for(std::map<int, std::vector<std::string> >::iterator edgeIter = refRead.begin() ; edgeIter != refRead.end() ; edgeIter++ ){
+        for(std::vector<std::string>::iterator readIter = (*edgeIter).second.begin() ; readIter != (*edgeIter).second.end() ; readIter++ ){
             readVec.push_back((*readIter));
-
-    for(std::map<int, std::vector<std::string> >::iterator edgeIter = altRead.begin() ; edgeIter != altRead.end() ; edgeIter++ )
-        for(std::vector<std::string>::iterator readIter = (*edgeIter).second.begin() ; readIter != (*edgeIter).second.end() ; readIter++ )
+        }
+    }
+    
+    for(std::map<int, std::vector<std::string> >::iterator edgeIter = altRead.begin() ; edgeIter != altRead.end() ; edgeIter++ ){
+        for(std::vector<std::string>::iterator readIter = (*edgeIter).second.begin() ; readIter != (*edgeIter).second.end() ; readIter++ ){
             readVec.push_back((*readIter));
-
+        }
+    }
     return readVec;
 }
 
@@ -88,13 +96,32 @@ int SubEdge::getQuality(PosAllele targetPos){
     return -1;
 }
 
-VariantEdge::VariantEdge(){
+int SubEdge::getAvgQuality(PosAllele targetPos){
+    if( targetPos.second == 1 ){
+        std::map<int, int>::iterator qIter = refQuality.find(targetPos.first);
+        if( qIter == refQuality.end() )
+            return -1;
+        else
+            return refQuality[targetPos.first]/refReadCount[targetPos.first];
+    }
+    if( targetPos.second == 2 ){
+        std::map<int, int>::iterator qIter = altQuality.find(targetPos.first);
+        if( qIter == altQuality.end() )
+            return -1;
+        else
+            return altQuality[targetPos.first]/altReadCount[targetPos.first];
+    }
+    return -1;
+}
+
+VariantEdge::VariantEdge(int inCurrPos){
+    currPos = inCurrPos;
     alt = new SubEdge();
     ref = new SubEdge();
 }
 
 //VariantEdge
-std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool isONT){
+std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool isONT, double diffRatioThreshold, bool containSV, bool debug){
     std::pair<int,int> refBestPair  = ref->BestPair(targetPos);
     std::pair<int,int> altBestPair  = alt->BestPair(targetPos);
     // get the weight of each pair
@@ -106,7 +133,7 @@ std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool
     // -1 : not connect
     int refAllele = -1;
     int altAllele = -1;
-    
+
     // If two choice have the same weight, 
     // the two edges have the weight is more reliable than one.
     // i.e. methylation
@@ -119,19 +146,51 @@ std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool
             ra+=1;
             ar+=1;
         }
-    }
+    }          
     
-    if( rr + aa > ra + ar ){
+    double readSimilarRatio = (double)std::min((rr+aa),(ar+ra)) / (double)std::max((rr+aa),(ar+ra));
+    /*
+    PosAllele refEnd   = std::make_pair(targetPos,  1);
+    PosAllele altEnd   = std::make_pair(targetPos,  2);
+    int rrAvgQuality = ref->getAvgQuality(refEnd);
+    int raAvgQuality = ref->getAvgQuality(altEnd);
+    int arAvgQuality = alt->getAvgQuality(refEnd);
+    int aaAvgQuality = alt->getAvgQuality(altEnd);
+    
+    double quaSimilarRatio = (double)std::min((rrAvgQuality+aaAvgQuality),(raAvgQuality+arAvgQuality)) / (double)std::max((rrAvgQuality+aaAvgQuality),(raAvgQuality+arAvgQuality));
+    
+    
+    if(debug){
+        std::cout<< "\t" << rr << "\t" << aa << "\t" << ra << "\t" << ar << "\t" << readSimilarRatio 
+                 << "\t" << rrAvgQuality << "\t" << aaAvgQuality << "\t" << raAvgQuality << "\t" << arAvgQuality << "\t" << quaSimilarRatio << "\t" << (containSV ? "containSV\t" : "noSV\t");
+    }
+    */
+    /*
+    if ( readSimilarRatio >= 0.75 && quaSimilarRatio >=0.75){
+        needDel = true;
+        if(debug) std::cout<<"( " << readSimilarRatio <<  "\t" << quaSimilarRatio << " need del\n";
+    }
+    else */if( readSimilarRatio > diffRatioThreshold && !containSV){
+        if(debug) std::cout<<"readSimilarRatio > diffRatioThreshold\n";
+    }
+    else if( readSimilarRatio > 0.6 && containSV){
+        if(debug) std::cout<<"readSimilarRatio > diffRatioThreshold\n";
+    }
+    else if( rr + aa > ra + ar ){
+        if(debug) std::cout<<"RR\n";
         refAllele = 1;
         altAllele = 2;
     }
     else if( rr + aa < ra + ar ){
+        if(debug) std::cout<<"RA\n";
         refAllele = 2;
         altAllele = 1;
     }
     else if( rr + aa == ra + ar ){
         // no connect 
         // not sure which is better
+        if(debug) std::cout<<"noConnect\n";
+
     }
     
     // create edge pairs
@@ -166,38 +225,54 @@ void BlockRead::recordRead(std::string readName){
 
 
 
-void VairiantGrpah::findBestEdgeList(){
+void VairiantGrpah::findBestEdgeList(double diffRatioThreshold){
     // Check whether there are edges in adjacent position
     // and select the edge with the largest weight combination 
     // as the best choice for the subgraph
-            
+
     // visit all nodes
-    for(std::map<int,int>::iterator nodeIter = nodeInfo.begin() ; nodeIter != nodeInfo.end() ; nodeIter++ ){
+    for(std::map<int,ReadBase>::iterator nodeIter = nodeInfo.begin() ; nodeIter != nodeInfo.end() ; nodeIter++ ){
         // get next node
-        std::map<int,int>::iterator nextNodeIter = std::next(nodeIter, 1);
+        std::map<int,ReadBase>::iterator nextNodeIter = std::next(nodeIter, 1);
         if( nextNodeIter == nodeInfo.end() )
              break;
         
         int currPos = (*nodeIter).first;
         int nextPos = (*nextNodeIter).first;
-        
+
         // check distance between two position 
-        if(std::abs(nextPos-currPos) > params->distance )
+        if(std::abs(nextPos-currPos) > params->distance ){
             continue;
+        }
         
         // Check if there is an edge from current node
         std::map<int,VariantEdge*>::iterator edgeIter = edgeList.find( currPos );
-            if( edgeIter==edgeList.end() )
-                continue;
-                
-        // find best edge pair from current position to next position
-        std::pair<PosAllele,PosAllele> EdgePair = (*edgeIter).second->findBestEdgePair(nextPos, params->isONT);
+        if( edgeIter==edgeList.end() ){
+            continue;
+        }
         
+        std::map<int,int>::iterator currSVIter = svPosition.find(currPos);
+        std::map<int,int>::iterator nextSVIter = svPosition.find(nextPos);
+        
+        bool currSV = ( currSVIter != svPosition.end() );
+        bool nextSV = ( nextSVIter != svPosition.end() );
+        bool containSV = (currSV || nextSV);
+        
+        //bool containSV = false;
+        
+
+        //std::cout<<"disjoint\t"<< currPos <<"\t"<<nextPos<<"\t";
+        
+        // find best edge pair from current position to next position
+        std::pair<PosAllele,PosAllele> EdgePair = (*edgeIter).second->findBestEdgePair(nextPos, params->isONT, diffRatioThreshold, containSV, false);
+        //std::cout<<"\n";
+
         // restore the position and allele of edge pair
         PosAllele refStart = std::make_pair(currPos, 1);
         PosAllele refEnd   = EdgePair.first;
         PosAllele altStart = std::make_pair(currPos, 2);
         PosAllele altEnd   = EdgePair.second;
+
         // -1 : ref or allele at this position didn't find the best edge to the next
         if( refEnd.second != -1 )
             bestEdgeConnect[refEnd] = refStart;
@@ -207,82 +282,105 @@ void VairiantGrpah::findBestEdgeList(){
 }
 
 
-std::map<std::string,int> VairiantGrpah::getBlockRead(std::pair<int,std::vector<int> > currentBlockVec, BlockRead &totalRead , int sampleNum){
-    BlockRead hp1Read;
-    BlockRead hp2Read;
+std::map<std::string,int> VairiantGrpah::getBlockRead(std::pair<int,std::vector<int> > currentBlockVec, std::map<std::string,int> &readQuality, BlockRead &totalRead , int sampleNum){
+    //BlockRead hp1Read;
+    //BlockRead hp2Read;
     BlockRead currentTotalRead;
     std::map<std::string,int> readTag;
-            
-    std::map<int,int>::iterator breakNode = nodeInfo.find(currentBlockVec.second[0]);
-            
-    int SNPcount = 0;
+    std::map<std::string,int> readTmpQuality;
+    
     // tag read belongs to which haplotype
-    for(std::vector<int>::iterator posIter = currentBlockVec.second.begin() ; posIter != currentBlockVec.second.end() ; posIter++ ){
+    int SNPcount = 0;
+    for(std::vector<int>::iterator posIter = currentBlockVec.second.begin(); posIter != currentBlockVec.second.end() ; posIter++ ){
         SNPcount++;
         // Because the read length cannot span all SNPs
         // a few SNPs before sampling are enough
         if( SNPcount > sampleNum )
             break;
-                    
-        PosAllele refAllele = std::make_pair((*posIter), 1);
-        PosAllele altAllele = std::make_pair((*posIter), 2);
-        
+            
         // prevent empty edge        
         std::map<int,VariantEdge*>::iterator edgeIter = edgeList.find( (*posIter) );
         if( edgeIter==edgeList.end() )
             continue;
         
+        // get ref reads
+        std::vector<std::string> rReadVec = (*edgeIter).second->ref->getSupportRead((*posIter));
         // tag REF haplotype read
-        std::vector<std::string> rReadVec = (*edgeIter).second->ref->getSupportRead((*breakNode).first);
         for(std::vector<std::string>::iterator readIter = rReadVec.begin() ; readIter != rReadVec.end() ; readIter++ ){
-            if( subNodeHP[refAllele] == 0 )
-                hp1Read.recordRead((*readIter));
-            else
-                hp2Read.recordRead((*readIter));
-                        
+            // Cumulative read quality
+            std::map<std::string,int>::iterator readQuaIter = readTmpQuality.find((*readIter));
+            if( readQuaIter == readTmpQuality.end() ){
+                readTmpQuality[(*readIter)] = nodeInfo[(*posIter)][(*readIter)];
+            }
+            else{
+                readTmpQuality[(*readIter)] += nodeInfo[(*posIter)][(*readIter)];
+            }
+            
+            //hp1Read.recordRead((*readIter));
             currentTotalRead.recordRead((*readIter));
             totalRead.recordRead((*readIter));
         }
-        // tag ALT haplotype read           
-        std::vector<std::string> aReadVec = (*edgeIter).second->alt->getSupportRead((*breakNode).first);
-            for(std::vector<std::string>::iterator readIter = aReadVec.begin() ; readIter != aReadVec.end() ; readIter++ ){ 
-            if( subNodeHP[altAllele] == 0 )
-                    hp1Read.recordRead((*readIter));
-            else
-                hp2Read.recordRead((*readIter));
-                        
+        
+        // get alt reads
+        std::vector<std::string> aReadVec = (*edgeIter).second->alt->getSupportRead((*posIter));
+        // tag ALT haplotype read    
+        for(std::vector<std::string>::iterator readIter = aReadVec.begin() ; readIter != aReadVec.end() ; readIter++ ){ 
+            // Cumulative read quality
+            std::map<std::string,int>::iterator readQuaIter = readTmpQuality.find((*readIter));
+            if( readQuaIter == readTmpQuality.end() ){
+                readTmpQuality[(*readIter)] = nodeInfo[(*posIter)][(*readIter)] * (-1);
+            }
+            else{
+                readTmpQuality[(*readIter)] -= nodeInfo[(*posIter)][(*readIter)];
+            }
+            
+            //hp2Read.recordRead((*readIter));         
             currentTotalRead.recordRead((*readIter));
             totalRead.recordRead((*readIter));
         }
-    }
-                
+    }   
     // Divide read into two different haplotypes
     for( std::map<std::string,int>::iterator readIter = currentTotalRead.readVec.begin() ; readIter != currentTotalRead.readVec.end() ; readIter++ ){
-        std::map<std::string,int>::iterator refReadIter = hp1Read.readVec.find((*readIter).first);
-        std::map<std::string,int>::iterator altReadIter = hp2Read.readVec.find((*readIter).first);
-                    
-        int refReadNum = (refReadIter == hp1Read.readVec.end() ? 0 : (*refReadIter).second);
-        int altReadNum = (altReadIter == hp2Read.readVec.end() ? 0 : (*altReadIter).second);
-                    
-        // Assign read to REF haplotype or ALT haplotype
-        if( refReadNum > altReadNum )
+        //std::map<std::string,int>::iterator refReadIter = hp1Read.readVec.find((*readIter).first);
+        //std::map<std::string,int>::iterator altReadIter = hp2Read.readVec.find((*readIter).first);
+
+        //int refReadNum = (refReadIter == hp1Read.readVec.end() ? 0 : (*refReadIter).second);
+        //int altReadNum = (altReadIter == hp2Read.readVec.end() ? 0 : (*altReadIter).second);
+        /*
+        if( refReadNum > altReadNum ){
             readTag[(*readIter).first] = 0;
-        else if( refReadNum < altReadNum)
+        }
+        else if( refReadNum < altReadNum){
             readTag[(*readIter).first] = 1;
+        }
+        else{
+        }*/
+        if( readTmpQuality[(*readIter).first] > 0 ){
+            readTag[(*readIter).first] = 0;
+        }
+        else if( readTmpQuality[(*readIter).first] < 0){
+            readTag[(*readIter).first] = 1;
+        }
+        else{
+        }
+        readQuality[(*readIter).first] = std::abs(readTmpQuality[(*readIter).first]);
     }
     return readTag;
 }
 
-bool VairiantGrpah::connectBlockByReadName(int nextBlcok){
+bool VairiantGrpah::connectBlockByReadName(int nextBlcok, double diffRatioThreshold, bool blockPhasing, bool final){
     bool connect = false;
 
     std::map<int,std::vector<int> >::reverse_iterator last = blockVec.rbegin() ;
     
     // loop all block, prepare to create new edges between two block
     // PS number, < position vector >
+    
     for(std::map<int,std::vector<int> >::iterator blockVecIter = blockVec.begin() ; blockVecIter != blockVec.end() ; blockVecIter++ ){
         // Number of SNPs checked
-        int sampleNum = 15 ;       
+        int sampleNum = 1 ;   
+        if(blockPhasing)
+            sampleNum = 15;
         // get next block
         std::map<int,std::vector<int> >::iterator nextBlockIter = std::next(blockVecIter, nextBlcok);
         if( nextBlockIter == blockVec.end() )
@@ -294,15 +392,21 @@ bool VairiantGrpah::connectBlockByReadName(int nextBlcok){
         // sort following block
         std::sort((*nextBlockIter).second.begin(), (*nextBlockIter).second.end());
         // The last SNP of the previous block
-        std::map<int,int>::iterator breakNode = nodeInfo.find((*blockVecIter).second[0]);
+        std::map<int,ReadBase>::iterator breakNode = nodeInfo.find((*blockVecIter).second[0]);
         // The last SNP of the following block
-        std::map<int,int>::iterator nodeIter = nodeInfo.find((*nextBlockIter).second[0]);
+        std::map<int,ReadBase>::iterator nodeIter = nodeInfo.find((*nextBlockIter).second[0]);
+        //if(!final)std::cout<< (*breakNode).first << "\t"<< (*nodeIter).first << "\n";
         
+        
+        if( std::abs((*nodeIter).first - (*breakNode).first) > params->distance){
+            continue;
+        }
         // Check if there is an edge from current node
         std::map<int,VariantEdge*>::iterator edgeIter = edgeList.find( (*nodeIter).first );
-        if( edgeIter==edgeList.end() )
+        if( edgeIter==edgeList.end() && blockPhasing){
+            //std::cout<< "occur: edgeIter==edgeList.end()\n";
             continue;
-        
+        }
         std::map<int,std::vector<int> >::iterator midBlockIter = std::next(blockVecIter, 1);
 
         if(nextBlcok==2){
@@ -313,50 +417,53 @@ bool VairiantGrpah::connectBlockByReadName(int nextBlcok){
             int midBlockStart = (*midBlockIter).second[0];
             int midBlockEnd   = (*midBlockIter).second[(*midBlockIter).second.size()-1];
             // middle block size threshold
-            if( midBlockEnd - midBlockStart >=10000 )
+            if( midBlockEnd - midBlockStart >=10000 && blockPhasing){
+                //std::cout<< "occur: midBlockEnd - midBlockStart >=10000\n";
                 continue;
+            }
         }
 
-        
-        if( std::abs((*breakNode).first - (*nodeIter).first) > params->distance )
-            continue;  
-
         BlockRead totalRead;
-        std::map<std::string,int> frontReadtag = this->getBlockRead((*blockVecIter), totalRead, sampleNum);
-        std::map<std::string,int> backReadtag  = this->getBlockRead((*nextBlockIter), totalRead, sampleNum);
-        
+        std::map<std::string,int> frontReadQuality;
+        std::map<std::string,int> backReadQuality;
+        std::map<std::string,int> frontReadtag = this->getBlockRead((*blockVecIter), frontReadQuality, totalRead, sampleNum);
+        std::map<std::string,int> backReadtag  = this->getBlockRead((*nextBlockIter), backReadQuality, totalRead, sampleNum);
         int rr=0;
         int ra=0;
         int ar=0;
         int aa=0;
-        int frontEmpty=0;
-        int backEmpty=0;
+        int rrTmpQyality=0;
+        int raTmpQyality=0;
+        int arTmpQyality=0;
+        int aaTmpQyality=0;
+        int selectConnect = -1;
         
         // loop all block read, judge each read connect result
         for( std::map<std::string,int>::iterator readIter = totalRead.readVec.begin() ; readIter != totalRead.readVec.end() ; readIter++ ){
             std::map<std::string,int>::iterator frontReadIter = frontReadtag.find((*readIter).first);
             std::map<std::string,int>::iterator backReadIter  = backReadtag.find((*readIter).first);
-            
-            if( frontReadIter == frontReadtag.end() ){
-                frontEmpty++;
-            }
-            if( backReadIter == backReadtag.end() ){
-                backEmpty++;
-            }
-            
-            if( frontReadIter != frontReadtag.end() && backReadIter != backReadtag.end() ){
-                if( (*frontReadIter).second == 0 && (*backReadIter).second == 0 ) rr++;
-                else if( (*frontReadIter).second == 0 && (*backReadIter).second == 1 ) ra++;
-                else if( (*frontReadIter).second == 1 && (*backReadIter).second == 0 ) ar++;
-                else if( (*frontReadIter).second == 1 && (*backReadIter).second == 1 ) aa++;
 
+            if( frontReadIter != frontReadtag.end() && backReadIter != backReadtag.end() ){
+                if( (*frontReadIter).second == 0 && (*backReadIter).second == 0 ){
+                    rrTmpQyality += frontReadQuality[(*readIter).first] + backReadQuality[(*readIter).first];
+                    rr++;
+                }
+                else if( (*frontReadIter).second == 0 && (*backReadIter).second == 1 ){
+                    raTmpQyality += frontReadQuality[(*readIter).first] + backReadQuality[(*readIter).first];
+                    ra++;
+                }
+                else if( (*frontReadIter).second == 1 && (*backReadIter).second == 0 ){
+                    arTmpQyality += frontReadQuality[(*readIter).first] + backReadQuality[(*readIter).first];
+                    ar++;
+                } 
+                else if( (*frontReadIter).second == 1 && (*backReadIter).second == 1 ){
+                    aaTmpQyality += frontReadQuality[(*readIter).first] + backReadQuality[(*readIter).first];
+                    aa++;
+                }
             }
         }
-        
-        // If two choice have the same weight, 
-        // the two edges have the weight is more reliable than one.
-        // i.e. methylation
-        if(params->isONT){
+        // two sides in a combination with higher credibility
+        if( blockPhasing && rr + aa == ra + ar ){
             if(rr!=0 && aa !=0){
                 rr+=1;
                 aa+=1;
@@ -366,33 +473,131 @@ bool VairiantGrpah::connectBlockByReadName(int nextBlcok){
                 ar+=1;
             }
         }
-        
-        if( rr + aa > ra + ar ){
-            PosAllele refStart = std::make_pair((*breakNode).first, 1);
-            PosAllele refEnd   = std::make_pair((*nodeIter).first,  1);
-            PosAllele altStart = std::make_pair((*breakNode).first, 2);
-            PosAllele altEnd   = std::make_pair((*nodeIter).first,  2);
-            
-            bestEdgeConnect[refEnd] = refStart;
-            bestEdgeConnect[altEnd] = altStart;
 
-            connect = true;
+        double readSimilarRatio = (double)std::min((rr+aa),(ar+ra)) / (double)std::max((rr+aa),(ar+ra));
+        /*
+        double quaTmpRatio = (double)std::min((rrTmpQyality+aaTmpQyality),(arTmpQyality+raTmpQyality)) / (double)std::max((rrTmpQyality+aaTmpQyality),(arTmpQyality+raTmpQyality));
+        std::map<int,int>::iterator currSVIter = svPosition.find((*breakNode).first);
+        std::map<int,int>::iterator nextSVIter = svPosition.find((*nodeIter).first);
+        bool containSV = ( currSVIter != svPosition.end() || nextSVIter != svPosition.end() );
+        
+        if( containSV && readSimilarRatio >= 0.9){
+            continue;
+        }
+        */
+        //if(!final)std::cout<<"Read: " << rr << "\t" << aa << "\t" << ar << "\t" << ra << "\t" << readSimilarRatio << "\n";
+        //if(!final)std::cout<<"Qlty: " << rrTmpQyality <<"\t"<< aaTmpQyality <<"\t"<< arTmpQyality <<"\t"<< raTmpQyality << "\t" << quaTmpRatio << "\n";
+
+        if( rr + aa > ra + ar ){
+            selectConnect = 1;
         }
         else if(rr + aa < ra + ar){
-            PosAllele refStart = std::make_pair((*breakNode).first, 1);
-            PosAllele refEnd   = std::make_pair((*nodeIter).first,  2);
-            PosAllele altStart = std::make_pair((*breakNode).first, 1);
-            PosAllele altEnd   = std::make_pair((*nodeIter).first,  2);
-            
-            bestEdgeConnect[refEnd] = refStart;
-            bestEdgeConnect[altEnd] = altStart;
-
-            connect = true;
+            selectConnect = 2;
         }
         else{
             // weight(aa + rr) == weight(ar+ ra)
-            // not sure which is better
+            // the edges are equal but the quality may be different
+            if( blockPhasing && rr + aa + ra + ar !=0 ){
+                if( rrTmpQyality + aaTmpQyality > raTmpQyality + arTmpQyality ){
+                    selectConnect = 1;
+                }
+                else if(rrTmpQyality + aaTmpQyality < raTmpQyality + arTmpQyality){
+                    selectConnect = 2;
+                }
+                else{
+                    //std::cout<<"occur: weight(aa + rr) == weight(ar+ ra) && " << rrTmpQyality <<"\t"<< aaTmpQyality <<"\t"<< raTmpQyality <<"\t"<< arTmpQyality << "\n";
+                }
+            }
+            else if(final){
+                
+                // break start
+                std::map<int,VariantEdge*>::iterator edgeIter = edgeList.find( (*breakNode).first );
+                
+                std::map<int,ReadBase>::iterator currNode = breakNode;
+                std::map<int,ReadBase>::iterator nextNode = std::next(breakNode, 1);
+                
+                //std::cout<<"goal\t"<<  (*breakNode).first << "\t" << (*nodeIter).first << "\n";
+                
+                while( currNode != nodeInfo.end() && nextNode != nodeInfo.end() && (*currNode).first < (*nodeIter).first ){
+                    std::map<int,VariantEdge*>::iterator edgeIter = edgeList.find( (*currNode).first );
+                    //std::cout<<"local\t"<<  (*currNode).first << "\t" << (*nextNode).first << "\n";
+                    if(edgeIter != edgeList.end() ){
+                        std::pair<PosAllele,PosAllele> EdgePair = (*edgeIter).second->findBestEdgePair((*nextNode).first, params->isONT, diffRatioThreshold, false, false);
+                        PosAllele refStart = std::make_pair((*currNode).first, 1);
+                        PosAllele refEnd   = EdgePair.first;
+                        PosAllele altStart = std::make_pair((*currNode).first, 2);
+                        PosAllele altEnd   = EdgePair.second;
+
+                        if( refEnd.second != -1 )
+                            bestEdgeConnect[refEnd] = refStart;
+                        if( altEnd.second != -1 )
+                            bestEdgeConnect[altEnd] = altStart;
+                        
+                    }
+                    currNode++;
+                    nextNode++;
+                }
+                continue;
+            }
         }
+
+        if( std::abs((*breakNode).first - (*nodeIter).first) > params->distance ){
+            //if(final && rr + aa + ra + ar !=0)std::cout<<"occur: std::abs((*breakNode).first - (*nodeIter).first) > params->distance\n";
+            continue;  
+        }
+        
+        // Assign read to REF haplotype or ALT haplotype
+        if( readSimilarRatio > diffRatioThreshold && !blockPhasing ){
+            std::map<int,ReadBase>::iterator nextNode = std::next(breakNode, 1);
+
+            if( rr+aa+ra+ar > 0 && !blockPhasing && (*nextNode).first == (*nodeIter).first ){
+                
+                PosAllele refEnd = std::make_pair((*nodeIter).first, 1);
+                PosAllele altEnd = std::make_pair((*nodeIter).first, 2);
+                
+                // get four edge quality
+                int rrAvgQuality = edgeList[(*breakNode).first]->ref->getAvgQuality(refEnd);
+                int raAvgQuality = edgeList[(*breakNode).first]->ref->getAvgQuality(altEnd);
+                int arAvgQuality = edgeList[(*breakNode).first]->alt->getAvgQuality(refEnd);
+                int aaAvgQuality = edgeList[(*breakNode).first]->alt->getAvgQuality(altEnd);
+                double quaSimilarRatio = (double)std::min((rrAvgQuality+aaAvgQuality),(raAvgQuality+arAvgQuality)) / (double)std::max((rrAvgQuality+aaAvgQuality),(raAvgQuality+arAvgQuality));
+                //if(!final)std::cout<< rrAvgQuality << "\t" << raAvgQuality << "\t" << arAvgQuality << "\t" << aaAvgQuality << "\t" << quaSimilarRatio << "\n";
+                if( quaSimilarRatio > diffRatioThreshold ){
+                    //if(!final)std::cout<<"occur: quaSimilarRatio > 0.7\n";
+                }
+                else if ( rrAvgQuality+aaAvgQuality > raAvgQuality+arAvgQuality ){
+                    selectConnect = 1;
+                }
+                else if ( rrAvgQuality+aaAvgQuality < raAvgQuality+arAvgQuality ){
+                    selectConnect = 2;
+                }
+            }   
+        }
+        
+        if ( selectConnect == 1 ){
+            PosAllele refStart = std::make_pair((*breakNode).first, 1);
+            PosAllele altStart = std::make_pair((*breakNode).first, 2);  
+            PosAllele refEnd   = std::make_pair((*nodeIter).first,  1);
+            PosAllele altEnd   = std::make_pair((*nodeIter).first,  2);  
+            bestEdgeConnect[refEnd] = refStart;
+            bestEdgeConnect[altEnd] = altStart;
+            connect = true;
+            
+            //if(!final)std::cout<<"occur: connect\n";
+        }
+        else if ( selectConnect == 2 ){
+            PosAllele refStart = std::make_pair((*breakNode).first, 2);
+            PosAllele altStart = std::make_pair((*breakNode).first, 1);  
+            PosAllele refEnd   = std::make_pair((*nodeIter).first,  1);
+            PosAllele altEnd   = std::make_pair((*nodeIter).first,  2);
+            bestEdgeConnect[refEnd] = refStart;
+            bestEdgeConnect[altEnd] = altStart;
+            connect = true;
+            
+            //if(!final)std::cout<<"occur: connect\n";
+        }
+        
+        //if(!final)std::cout<<"\n";
     }
     return connect;
 }
@@ -484,62 +689,50 @@ void VairiantGrpah::connectBlockByQuality(){
     for(std::map<int,std::vector<int> >::iterator currentBlockIter = blockVec.begin() ; currentBlockIter != blockVec.end() ; currentBlockIter++ ){
         // The last SNP of this block
         std::vector<int>::reverse_iterator posIter = (*currentBlockIter).second.rbegin();
-        // next SNP
-        std::map<int,int>::iterator nextPosIter = nodeInfo.find((*posIter));
+        // current SNP iter
+        std::map<int,ReadBase>::iterator currentPosIter = nodeInfo.find((*posIter));
 
-        // Check if there is an edge from current node
+        // Check there have edges from current node to the next
         std::map<int,VariantEdge*>::iterator edgeIter = edgeList.find( (*posIter) );
-            if( edgeIter==edgeList.end() )
-                continue;
+        if( edgeIter==edgeList.end() )
+            continue;
         
-        if( nextPosIter != nodeInfo.end() ){
-            nextPosIter = std::next(nextPosIter, 1);
+        if( currentPosIter != nodeInfo.end() ){
+            std::map<int,ReadBase>::iterator  nextPosIter = std::next(currentPosIter, 1);
 
             int currPos = (*posIter);
             int nextPos = (*nextPosIter).first;
-            
+              
             // check distance between two position 
             if(std::abs(nextPos-currPos) > params->distance )
                 continue;
             
-            std::map<int,VariantEdge*>::iterator edgeIter = edgeList.find((*posIter));
+            PosAllele refEnd = std::make_pair((*nextPosIter).first, 1);
+            PosAllele altEnd = std::make_pair((*nextPosIter).first, 2);
+            // get four edge quality
             
-            if( edgeIter != edgeList.end() ){
-                PosAllele refEnd = std::make_pair((*nextPosIter).first, 1);
-                PosAllele altEnd = std::make_pair((*nextPosIter).first, 2);
-                // get four edge quality
-                int rrQuality = edgeList[(*posIter)]->ref->getQuality(refEnd);
-                int raQuality = edgeList[(*posIter)]->ref->getQuality(altEnd);
-                int arQuality = edgeList[(*posIter)]->alt->getQuality(refEnd);
-                int aaQuality = edgeList[(*posIter)]->alt->getQuality(altEnd);
-                int distrustCount = 0;
-                
-                if( rrQuality == -1 )distrustCount++;
-                if( raQuality == -1 )distrustCount++;
-                if( arQuality == -1 )distrustCount++;
-                if( aaQuality == -1 )distrustCount++;
-                // we can't trust connect by one edge quality
-                if(distrustCount>=3)
-                    continue;
-                if( rrQuality + aaQuality > raQuality + arQuality ){
-                    PosAllele refStart = std::make_pair((*posIter), 1);
-                    PosAllele refEnd   = std::make_pair((*nextPosIter).first,  1);
-                    PosAllele altStart = std::make_pair((*posIter), 2);
-                    PosAllele altEnd   = std::make_pair((*nextPosIter).first,  2);
+            int rrQuality = edgeList[(*posIter)]->ref->getQuality(refEnd);
+            int raQuality = edgeList[(*posIter)]->ref->getQuality(altEnd);
+            int arQuality = edgeList[(*posIter)]->alt->getQuality(refEnd);
+            int aaQuality = edgeList[(*posIter)]->alt->getQuality(altEnd);
                     
-                    bestEdgeConnect[refEnd] = refStart;
-                    bestEdgeConnect[altEnd] = altStart;
-                }
-                else if( rrQuality + aaQuality < raQuality + arQuality){
-                    PosAllele refStart = std::make_pair((*posIter), 1);
-                    PosAllele refEnd   = std::make_pair((*nextPosIter).first,  2);
-                    PosAllele altStart = std::make_pair((*posIter), 1);
-                    PosAllele altEnd   = std::make_pair((*nextPosIter).first,  2);
-                    
-                    bestEdgeConnect[refEnd] = refStart;
-                    bestEdgeConnect[altEnd] = altStart;
-                }
+            if( rrQuality + aaQuality > raQuality + arQuality ){
+                PosAllele refStart = std::make_pair((*posIter), 1);
+                PosAllele altStart = std::make_pair((*posIter), 2);
+                PosAllele refEnd   = std::make_pair((*nextPosIter).first,  1);
+                PosAllele altEnd   = std::make_pair((*nextPosIter).first,  2);
+                bestEdgeConnect[refEnd] = refStart;
+                bestEdgeConnect[altEnd] = altStart;
             }
+            else if( rrQuality + aaQuality < raQuality + arQuality){
+                PosAllele refStart = std::make_pair((*posIter), 2);
+                PosAllele altStart = std::make_pair((*posIter), 1);
+                PosAllele refEnd   = std::make_pair((*nextPosIter).first,  1);
+                PosAllele altEnd   = std::make_pair((*nextPosIter).first,  2);
+                bestEdgeConnect[refEnd] = refStart;
+                bestEdgeConnect[altEnd] = altStart;
+            }
+
         }
     }
 }
@@ -547,9 +740,9 @@ void VairiantGrpah::connectBlockByQuality(){
 void VairiantGrpah::connectByQuality(){
     
     // visit all nodes
-    for(std::map<int,int>::iterator nodeIter = nodeInfo.begin() ; nodeIter != nodeInfo.end() ; nodeIter++ ){
+    for(std::map<int,ReadBase>::iterator nodeIter = nodeInfo.begin() ; nodeIter != nodeInfo.end() ; nodeIter++ ){
         // get next node
-        std::map<int,int>::iterator nextNodeIter = std::next(nodeIter, 1);
+        std::map<int,ReadBase>::iterator nextNodeIter = std::next(nodeIter, 1);
         if( nextNodeIter == nodeInfo.end() )
              break;
         // Check if there is an edge from current node
@@ -560,26 +753,24 @@ void VairiantGrpah::connectByQuality(){
         PosAllele refEnd = std::make_pair((*nextNodeIter).first, 1);
         PosAllele altEnd = std::make_pair((*nextNodeIter).first, 2);
         // get four edge quality
-        int rrQuality = edgeList[(*nodeIter).first]->ref->getQuality(refEnd);
-        int raQuality = edgeList[(*nodeIter).first]->ref->getQuality(altEnd);
-        int arQuality = edgeList[(*nodeIter).first]->alt->getQuality(refEnd);
-        int aaQuality = edgeList[(*nodeIter).first]->alt->getQuality(altEnd);
+        int rrQuality = edgeList[(*nodeIter).first]->ref->getAvgQuality(refEnd);
+        int raQuality = edgeList[(*nodeIter).first]->ref->getAvgQuality(altEnd);
+        int arQuality = edgeList[(*nodeIter).first]->alt->getAvgQuality(refEnd);
+        int aaQuality = edgeList[(*nodeIter).first]->alt->getAvgQuality(altEnd);
 
         if( rrQuality + aaQuality > raQuality + arQuality ){
             PosAllele refStart = std::make_pair((*nodeIter).first, 1);
-            PosAllele refEnd   = std::make_pair((*nextNodeIter).first,  1);
             PosAllele altStart = std::make_pair((*nodeIter).first, 2);
+            PosAllele refEnd   = std::make_pair((*nextNodeIter).first,  1);
             PosAllele altEnd   = std::make_pair((*nextNodeIter).first,  2);
-                    
             bestEdgeConnect[refEnd] = refStart;
             bestEdgeConnect[altEnd] = altStart;
         }
         else if( rrQuality + aaQuality < raQuality + arQuality){
-            PosAllele refStart = std::make_pair((*nodeIter).first, 1);
-            PosAllele refEnd   = std::make_pair((*nextNodeIter).first,  2);
+            PosAllele refStart = std::make_pair((*nodeIter).first, 2);
             PosAllele altStart = std::make_pair((*nodeIter).first, 1);
-            PosAllele altEnd   = std::make_pair((*nextNodeIter).first,  2);
-                    
+            PosAllele refEnd   = std::make_pair((*nextNodeIter).first,  1);
+            PosAllele altEnd   = std::make_pair((*nextNodeIter).first,  2); 
             bestEdgeConnect[refEnd] = refStart;
             bestEdgeConnect[altEnd] = altStart;
         }
@@ -601,8 +792,9 @@ int VairiantGrpah::sumOfEdgePairQuality(PosAllele start, PosAllele end){
 }
 
 
-VairiantGrpah::VairiantGrpah(PhasingParameters &in_params){
+VairiantGrpah::VairiantGrpah(std::string &in_ref, PhasingParameters &in_params){
     params=&in_params;
+    ref=&in_ref;
 }
 
 VairiantGrpah::~VairiantGrpah(){
@@ -611,29 +803,37 @@ VairiantGrpah::~VairiantGrpah(){
 void VairiantGrpah::addEdge(std::vector<ReadVariant> &readVariant){
     // iter all read
     for(std::vector<ReadVariant>::iterator readIter = readVariant.begin() ; readIter != readVariant.end() ; readIter++ ){
-        // get variant
+        // record all variant 
+        for( auto variant : (*readIter).variantVec ){
+            if( variant.quality == -1 ){
+                svPosition[variant.position] = 1;
+                if( variant.allele == 1 ){
+                    // SV calling
+                    variant.quality = 60; 
+                }
+                else{
+                    // assume ref
+                    variant.quality = 30;
+                }
+            }
+            nodeInfo[variant.position][(*readIter).read_name] = variant.quality;
+        }
+        // iter all pair of snp and construct initial graph
         std::vector<Variant>::iterator variant1Iter = (*readIter).variantVec.begin();
         std::vector<Variant>::iterator variant2Iter = std::next(variant1Iter,1);
-        // iter all snp on current read
         while(variant1Iter != (*readIter).variantVec.end() && variant2Iter != (*readIter).variantVec.end() ){
-            std::map<int,int>::iterator node1Iter = nodeInfo.find((*variant1Iter).position);
-            std::map<int,int>::iterator node2Iter = nodeInfo.find((*variant2Iter).position);
-            
-            // add node if not exist
-            if( node1Iter == nodeInfo.end() )
-                nodeInfo[(*variant1Iter).position] = (*variant1Iter).quality;
-            if( node2Iter == nodeInfo.end() )
-                nodeInfo[(*variant2Iter).position] = (*variant2Iter).quality;
             // create new edge if not exist
             std::map<int,VariantEdge*>::iterator posIter = edgeList.find((*variant1Iter).position);
             if( posIter == edgeList.end() )
-                edgeList[(*variant1Iter).position] = new VariantEdge();
+                edgeList[(*variant1Iter).position] = new VariantEdge((*variant1Iter).position);
 
             // add edge process
+            // this allele support ref
             if( (*variant1Iter).allele == 0 )
                 edgeList[(*variant1Iter).position]->ref->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).read_name);
+            // this allele support alt
             if( (*variant1Iter).allele == 1 )
-                edgeList[(*variant1Iter).position]->alt->addSubEdge((*variant1Iter).quality,(*variant2Iter),(*readIter).read_name);
+                edgeList[(*variant1Iter).position]->alt->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).read_name);
             variant1Iter++;
             variant2Iter++;
         }
@@ -667,7 +867,7 @@ void VairiantGrpah::writingDotFile(std::string dotPrefix){
 void VairiantGrpah::exportResult(std::string chrName, PhasingResult &result){
     
     // loop all position
-    for( std::map<int,int>::iterator nodeIter = nodeInfo.begin() ; nodeIter != nodeInfo.end() ; nodeIter++ ){
+    for( std::map<int,ReadBase>::iterator nodeIter = nodeInfo.begin() ; nodeIter != nodeInfo.end() ; nodeIter++ ){
         
         PhasingElement tmp;
         
@@ -697,32 +897,39 @@ int VairiantGrpah::totalNode(){
 }
 
 void VairiantGrpah::phasingProcess(){
-    
-    // find best edge
-    this->findBestEdgeList();
+
+    // disjoint path process, find best edge
+    this->findBestEdgeList(params->readSimilarRatio);
     // find a path using current edge
     this->findResultPath();
     
-    // connect block by quality
-    this->connectBlockByQuality();
-    this->findResultPath();
-    
-    // After the above steps, it is the result of the first phasing. 
-    // Preliminary HP and Block results have been obtained. 
-    // But the reason why many blocks are disconnected is because the choice of two weights is the same.
-    // This step will directly use Read Name to determine whether the two blocks can be connected.
-    // At this stage, a new edge will be added between two connectable blocks.
-    
-    for(int i = 1 ; i <= params->crossBlock ; i++ ){
-        while(true){
-            int beforeBlockSize = blockVec.size();
-            bool connect = this->connectBlockByReadName(i);
-            // find a path using current edge
-            this->findResultPath();
-            int aftertBlockSize = blockVec.size();
-            
-            if(!connect || beforeBlockSize == aftertBlockSize)
-                break;
+    for(int round = 1 ; round <= 2 ; round++ ){
+        // round 1: try to connect by 
+        // connect block by average quality
+        this->connectBlockByReadName(1, params->quaSimilarRatio, false, (round == 2) );
+        this->findResultPath();
+
+        // connect block by total quality
+        this->connectBlockByQuality();
+        this->findResultPath();
+       
+        // After the above steps, it is the result of the first phasing. 
+        // Preliminary HP and Block results have been obtained. 
+        // But the reason why many blocks are disconnected is because the choice of two weights is the same.
+        // This step will directly use Read Name to determine whether the two blocks can be connected.
+        // At this stage, a new edge will be added between two connectable blocks.
+        for(int i = 1 ; i <= params->crossBlock ; i++ ){
+            while(true){
+                int beforeBlockSize = blockVec.size();
+                bool connect = this->connectBlockByReadName(i, params->blockSimilarRatio, true, false);
+                // find a path using current edge
+                this->findResultPath();
+                int aftertBlockSize = blockVec.size();
+                
+                if(!connect || beforeBlockSize == aftertBlockSize){
+                    break;
+                }
+            }
         }
     }
     
