@@ -9,6 +9,7 @@ struct PhasingParameters
     int numThreads;
     int distance;
     int crossBlock;
+    int islandBlockLength;
     std::string snpFile;
     std::string svFile;
     std::string bamFile;
@@ -18,9 +19,10 @@ struct PhasingParameters
     bool isONT;
     bool isPB;
     
-    double readSimilarRatio;
-    double quaSimilarRatio;
-    double blockSimilarRatio;
+    double readsThreshold;
+    double qualityThreshold;
+    double blockReadThreshold;
+    double svReadsThreshold;
 };
 
 class PhasingProcess

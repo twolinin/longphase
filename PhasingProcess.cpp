@@ -33,9 +33,6 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
  
     // loop all chromosome
     for(std::vector<std::string>::iterator chrIter = chrName.begin(); chrIter != chrName.end() ; chrIter++ ){
-        //if((*chrIter)!="1")
-        //    continue;
-        
         std::cerr<< "parsing contig/chromosome: " << (*chrIter) << " ... ";
         begin = time(NULL);
         
@@ -59,9 +56,7 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
             std::cerr<< "filter SNP ... ";
             snpFile.filterSNP((*chrIter), readVariantVec, chr_reference);
         }
-        
-        //bamParser->svFilter(readVariantVec);
-        
+
         delete bamParser;
         
         // bam files are partial file or no read support this chromosome's SNP

@@ -8,47 +8,50 @@
 
 static const char *CORRECT_USAGE_MESSAGE =
 "Usage: "  " " SUBPROGRAM " [OPTION] ... READSFILE\n"
-"      --help                       display this help and exit.\n\n"
+"      --help                          display this help and exit.\n\n"
 "require arguments:\n"
-"      -s, --snp-file=NAME          input SNP vcf file.\n"
-"      -b, --bam-file=NAME          input bam file.\n"
-"      --ont, --pb                  ont: Oxford Nanopore genomic reads.\n"
-"                                   pb: PacBio HiFi/CCS genomic reads.\n"
+"      -s, --snp-file=NAME             input SNP vcf file.\n"
+"      -b, --bam-file=NAME             input bam file.\n"
+"      --ont, --pb                     ont: Oxford Nanopore genomic reads.\n"
+"                                      pb: PacBio HiFi/CCS genomic reads.\n"
 "optional arguments:\n"
-"      -r, --reference=NAME         reference fasta.\n"
-"      --sv-file=NAME               input SV vcf file.\n"
-"      -t, --threads=Num            number of thread. default:1\n"
-"      -o, --out-prefix=NAME        prefix of phasing result.\n"
-"      --dot                        each contig/chromosome will generate dot file. \n"
-"      -1, --readSimilarRatio=Num   give up phasing pair if the number of reads of the two combinations are similar. default:0.5\n"
-"      -2, --quaSimilarRatio=Num    give up phasing pair if the quality of the two combinations are similar. default:0.7\n"
-"      -3, --blockSimilarRatio=Num  give up phasing pair if the number of block's reads of the two combinations are similar. default:1\n"
-"      -d, --distance=Num           phasing two variant if distance less than threshold. default:300000\n"
-"      -c, --crossBlock=Num         each block tries to connect with next N blocks. default:1\n"
+"      -r, --reference=NAME            reference fasta.\n"
+"      --sv-file=NAME                  input SV vcf file.\n"
+"      -t, --threads=Num               number of thread. default:1\n"
+"      -o, --out-prefix=NAME           prefix of phasing result.\n"
+"      --dot                           each contig/chromosome will generate dot file. \n"
+"      -1, --readsThreshold=[0~1]      give up SNP-SNP phasing pair if the number of reads of the two combinations are similar. default:0.5\n"
+"      -2, --qualityThreshold=[0~1]    give up phasing pair if the quality of the two combinations are similar. default:0.7\n"
+"      -3, --blockReadThreshold=[0~1]  give up phasing pair if the number of block's reads of the two combinations are similar. default:1.0\n"
+"      -4, --svReadsThreshold=[0~1]    give up SNP-SV phasing pair if the number of reads of the two combinations are similar. default:0.6\n"
+"      -d, --distance=Num              phasing two variant if distance less than threshold. default:300000\n"
+"      -c, --crossBlock=Num            each block tries to connect with next N blocks. default:1\n"
+"      -i, --islandBlockLength=Num     phasing across smaller blocks if crossBlock is greater than 1. default:10000\n"
 "\n";
 
 
-static const char* shortopts = "s:b:o:t:r:d:c:1:2:3:";
+static const char* shortopts = "s:b:o:t:r:d:c:i:1:2:3:4:";
 
 enum { OPT_HELP = 1 , DOT_FILE, SV_FILE, IS_ONT, IS_PB};
 
 static const struct option longopts[] = { 
-    { "help",              no_argument,        NULL, OPT_HELP },
-    { "dot",               no_argument,        NULL, DOT_FILE },  
-    { "ont",               no_argument,        NULL, IS_ONT }, 
-    { "pb",                no_argument,        NULL, IS_PB }, 
-    { "sv-file",           required_argument,  NULL, SV_FILE },     
-    { "reference",         required_argument,  NULL, 'r' },
-    { "snp-file",          required_argument,  NULL, 's' },
-    { "bam-file",          required_argument,  NULL, 'b' },
-    { "out-prefix",        required_argument,  NULL, 'o' },
-    { "threads",           required_argument,  NULL, 't' },
-    { "distance",          required_argument,  NULL, 'd' },
-    { "crossBlock",        required_argument,  NULL, 'c' },
-    
-    { "readSimilarRatio",   required_argument,  NULL, '1' },
-    { "quaSimilarRatio",required_argument,  NULL, '2' },
-    { "blockSimilarRatio",  required_argument,  NULL, '3' },
+    { "help",                 no_argument,        NULL, OPT_HELP },
+    { "dot",                  no_argument,        NULL, DOT_FILE },  
+    { "ont",                  no_argument,        NULL, IS_ONT }, 
+    { "pb",                   no_argument,        NULL, IS_PB }, 
+    { "sv-file",              required_argument,  NULL, SV_FILE },     
+    { "reference",            required_argument,  NULL, 'r' },
+    { "snp-file",             required_argument,  NULL, 's' },
+    { "bam-file",             required_argument,  NULL, 'b' },
+    { "out-prefix",           required_argument,  NULL, 'o' },
+    { "threads",              required_argument,  NULL, 't' },
+    { "distance",             required_argument,  NULL, 'd' },
+    { "crossBlock",           required_argument,  NULL, 'c' },
+    { "islandBlockLength",    required_argument,  NULL, 'i' },
+    { "readsThreshold",       required_argument,  NULL, '1' },
+    { "qualityThreshold",     required_argument,  NULL, '2' },
+    { "blockReadThreshold",   required_argument,  NULL, '3' },
+    { "svReadsThreshold",     required_argument,  NULL, '4' },
     { NULL, 0, NULL, 0 }
 };
 
@@ -57,6 +60,7 @@ namespace opt
     static int numThreads = 1;
     static int distance = 300000;
     static int crossBlock = 1;
+    static int islandBlockLength = 10000;
     static std::string snpFile="";
     static std::string svFile="";
     static std::string bamFile="";
@@ -66,9 +70,11 @@ namespace opt
     static bool isONT=false;
     static bool isPB=false;
     
-    double readSimilarRatio = 0.5;
-    double quaSimilarRatio = 0.7;
-    double blockSimilarRatio = 1;
+    double readsThreshold = 0.5;
+    double qualityThreshold = 0.7;
+    double blockReadThreshold = 1;
+    
+    double svReadsThreshold = 0.6;
 }
 
 void PhasingOptions(int argc, char** argv)
@@ -88,10 +94,12 @@ void PhasingOptions(int argc, char** argv)
         case 'r': arg >> opt::fastaFile; break;  
         case 'd': arg >> opt::distance; break;  
         case 'c': arg >> opt::crossBlock; break;  
+        case 'i': arg >> opt::islandBlockLength; break;  
 
-        case '1': arg >> opt::readSimilarRatio; break; 
-        case '2': arg >> opt::quaSimilarRatio; break; 
-        case '3': arg >> opt::blockSimilarRatio; break; 
+        case '1': arg >> opt::readsThreshold; break; 
+        case '2': arg >> opt::qualityThreshold; break; 
+        case '3': arg >> opt::blockReadThreshold; break; 
+        case '4': arg >> opt::svReadsThreshold; break; 
         
         case DOT_FILE: opt::generateDot=true; break;
         case IS_ONT: opt::isONT=true; break;
@@ -124,7 +132,7 @@ void PhasingOptions(int argc, char** argv)
         std::ifstream openFile( opt::snpFile.c_str() );
         if( !openFile.is_open() )
         {
-            std::cout<< "File " << opt::snpFile << " not exist.\n\n";
+            std::cerr<< "File " << opt::snpFile << " not exist.\n\n";
             die = true;
         }
     }
@@ -138,7 +146,7 @@ void PhasingOptions(int argc, char** argv)
         std::ifstream openFile( opt::bamFile.c_str() );
         if( !openFile.is_open() )
         {
-            std::cout<< "File " << opt::bamFile << " not exist.\n\n";
+            std::cerr<< "File " << opt::bamFile << " not exist.\n\n";
             die = true;
         }
     }
@@ -146,15 +154,69 @@ void PhasingOptions(int argc, char** argv)
         std::cerr << SUBPROGRAM ": missing bam file.\n";
         die = true;
     }
+    
+    if ( opt::numThreads < 1 ){
+        std::cerr << SUBPROGRAM " invalid threads. value: " 
+                  << opt::numThreads 
+                  << "\n please check -t, --threads=Num\n";
+        die = true;
+    }
+
+    if ( opt::distance < 0 ){
+        std::cerr << SUBPROGRAM " invalid distance. value: " 
+                  << opt::distance 
+                  << "\n please check -d or --distance=Num\n";
+        die = true;
+    }
+
+    if ( opt::crossBlock < 0 ){
+        std::cerr << SUBPROGRAM " invalid crossBlock. value: " 
+                  << opt::crossBlock 
+                  << "\n please check -c, --crossBlock=Num\n";
+        die = true;
+    }
+    
+    if ( opt::islandBlockLength < 0 ){
+        std::cerr << SUBPROGRAM " invalid islandBlockLength. value: " 
+                  << opt::islandBlockLength 
+                  << "\n please check -i, --islandBlockLength=Num\n";
+        die = true;
+    }
+
+    if ( opt::readsThreshold < 0 || opt::readsThreshold > 1 ){
+        std::cerr << SUBPROGRAM " invalid readsThreshold. value: " 
+                  << opt::readsThreshold 
+                  << "\n please check -1, --readsThreshold=[0~1]\n";
+        die = true;
+    }
+    
+    if ( opt::qualityThreshold < 0 || opt::qualityThreshold > 1 ){
+        std::cerr << SUBPROGRAM " invalid qualityThreshold. value: " 
+                  << opt::qualityThreshold 
+                  << "\n please check -2, --qualityThreshold=[0~1]\n";
+        die = true;
+    }
+    
+    if ( opt::blockReadThreshold < 0 || opt::blockReadThreshold > 1 ){
+        std::cerr << SUBPROGRAM " invalid blockReadThreshold. value: " 
+                  << opt::blockReadThreshold 
+                  << "\n please check -3, --blockReadThreshold=[0~1]\n";
+        die = true;
+    }
+    
+    if ( opt::svReadsThreshold < 0 || opt::svReadsThreshold > 1 ){
+        std::cerr << SUBPROGRAM " invalid svReadsThreshold. value: " 
+                  << opt::svReadsThreshold 
+                  << "\n please check -4, --svReadsThreshold=[0~1]\n";
+        die = true;
+    }
 
     if (die)
     {
-        std::cout << "\n" << CORRECT_USAGE_MESSAGE;
+        std::cerr << "\n" << CORRECT_USAGE_MESSAGE;
         exit(EXIT_FAILURE);
     }
 
-
-    
 }
 
 int PhasingMain(int argc, char** argv)
@@ -167,6 +229,7 @@ int PhasingMain(int argc, char** argv)
     ecParams.numThreads=opt::numThreads;
     ecParams.distance=opt::distance;
     ecParams.crossBlock=opt::crossBlock;
+    ecParams.islandBlockLength=opt::islandBlockLength;
     ecParams.snpFile=opt::snpFile;
     ecParams.svFile=opt::svFile;
     ecParams.bamFile=opt::bamFile;
@@ -176,9 +239,11 @@ int PhasingMain(int argc, char** argv)
     ecParams.isONT=opt::isONT;
     ecParams.isPB=opt::isPB;
     
-    ecParams.readSimilarRatio=opt::readSimilarRatio;
-    ecParams.quaSimilarRatio=opt::quaSimilarRatio;
-    ecParams.blockSimilarRatio=opt::blockSimilarRatio;
+    ecParams.readsThreshold=opt::readsThreshold;
+    ecParams.qualityThreshold=opt::qualityThreshold;
+    ecParams.blockReadThreshold=opt::blockReadThreshold;
+    
+    ecParams.svReadsThreshold=opt::svReadsThreshold;
     
     PhasingProcess processor(ecParams);
 

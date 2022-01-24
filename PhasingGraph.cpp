@@ -37,10 +37,12 @@ void SubEdge::addSubEdge(int currentQuality, Variant connectNode, std::string re
 
 std::vector<std::string> SubEdge::showEdge(std::string message){
     std::vector<std::string> result;
-    for(std::map<int, std::vector<std::string> >::iterator edgeIter = refRead.begin() ; edgeIter != refRead.end() ; edgeIter++ )
+    for(std::map<int, std::vector<std::string> >::iterator edgeIter = refRead.begin() ; edgeIter != refRead.end() ; edgeIter++ ){
         result.push_back(message +" -> ref_" + std::to_string((*edgeIter).first) + "[label=" + std::to_string((*edgeIter).second.size()) + "];");
-    for(std::map<int, std::vector<std::string> >::iterator edgeIter = altRead.begin() ; edgeIter != altRead.end() ; edgeIter++ )
+    }
+    for(std::map<int, std::vector<std::string> >::iterator edgeIter = altRead.begin() ; edgeIter != altRead.end() ; edgeIter++ ){
         result.push_back(message +" -> alt_" + std::to_string((*edgeIter).first) + "[label=" + std::to_string((*edgeIter).second.size()) + "];");
+    }
     return result;
 }
 
@@ -52,12 +54,13 @@ std::pair<int,int> SubEdge::BestPair(int targetPos){
     std::map<int, std::vector<std::string> >::iterator refEdgeIter = refRead.find(targetPos);
     std::map<int, std::vector<std::string> >::iterator altEdgeIter = altRead.find(targetPos);
     // local connect target REF allele
-    if( refEdgeIter != refRead.end() )
+    if( refEdgeIter != refRead.end() ){
         refResult = (*refEdgeIter).second.size();
+    }
     // local connect target ALT allele
-    if( altEdgeIter != altRead.end() )
+    if( altEdgeIter != altRead.end() ){
         altResult = (*altEdgeIter).second.size();   
-                
+    }            
     return std::make_pair( refResult, altResult );
 }
 
@@ -79,6 +82,7 @@ std::vector<std::string> SubEdge::getSupportRead(int breakNodePosition){
 }
 
 int SubEdge::getQuality(PosAllele targetPos){
+    // target is Ref allele
     if( targetPos.second == 1 ){
         std::map<int, int>::iterator qIter = refQuality.find(targetPos.first);
         if( qIter == refQuality.end() )
@@ -86,6 +90,7 @@ int SubEdge::getQuality(PosAllele targetPos){
         else
             return refQuality[targetPos.first];
     }
+    // target is Alt allele
     if( targetPos.second == 2 ){
         std::map<int, int>::iterator qIter = altQuality.find(targetPos.first);
         if( qIter == altQuality.end() )
@@ -97,6 +102,7 @@ int SubEdge::getQuality(PosAllele targetPos){
 }
 
 int SubEdge::getAvgQuality(PosAllele targetPos){
+    // target is Ref allele
     if( targetPos.second == 1 ){
         std::map<int, int>::iterator qIter = refQuality.find(targetPos.first);
         if( qIter == refQuality.end() )
@@ -104,6 +110,7 @@ int SubEdge::getAvgQuality(PosAllele targetPos){
         else
             return refQuality[targetPos.first]/refReadCount[targetPos.first];
     }
+    // target is Alt allele
     if( targetPos.second == 2 ){
         std::map<int, int>::iterator qIter = altQuality.find(targetPos.first);
         if( qIter == altQuality.end() )
@@ -121,7 +128,7 @@ VariantEdge::VariantEdge(int inCurrPos){
 }
 
 //VariantEdge
-std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool isONT, double diffRatioThreshold, bool containSV, bool debug){
+std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool isONT, double diffRatioThreshold, double svDiffRatioThreshold, bool containSV){
     std::pair<int,int> refBestPair  = ref->BestPair(targetPos);
     std::pair<int,int> altBestPair  = alt->BestPair(targetPos);
     // get the weight of each pair
@@ -148,49 +155,29 @@ std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool
         }
     }          
     
-    double readSimilarRatio = (double)std::min((rr+aa),(ar+ra)) / (double)std::max((rr+aa),(ar+ra));
-    /*
-    PosAllele refEnd   = std::make_pair(targetPos,  1);
-    PosAllele altEnd   = std::make_pair(targetPos,  2);
-    int rrAvgQuality = ref->getAvgQuality(refEnd);
-    int raAvgQuality = ref->getAvgQuality(altEnd);
-    int arAvgQuality = alt->getAvgQuality(refEnd);
-    int aaAvgQuality = alt->getAvgQuality(altEnd);
+    double readsThreshold = (double)std::min((rr+aa),(ar+ra)) / (double)std::max((rr+aa),(ar+ra));
     
-    double quaSimilarRatio = (double)std::min((rrAvgQuality+aaAvgQuality),(raAvgQuality+arAvgQuality)) / (double)std::max((rrAvgQuality+aaAvgQuality),(raAvgQuality+arAvgQuality));
-    
-    
-    if(debug){
-        std::cout<< "\t" << rr << "\t" << aa << "\t" << ra << "\t" << ar << "\t" << readSimilarRatio 
-                 << "\t" << rrAvgQuality << "\t" << aaAvgQuality << "\t" << raAvgQuality << "\t" << arAvgQuality << "\t" << quaSimilarRatio << "\t" << (containSV ? "containSV\t" : "noSV\t");
+    if( readsThreshold > diffRatioThreshold && !containSV){
+        // SNP-SNP
+        // The number of RR and RA is similar, and it is easily affected by sequence errors.
     }
-    */
-    /*
-    if ( readSimilarRatio >= 0.75 && quaSimilarRatio >=0.75){
-        needDel = true;
-        if(debug) std::cout<<"( " << readSimilarRatio <<  "\t" << quaSimilarRatio << " need del\n";
-    }
-    else */if( readSimilarRatio > diffRatioThreshold && !containSV){
-        if(debug) std::cout<<"readSimilarRatio > diffRatioThreshold\n";
-    }
-    else if( readSimilarRatio > 0.6 && containSV){
-        if(debug) std::cout<<"readSimilarRatio > diffRatioThreshold\n";
+    else if( readsThreshold > svDiffRatioThreshold && containSV){
+        // SNP-SV or SV-SNP
+        // The number of RR and RA is similar, and it is easily affected by sequence errors.
     }
     else if( rr + aa > ra + ar ){
-        if(debug) std::cout<<"RR\n";
+        // RR conect
         refAllele = 1;
         altAllele = 2;
     }
     else if( rr + aa < ra + ar ){
-        if(debug) std::cout<<"RA\n";
+        // RA connect
         refAllele = 2;
         altAllele = 1;
     }
     else if( rr + aa == ra + ar ){
         // no connect 
         // not sure which is better
-        if(debug) std::cout<<"noConnect\n";
-
     }
     
     // create edge pairs
@@ -225,7 +212,7 @@ void BlockRead::recordRead(std::string readName){
 
 
 
-void VairiantGrpah::findBestEdgeList(double diffRatioThreshold){
+void VairiantGrpah::findBestEdgeList(){
     // Check whether there are edges in adjacent position
     // and select the edge with the largest weight combination 
     // as the best choice for the subgraph
@@ -258,14 +245,8 @@ void VairiantGrpah::findBestEdgeList(double diffRatioThreshold){
         bool nextSV = ( nextSVIter != svPosition.end() );
         bool containSV = (currSV || nextSV);
         
-        //bool containSV = false;
-        
-
-        //std::cout<<"disjoint\t"<< currPos <<"\t"<<nextPos<<"\t";
-        
         // find best edge pair from current position to next position
-        std::pair<PosAllele,PosAllele> EdgePair = (*edgeIter).second->findBestEdgePair(nextPos, params->isONT, diffRatioThreshold, containSV, false);
-        //std::cout<<"\n";
+        std::pair<PosAllele,PosAllele> EdgePair = (*edgeIter).second->findBestEdgePair(nextPos, params->isONT, params->readsThreshold, params->svReadsThreshold, containSV);
 
         // restore the position and allele of edge pair
         PosAllele refStart = std::make_pair(currPos, 1);
@@ -315,8 +296,6 @@ std::map<std::string,int> VairiantGrpah::getBlockRead(std::pair<int,std::vector<
             else{
                 readTmpQuality[(*readIter)] += nodeInfo[(*posIter)][(*readIter)];
             }
-            
-            //hp1Read.recordRead((*readIter));
             currentTotalRead.recordRead((*readIter));
             totalRead.recordRead((*readIter));
         }
@@ -332,29 +311,13 @@ std::map<std::string,int> VairiantGrpah::getBlockRead(std::pair<int,std::vector<
             }
             else{
                 readTmpQuality[(*readIter)] -= nodeInfo[(*posIter)][(*readIter)];
-            }
-            
-            //hp2Read.recordRead((*readIter));         
+            }       
             currentTotalRead.recordRead((*readIter));
             totalRead.recordRead((*readIter));
         }
     }   
     // Divide read into two different haplotypes
     for( std::map<std::string,int>::iterator readIter = currentTotalRead.readVec.begin() ; readIter != currentTotalRead.readVec.end() ; readIter++ ){
-        //std::map<std::string,int>::iterator refReadIter = hp1Read.readVec.find((*readIter).first);
-        //std::map<std::string,int>::iterator altReadIter = hp2Read.readVec.find((*readIter).first);
-
-        //int refReadNum = (refReadIter == hp1Read.readVec.end() ? 0 : (*refReadIter).second);
-        //int altReadNum = (altReadIter == hp2Read.readVec.end() ? 0 : (*altReadIter).second);
-        /*
-        if( refReadNum > altReadNum ){
-            readTag[(*readIter).first] = 0;
-        }
-        else if( refReadNum < altReadNum){
-            readTag[(*readIter).first] = 1;
-        }
-        else{
-        }*/
         if( readTmpQuality[(*readIter).first] > 0 ){
             readTag[(*readIter).first] = 0;
         }
@@ -370,12 +333,10 @@ std::map<std::string,int> VairiantGrpah::getBlockRead(std::pair<int,std::vector<
 
 bool VairiantGrpah::connectBlockByReadName(int nextBlcok, double diffRatioThreshold, bool blockPhasing, bool final){
     bool connect = false;
-
     std::map<int,std::vector<int> >::reverse_iterator last = blockVec.rbegin() ;
     
     // loop all block, prepare to create new edges between two block
     // PS number, < position vector >
-    
     for(std::map<int,std::vector<int> >::iterator blockVecIter = blockVec.begin() ; blockVecIter != blockVec.end() ; blockVecIter++ ){
         // Number of SNPs checked
         int sampleNum = 1 ;   
@@ -395,16 +356,13 @@ bool VairiantGrpah::connectBlockByReadName(int nextBlcok, double diffRatioThresh
         std::map<int,ReadBase>::iterator breakNode = nodeInfo.find((*blockVecIter).second[0]);
         // The last SNP of the following block
         std::map<int,ReadBase>::iterator nodeIter = nodeInfo.find((*nextBlockIter).second[0]);
-        //if(!final)std::cout<< (*breakNode).first << "\t"<< (*nodeIter).first << "\n";
-        
-        
+        // The distance between the two blocks is abnormal, which may be affected by chimeric read.
         if( std::abs((*nodeIter).first - (*breakNode).first) > params->distance){
             continue;
         }
         // Check if there is an edge from current node
         std::map<int,VariantEdge*>::iterator edgeIter = edgeList.find( (*nodeIter).first );
         if( edgeIter==edgeList.end() && blockPhasing){
-            //std::cout<< "occur: edgeIter==edgeList.end()\n";
             continue;
         }
         std::map<int,std::vector<int> >::iterator midBlockIter = std::next(blockVecIter, 1);
@@ -417,8 +375,7 @@ bool VairiantGrpah::connectBlockByReadName(int nextBlcok, double diffRatioThresh
             int midBlockStart = (*midBlockIter).second[0];
             int midBlockEnd   = (*midBlockIter).second[(*midBlockIter).second.size()-1];
             // middle block size threshold
-            if( midBlockEnd - midBlockStart >=10000 && blockPhasing){
-                //std::cout<< "occur: midBlockEnd - midBlockStart >=10000\n";
+            if( midBlockEnd - midBlockStart >= params->islandBlockLength && blockPhasing){
                 continue;
             }
         }
@@ -442,7 +399,7 @@ bool VairiantGrpah::connectBlockByReadName(int nextBlcok, double diffRatioThresh
         for( std::map<std::string,int>::iterator readIter = totalRead.readVec.begin() ; readIter != totalRead.readVec.end() ; readIter++ ){
             std::map<std::string,int>::iterator frontReadIter = frontReadtag.find((*readIter).first);
             std::map<std::string,int>::iterator backReadIter  = backReadtag.find((*readIter).first);
-
+            // this read exists in two blocks
             if( frontReadIter != frontReadtag.end() && backReadIter != backReadtag.end() ){
                 if( (*frontReadIter).second == 0 && (*backReadIter).second == 0 ){
                     rrTmpQyality += frontReadQuality[(*readIter).first] + backReadQuality[(*readIter).first];
@@ -474,20 +431,6 @@ bool VairiantGrpah::connectBlockByReadName(int nextBlcok, double diffRatioThresh
             }
         }
 
-        double readSimilarRatio = (double)std::min((rr+aa),(ar+ra)) / (double)std::max((rr+aa),(ar+ra));
-        /*
-        double quaTmpRatio = (double)std::min((rrTmpQyality+aaTmpQyality),(arTmpQyality+raTmpQyality)) / (double)std::max((rrTmpQyality+aaTmpQyality),(arTmpQyality+raTmpQyality));
-        std::map<int,int>::iterator currSVIter = svPosition.find((*breakNode).first);
-        std::map<int,int>::iterator nextSVIter = svPosition.find((*nodeIter).first);
-        bool containSV = ( currSVIter != svPosition.end() || nextSVIter != svPosition.end() );
-        
-        if( containSV && readSimilarRatio >= 0.9){
-            continue;
-        }
-        */
-        //if(!final)std::cout<<"Read: " << rr << "\t" << aa << "\t" << ar << "\t" << ra << "\t" << readSimilarRatio << "\n";
-        //if(!final)std::cout<<"Qlty: " << rrTmpQyality <<"\t"<< aaTmpQyality <<"\t"<< arTmpQyality <<"\t"<< raTmpQyality << "\t" << quaTmpRatio << "\n";
-
         if( rr + aa > ra + ar ){
             selectConnect = 1;
         }
@@ -505,34 +448,35 @@ bool VairiantGrpah::connectBlockByReadName(int nextBlcok, double diffRatioThresh
                     selectConnect = 2;
                 }
                 else{
-                    //std::cout<<"occur: weight(aa + rr) == weight(ar+ ra) && " << rrTmpQyality <<"\t"<< aaTmpQyality <<"\t"<< raTmpQyality <<"\t"<< arTmpQyality << "\n";
                 }
             }
+            // The number of reads is the same in the RR and RA of the two blocks.
+            // Finally, return to the read between the two SNPs to make a decision.
             else if(final){
-                
-                // break start
+                // get breakpoint SNP
                 std::map<int,VariantEdge*>::iterator edgeIter = edgeList.find( (*breakNode).first );
-                
+                // get next SNP
                 std::map<int,ReadBase>::iterator currNode = breakNode;
                 std::map<int,ReadBase>::iterator nextNode = std::next(breakNode, 1);
-                
-                //std::cout<<"goal\t"<<  (*breakNode).first << "\t" << (*nodeIter).first << "\n";
-                
+
                 while( currNode != nodeInfo.end() && nextNode != nodeInfo.end() && (*currNode).first < (*nodeIter).first ){
                     std::map<int,VariantEdge*>::iterator edgeIter = edgeList.find( (*currNode).first );
-                    //std::cout<<"local\t"<<  (*currNode).first << "\t" << (*nextNode).first << "\n";
+                    
                     if(edgeIter != edgeList.end() ){
-                        std::pair<PosAllele,PosAllele> EdgePair = (*edgeIter).second->findBestEdgePair((*nextNode).first, params->isONT, diffRatioThreshold, false, false);
+                        std::pair<PosAllele,PosAllele> EdgePair = (*edgeIter).second->findBestEdgePair((*nextNode).first, params->isONT, diffRatioThreshold, 0, false);
+                        // restore the position and allele of edge pair
                         PosAllele refStart = std::make_pair((*currNode).first, 1);
                         PosAllele refEnd   = EdgePair.first;
                         PosAllele altStart = std::make_pair((*currNode).first, 2);
                         PosAllele altEnd   = EdgePair.second;
-
-                        if( refEnd.second != -1 )
-                            bestEdgeConnect[refEnd] = refStart;
-                        if( altEnd.second != -1 )
-                            bestEdgeConnect[altEnd] = altStart;
                         
+                        // -1 : ref or allele at this position didn't find the best edge to the next
+                        if( refEnd.second != -1 ){
+                            bestEdgeConnect[refEnd] = refStart;
+                        }
+                        if( altEnd.second != -1 ){
+                            bestEdgeConnect[altEnd] = altStart;
+                        }
                     }
                     currNode++;
                     nextNode++;
@@ -541,13 +485,10 @@ bool VairiantGrpah::connectBlockByReadName(int nextBlcok, double diffRatioThresh
             }
         }
 
-        if( std::abs((*breakNode).first - (*nodeIter).first) > params->distance ){
-            //if(final && rr + aa + ra + ar !=0)std::cout<<"occur: std::abs((*breakNode).first - (*nodeIter).first) > params->distance\n";
-            continue;  
-        }
-        
+        double readsThreshold = (double)std::min((rr+aa),(ar+ra)) / (double)std::max((rr+aa),(ar+ra));
+
         // Assign read to REF haplotype or ALT haplotype
-        if( readSimilarRatio > diffRatioThreshold && !blockPhasing ){
+        if( readsThreshold > diffRatioThreshold && !blockPhasing ){
             std::map<int,ReadBase>::iterator nextNode = std::next(breakNode, 1);
 
             if( rr+aa+ra+ar > 0 && !blockPhasing && (*nextNode).first == (*nodeIter).first ){
@@ -560,10 +501,9 @@ bool VairiantGrpah::connectBlockByReadName(int nextBlcok, double diffRatioThresh
                 int raAvgQuality = edgeList[(*breakNode).first]->ref->getAvgQuality(altEnd);
                 int arAvgQuality = edgeList[(*breakNode).first]->alt->getAvgQuality(refEnd);
                 int aaAvgQuality = edgeList[(*breakNode).first]->alt->getAvgQuality(altEnd);
-                double quaSimilarRatio = (double)std::min((rrAvgQuality+aaAvgQuality),(raAvgQuality+arAvgQuality)) / (double)std::max((rrAvgQuality+aaAvgQuality),(raAvgQuality+arAvgQuality));
-                //if(!final)std::cout<< rrAvgQuality << "\t" << raAvgQuality << "\t" << arAvgQuality << "\t" << aaAvgQuality << "\t" << quaSimilarRatio << "\n";
-                if( quaSimilarRatio > diffRatioThreshold ){
-                    //if(!final)std::cout<<"occur: quaSimilarRatio > 0.7\n";
+                double qualityThreshold = (double)std::min((rrAvgQuality+aaAvgQuality),(raAvgQuality+arAvgQuality)) / (double)std::max((rrAvgQuality+aaAvgQuality),(raAvgQuality+arAvgQuality));
+                
+                if( qualityThreshold > diffRatioThreshold ){
                 }
                 else if ( rrAvgQuality+aaAvgQuality > raAvgQuality+arAvgQuality ){
                     selectConnect = 1;
@@ -582,8 +522,6 @@ bool VairiantGrpah::connectBlockByReadName(int nextBlcok, double diffRatioThresh
             bestEdgeConnect[refEnd] = refStart;
             bestEdgeConnect[altEnd] = altStart;
             connect = true;
-            
-            //if(!final)std::cout<<"occur: connect\n";
         }
         else if ( selectConnect == 2 ){
             PosAllele refStart = std::make_pair((*breakNode).first, 2);
@@ -593,11 +531,7 @@ bool VairiantGrpah::connectBlockByReadName(int nextBlcok, double diffRatioThresh
             bestEdgeConnect[refEnd] = refStart;
             bestEdgeConnect[altEnd] = altStart;
             connect = true;
-            
-            //if(!final)std::cout<<"occur: connect\n";
         }
-        
-        //if(!final)std::cout<<"\n";
     }
     return connect;
 }
@@ -738,7 +672,6 @@ void VairiantGrpah::connectBlockByQuality(){
 }
 
 void VairiantGrpah::connectByQuality(){
-    
     // visit all nodes
     for(std::map<int,ReadBase>::iterator nodeIter = nodeInfo.begin() ; nodeIter != nodeInfo.end() ; nodeIter++ ){
         // get next node
@@ -790,7 +723,6 @@ int VairiantGrpah::sumOfEdgePairQuality(PosAllele start, PosAllele end){
     }
     return -1;
 }
-
 
 VairiantGrpah::VairiantGrpah(std::string &in_ref, PhasingParameters &in_params){
     params=&in_params;
@@ -899,14 +831,14 @@ int VairiantGrpah::totalNode(){
 void VairiantGrpah::phasingProcess(){
 
     // disjoint path process, find best edge
-    this->findBestEdgeList(params->readSimilarRatio);
+    this->findBestEdgeList();
     // find a path using current edge
     this->findResultPath();
     
     for(int round = 1 ; round <= 2 ; round++ ){
-        // round 1: try to connect by 
-        // connect block by average quality
-        this->connectBlockByReadName(1, params->quaSimilarRatio, false, (round == 2) );
+        // round 1: try to connect block by average quality
+        // round 2: if the breakpoint with equal weighted. Use number of read connect two block.
+        this->connectBlockByReadName(1, params->qualityThreshold, false, (round == 2) );
         this->findResultPath();
 
         // connect block by total quality
@@ -921,7 +853,7 @@ void VairiantGrpah::phasingProcess(){
         for(int i = 1 ; i <= params->crossBlock ; i++ ){
             while(true){
                 int beforeBlockSize = blockVec.size();
-                bool connect = this->connectBlockByReadName(i, params->blockSimilarRatio, true, false);
+                bool connect = this->connectBlockByReadName(i, params->blockReadThreshold, true, false);
                 // find a path using current edge
                 this->findResultPath();
                 int aftertBlockSize = blockVec.size();

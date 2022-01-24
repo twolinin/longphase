@@ -46,7 +46,7 @@ struct VariantEdge{
 
     VariantEdge(int currPos);
     // node pair 
-    std::pair<PosAllele,PosAllele> findBestEdgePair(int targetPos, bool isONT, double diffRatioThreshold, bool conatinSV, bool debug);
+    std::pair<PosAllele,PosAllele> findBestEdgePair(int targetPos, bool isONT, double diffRatioThreshold, double svReadSimilarRatio, bool conatinSV);
     // number of read of two node. AA and AB combination
     std::pair<int,int> findNumberOfRead(int targetPos);
 };
@@ -88,7 +88,7 @@ class VairiantGrpah{
         // homopolymer map
         std::map<int,bool> homopolymerMap;
     
-        void findBestEdgeList(double diffRatioThreshold);
+        void findBestEdgeList();
         std::map<std::string,int> getBlockRead(std::pair<int,std::vector<int> > currentBlockVec, std::map<std::string,int> &readQuality, BlockRead &totalRead , int sampleNum);
         bool connectBlockByReadName(int nextBlcok, double diffRatioThreshold, bool blockPhasing, bool final);
         void findResultPath();
