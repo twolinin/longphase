@@ -46,21 +46,30 @@ longphase phase \
 ```
 
 The complete list of parameters is shown below. 
-| Parameter | Description | Default |
-| :------------ |:---------------|-------------:|
-|--help|display this help and exit.||
-|--dot|each contig/chromosome will generate dot file.||
-|--ont|Using Oxford Nanopore genomic reads.||
-|--pb|Using PacBio HiFi/CCS genomic reads.||
-|--sv-file=Name|input SV vcf file. ||
-|-s, --snp-file=Name|input SNP vcf file.||
-|-b, --bam-file=Name|input bam file.||
-|-o, --out-prefix=Name|prefix of phasing result.|result|
-|-r, --reference=Name|reference fasta.||
-|-t, --threads=Num|number of thread.|1|
-|-d, --distance=Num|phasing two variant if distance less than threshold.|300000|
+```
+Usage:  phase [OPTION] ... READSFILE
+      --help                          display this help and exit.
 
----
+require arguments:
+      -s, --snp-file=NAME             input SNP vcf file.
+      -b, --bam-file=NAME             input bam file.
+      --ont, --pb                     ont: Oxford Nanopore genomic reads.
+                                      pb: PacBio HiFi/CCS genomic reads.
+optional arguments:
+      -r, --reference=NAME            reference fasta.
+      --sv-file=NAME                  input SV vcf file.
+      -t, --threads=Num               number of thread. default:1
+      -o, --out-prefix=NAME           prefix of phasing result.
+      --dot                           each contig/chromosome will generate dot file.
+      -1, --readsThreshold=[0~1]      give up SNP-SNP phasing pair if the number of reads of the two combinations are similar. default:0.5
+      -2, --qualityThreshold=[0~1]    give up phasing pair if the quality of the two combinations are similar. default:0.7
+      -3, --blockReadThreshold=[0~1]  give up phasing pair if the number of block's reads of the two combinations are similar. default:1.0
+      -4, --svReadsThreshold=[0~1]    give up SNP-SV phasing pair if the number of reads of the two combinations are similar. default:0.6
+      -d, --distance=Num              phasing two variant if distance less than threshold. default:300000
+      -c, --crossBlock=Num            each block tries to connect with next N blocks. default:1
+      -i, --islandBlockLength=Num     phasing across smaller blocks if crossBlock is greater than 1. default:10000
+```
+
 ### Output files of SNP-only phasing
 When phasing SNPs alone, LongPhase outputs the results into a VCF file. The alleles of the two haplotypes are stored in the GT field (e.g., 1|0), whereas the left and right alleles of the vertical bar represents the paternal or maternal haplotypes. The last PS field (e.g., 16809) represents the identifier of the block. For instance, the following example illustrates two haplotypes of five phased SNPs, CCCCC and GATGT, in the same block 16809.
 
