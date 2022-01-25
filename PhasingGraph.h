@@ -88,22 +88,27 @@ class VairiantGrpah{
         // homopolymer map
         std::map<int,bool> homopolymerMap;
     
-        void findBestEdgeList();
+        // disjoint path
+        void initialDisjointPath();
+        // block phasing
         std::map<std::string,int> getBlockRead(std::pair<int,std::vector<int> > currentBlockVec, std::map<std::string,int> &readQuality, BlockRead &totalRead , int sampleNum);
-        bool connectBlockByReadName(int nextBlcok, double diffRatioThreshold, bool blockPhasing, bool final);
+        bool connectBlockByCommonRead(int nextBlcok, double diffRatioThreshold);
+        // connect block by total quality
+        void checkTotalQuality();
+        
+        void checkAverageQuality(double diffRatioThreshold);
+        
+        void checkDisjointPath(double diffRatioThreshold);
+        
+        // produce PS tag and determine phased GT tag
         void findResultPath();
-        void connectBlockByQuality();
-        
-        void connectByQuality();
-        
-        int sumOfEdgePairQuality(PosAllele start, PosAllele end);
+
 
     public:
     
         VairiantGrpah(std::string &ref, PhasingParameters &params);
         ~VairiantGrpah();
     
-        //void addEdge(Variant node1, Variant node2, std::string readName);
         void addEdge(std::vector<ReadVariant> &readVariant);
         
         void phasingProcess();
