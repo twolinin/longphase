@@ -51,13 +51,17 @@ Usage:  phase [OPTION] ... READSFILE
       --help                          display this help and exit.
 
 require arguments:
-      -s, --snp-file=NAME             input SNP vcf file.
-      -b, --bam-file=NAME             input bam file.
+      -s, --snp-file=NAME             path to a SNP vcf file. The file containing variant calls to the reference genome.
+      -b, --bam-file=NAME             path to a bam file. This file contains alignments performed by mapping reads to the reference genome.
+                                      The index file (bai file) of alignments should be stored under the same path. 
+                                      e.g. *.bam and *.bam.bai.
       --ont, --pb                     ont: Oxford Nanopore genomic reads.
                                       pb: PacBio HiFi/CCS genomic reads.
 optional arguments:
-      -r, --reference=NAME            reference fasta.
-      --sv-file=NAME                  input SV vcf file.
+      -r, --reference=NAME            path to a reference file in FASTA format.
+                                      The index file (fai file) of reference genome should be stored under the same path. 
+                                      e.g. *.fasta and *.fasta.fai
+      --sv-file=NAME                  input SV vcf file. The file containing structure variant calls to the reference genome. 
       -t, --threads=Num               number of thread. default:1
       -o, --out-prefix=NAME           prefix of phasing result.
       --dot                           each contig/chromosome will generate dot file.
