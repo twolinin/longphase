@@ -38,7 +38,7 @@ make -j 4
 
 ---
 ### Usage
-For SNP-only phasing, the input of LongPhase consists of SNPs in VCF (e.g., SNP.vcf), an indexed reference in Fasta (e.g., reference.fasta, reference.fasta.fai), and an indexed read-to-refernce alignment in BAM (e.g., alignment.bam, alignment.bai) see [Input Preparation](#input-preparation). An exampe input of Nanopore HG002 (60x ULR) can be downloaded from [here](http://bioinfo.cs.ccu.edu.tw/bioinfo/HG002_60x/). The users should specify the sequencing patform (--ont for Nanopore and --pb for PacBio). An example of SNP phasing usage is shown below.
+For SNP-only phasing, the input of LongPhase consists of SNPs in VCF (e.g., SNP.vcf), an indexed reference in Fasta (e.g., reference.fasta, reference.fasta.fai), and an indexed read-to-refernce alignment in BAM (e.g., alignment.bam, alignment.bai) (see [Input Preparation](#input-preparation)). An exampe input of Nanopore HG002 (60x ULR) can be downloaded from [here](http://bioinfo.cs.ccu.edu.tw/bioinfo/HG002_60x/). The users should specify the sequencing patform (--ont for Nanopore and --pb for PacBio). An example of SNP phasing usage is shown below.
 #### SNP-only phasing
 ```
 longphase phase \
