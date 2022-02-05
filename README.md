@@ -21,6 +21,63 @@ make -j 4
 ```
 
 ---
+### Input Preparation
+Generate reference index. e.g. [samtools](https://github.com/samtools/samtools).
+```
+samtools faidx reference.fasta
+```
+Generate alignment files and index files. e.g. by [minimap2](https://github.com/lh3/minimap2) and [samtools](https://github.com/samtools/samtools).
+```
+# generate alignment flie. different sequencing platforms use different parameters. e.g. map-pb/map-ont/map-hifi
+# the MD-tag in the annotation needed by sniffles (–MD).
+minimap2 --MD -ax map-ont -t 10 reference.fasta reads.fastq -o alignment.sam
+
+# sort alignment file
+samtools sort -@ 10 alignment.sam -o alignment.bam
+
+# index alignment file
+samtools index -@ 10 alignment.bam
+```
+Generate single nucleotide polymorphism (SNP) file. e.g. [PEPPER-Margin-DeepVariant](https://github.com/kishwarshafin/pepper) pipeline.
+```
+INPUT_DIR={input data path}
+OUTPUT_DIR={output data path}
+BAM=alignment.bam
+REF=reference.fasta
+THREADS=10
+
+sudo docker run \
+-v "${INPUT_DIR}":"${INPUT_DIR}" \
+-v "${OUTPUT_DIR}":"${OUTPUT_DIR}" \
+kishwars/pepper_deepvariant:r0.7 \
+run_pepper_margin_deepvariant call_variant \
+-b "${INPUT_DIR}/${BAM}" \
+-f "${INPUT_DIR}/${REF}" \
+-o "${OUTPUT_DIR}" \
+-t "${THREADS}" \
+--ont_r9_guppy5_sup
+
+# --ont_r9_guppy5_sup is preset for ONT R9.4.1 Guppy 5 "Sup" basecaller
+# for ONT R10.4 Q20 reads: --ont_r10_q20
+# for PacBio-HiFi reads: --hifi
+```
+Generate Structural variation (SV) file by [sniffles](https://github.com/fritzsedlazeck/Sniffles) or [CuteSV](https://github.com/tjiangHIT/cuteSV).
+```
+# sniffles use parameter --num_reads_report -1
+sniffles -t 10 --num_reads_report -1 -m alignment.bam -v SV.vcf
+
+# cuteSV command for PacBio CLR data:
+cuteSV alignment.bam reference.fasta SV.vcf work_dir
+
+# cuteSV suggestions parameters
+# PacBio CLR data: 
+--max_cluster_bias_INS 100 --diff_ratio_merging_INS 0.3 --max_cluster_bias_DEL 200 --diff_ratio_merging_DEL 0.5
+# PacBio CCS(HIFI) data: 
+--max_cluster_bias_INS 1000 --diff_ratio_merging_INS 0.9 --max_cluster_bias_DEL 1000 --diff_ratio_merging_DEL 0.5
+# ONT data: 
+--max_cluster_bias_INS 100 --diff_ratio_merging_INS 0.3 --max_cluster_bias_DEL 100 --diff_ratio_merging_DEL 0.3
+```
+
 ### Usage
 For SNP-only phasing, the input of LongPhase consists of SNPs in VCF (e.g., SNP.vcf), an indexed reference in Fasta (e.g., reference.fasta, reference.fasta.fai), and an indexed read-to-refernce alignment in BAM (e.g., alignment.bam, alignment.bai). An exampe input of Nanopore HG002 (60x ULR) can be downloaded from [here](http://bioinfo.cs.ccu.edu.tw/bioinfo/HG002_60x/). The users should specify the sequencing patform (--ont for Nanopore and --pb for PacBio). An example of SNP phasing usage is shown below.
 ```
