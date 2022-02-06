@@ -1,5 +1,5 @@
 # LongPhase
-LongPhase is an ultra-fast program for simultaneously phasing SNPs and SVs by using Nanopore and PacBio long reads. It is capable of producing chromosome-scale haplotype blocks by using Nanpore ultra-long reads without the need for additional trios, chromosome conformation, and strand-seq data. On an 8-core machine, LongPhase can finish phasing a human genome in 10-20 minutes.
+LongPhase is an ultra-fast program for simultaneously co-phasing SNPs and SVs by using Nanopore and PacBio long reads. It is capable of producing nearly chromosome-scale haplotype blocks by using Nanpore ultra-long reads without the need for additional trios, chromosome conformation, and strand-seq data. On an 8-core machine, LongPhase can finish phasing a human genome in 10-20 minutes.
 
 ---
 - [Installation](#installation)
@@ -128,13 +128,13 @@ An example of SV VCF file
 
 ---
 ### Input Preparation
-#### Generate reference index
-e.g. [samtools](https://github.com/samtools/samtools).
+#### Generate reference index via samtools
+[samtools](https://github.com/samtools/samtools).
 ```
 samtools faidx reference.fasta
 ```
-#### Generate alignment files and index files
-e.g. [minimap2](https://github.com/lh3/minimap2) and [samtools](https://github.com/samtools/samtools).
+#### Generate alignment and index files
+Produce read-to-reference alignment via [minimap2](https://github.com/lh3/minimap2) and sort/index the bam by [samtools](https://github.com/samtools/samtools).
 ```
 # generate alignment flie. different sequencing platforms use different parameters. e.g. map-pb/map-ont/map-hifi
 # the MD-tag in the annotation needed by sniffles (–MD).
@@ -196,7 +196,7 @@ LongPhase is 10x faster than WhatsHap and Margin and produces much larger blocks
 
 ---
 ### Citation
-Jyun-Hong Lin, Liang-Chi Chen, Shu-Qi Yu and Yao-Ting Huang, LongPhase: an ultra-fast chromosome-scale phasing algorithm for small and large variants, BioRxiv, 2021.
+Jyun-Hong Lin, Liang-Chi Chen, Shu-Qi Yu and Yao-Ting Huang, [LongPhase: an ultra-fast chromosome-scale phasing algorithm for small and large variants](https://academic.oup.com/bioinformatics/advance-article-abstract/doi/10.1093/bioinformatics/btac058/6519151), Bioinformatics, 2022.
 
 ---
 ### Contact
