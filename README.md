@@ -177,7 +177,7 @@ e.g. [sniffles](https://github.com/fritzsedlazeck/Sniffles) or [CuteSV](https://
 sniffles -t 10 --num_reads_report -1 -m alignment.bam -v SV.vcf
 
 # cuteSV command for PacBio CLR data:
-cuteSV alignment.bam reference.fasta SV.vcf work_dir
+cuteSV alignment.bam reference.fasta SV.vcf work_dir --report_readid --genotype
 
 # cuteSV suggestions parameters
 # PacBio CLR data: 
