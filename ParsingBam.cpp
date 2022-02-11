@@ -3,6 +3,7 @@
 #include <string.h>
 #include <sstream>
 
+
 // vcf parser modify from 
 // http://wresch.github.io/2014/11/18/process-vcf-file-with-htslib.html
 // bam parser modify from 
@@ -158,7 +159,67 @@ int VariantParser::getLastSNP(std::string chrName){
 }
 
 void VariantParser::writeResult(std::string resultPrefix, PhasingResult phasingResult){
+
+    if( variantFile.find("gz") != std::string::npos ){
+        // .vcf.gz 
+        compressInput(resultPrefix,phasingResult);
+    }
+    else if( variantFile.find("vcf") != std::string::npos ){
+        // .vcf
+        unCompressInput(resultPrefix,phasingResult);
+    }
+    return;
+}
+
+void VariantParser::compressInput(std::string resultPrefix, PhasingResult phasingResult){
     
+    gzFile file = gzopen(variantFile.c_str(), "rb");
+    std::ofstream resultVcf(resultPrefix+".vcf");
+    
+    if(!resultVcf.is_open()){
+        std::cout<< "Fail to open write file: " << resultPrefix+".vcf" << "\n";
+    }
+    else if(!file){
+        std::cout<< "Fail to open vcf: " << variantFile << "\n";
+    }
+    else{
+        bool ps_def = false;
+              
+        char buffer[1048576]; // 1M
+        char* offset = buffer;
+            
+        while(true) {
+            int len = sizeof(buffer)-(offset-buffer);
+            if (len == 0){
+                std::cerr<<"Buffer to small for input line lengths\n";
+                exit(EXIT_FAILURE);
+            }
+
+            len = gzread(file, offset, len);
+
+            if (len == 0) break;    
+            if (len <  0){ 
+                int err;
+                fprintf (stderr, "Error: %s.\n", gzerror(file, &err));
+                exit(EXIT_FAILURE);
+            }
+
+            char* cur = buffer;
+            char* end = offset+len;
+
+            for (char* eol; (cur<end) && (eol = std::find(cur, end, '\n')) < end; cur = eol + 1)
+            {
+                std::string input = std::string(cur, eol);
+                writeLine(input, ps_def, resultVcf, phasingResult);
+            }
+            // any trailing data in [eol, end) now is a partial line
+            offset = std::copy(cur, end, buffer);
+        }
+        gzclose (file);
+    }
+}
+
+void VariantParser::unCompressInput(std::string resultPrefix, PhasingResult phasingResult){
     std::ifstream originVcf(variantFile);
     std::ofstream resultVcf(resultPrefix+".vcf");
     
@@ -173,149 +234,150 @@ void VariantParser::writeResult(std::string resultPrefix, PhasingResult phasingR
         std::string input;
         while(! originVcf.eof() ){
             std::getline(originVcf, input);
-            // header
-            if( input.find("#")!= std::string::npos){
-                // avoid double definition
-                if( input.find("ID=PS")!= std::string::npos){
-                    ps_def = true;
-                }
-                // format line 
-                if(input.find("##")== std::string::npos && ps_def == false){
-                    resultVcf <<  "##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase set identifier\">\n";
-                }
-                resultVcf << input << "\n";
-            }
-            else if( input.find("#")== std::string::npos ){
-                std::istringstream iss(input);
-                std::vector<std::string> fields((std::istream_iterator<std::string>(iss)),std::istream_iterator<std::string>());
-
-                if( fields.size() == 0 )
-                    break;
-
-                int pos = std::stoi( fields[1] );
-                int posIdx = pos - 1 ;
-                std::string key = fields[0] + "_" + std::to_string(posIdx);
-
-                PhasingResult::iterator psElementIter =  phasingResult.find(key);
-                std::map<int, RefAlt>::iterator posIter = chrVariant[fields[0]].find(posIdx);
-
-                // PS flag already exist, erase PS info
-                if( fields[8].find("PS")!= std::string::npos ){
-
-                    // find PS flag
-                    int colon_pos = 0;
-                    int ps_pos = fields[8].find("PS");
-                    for(int i =0 ; i< ps_pos ; i++){
-                        if(fields[8][i]==':')
-                            colon_pos++;
-                    }
-                            
-                    // erase PS flag
-                    if( fields[8].find(":",ps_pos+1) != std::string::npos ){
-                        fields[8].erase(ps_pos, 3);
-                    }
-                    else{
-                        fields[8].erase(ps_pos - 1, 3);
-                    }
-                        
-                    // find PS value start
-                    int current_colon = 0;
-                    int ps_start = 0;
-                    for(unsigned int i =0; i < fields[9].length() ; i++){
-                        if( current_colon >= colon_pos )
-                            break;
-                        if(fields[9][i]==':')
-                            current_colon++;  
-                        ps_start++;
-                    }
-                        
-                    // erase PS value
-                    if( fields[9].find(":",ps_start+1) != std::string::npos ){
-                        int ps_end_pos = fields[9].find(":",ps_start+1);
-                        fields[9].erase(ps_start, ps_end_pos - ps_start + 1);
-                    }
-                    else{
-                        fields[9].erase(ps_start-1, fields[9].length() - ps_start + 1);
-                    }
-                }
-                // reset GT flag
-                if( fields[8].find("GT")!= std::string::npos ){
-                    // find GT flag
-                    int colon_pos = 0;
-                    int gt_pos = fields[8].find("GT");
-                    for(int i =0 ; i< gt_pos ; i++){
-                        if(fields[8][i]==':')
-                            colon_pos++;
-                    }
-                    // find GT value start
-                    int current_colon = 0;
-                    int modifu_start = 0;
-                    for(unsigned int i =0; i < fields[9].length() ; i++){
-                        if( current_colon >= colon_pos )
-                            break;
-                        if(fields[9][i]==':')
-                            current_colon++;  
-                        modifu_start++;
-                    }
-                    if(fields[9][modifu_start+1] == '|'){
-                        // direct modify GT value
-                        if(fields[9][modifu_start] > fields[9][modifu_start+2]){
-                            fields[9][modifu_start+1] = fields[9][modifu_start];
-                            fields[9][modifu_start] = fields[9][modifu_start+2];
-                            fields[9][modifu_start+2] =fields[9][modifu_start+1];
-                        }
-                        fields[9][modifu_start+1] = '/';
-                    }
-                    
-                }
-
-                // this pos is phase
-                if( psElementIter != phasingResult.end() && posIter != chrVariant[fields[0]].end()){
-
-                    // add PS flag and value
-                    fields[8] = fields[8] + ":PS";
-                    fields[9] = fields[9] + ":" + std::to_string((*psElementIter).second.block);
-                    
-                    // find GT flag
-                    int colon_pos = 0;
-                    int gt_pos = fields[8].find("GT");
-                    for(int i =0 ; i< gt_pos ; i++){
-                        if(fields[8][i]==':')
-                            colon_pos++;
-                    }
-                    // find GT value start
-                    int current_colon = 0;
-                    int modifu_start = 0;
-                    for(unsigned int i =0; i < fields[9].length() ; i++){
-                        if( current_colon >= colon_pos )
-                            break;
-                        if(fields[9][i]==':')
-                            current_colon++;  
-                        modifu_start++;
-                    }
-                    // direct modify GT value
-                    fields[9][modifu_start] = (*psElementIter).second.RAstatus[0];
-                    fields[9][modifu_start+1] = '|';
-                    fields[9][modifu_start+2] = (*psElementIter).second.RAstatus[2];
-
-                }
-                // this pos has not been phased
-                else{
-                    // add PS flag and value
-                    fields[8] = fields[8] + ":PS";
-                    fields[9] = fields[9] + ":.";
-                }
-                
-                for(std::vector<std::string>::iterator fieldIter = fields.begin(); fieldIter != fields.end(); ++fieldIter){
-                    if( fieldIter != fields.begin() )
-                        resultVcf<< "\t";
-                    resultVcf << (*fieldIter);
-                }
-                resultVcf << "\n";
-            }
+            writeLine(input, ps_def, resultVcf, phasingResult);
         }
     }
 }
+void VariantParser::writeLine(std::string &input, bool &ps_def, std::ofstream &resultVcf, PhasingResult &phasingResult){
+    // header
+    if( input.find("#")!= std::string::npos){
+        // avoid double definition
+        if( input.find("ID=PS")!= std::string::npos){
+            ps_def = true;
+        }
+        // format line 
+        if(input.find("##")== std::string::npos && ps_def == false){
+            resultVcf <<  "##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase set identifier\">\n";
+        }
+        resultVcf << input << "\n";
+    }
+    else if( input.find("#")== std::string::npos ){
+        std::istringstream iss(input);
+        std::vector<std::string> fields((std::istream_iterator<std::string>(iss)),std::istream_iterator<std::string>());
+
+        if( fields.size() == 0 )
+            return;
+
+        int pos = std::stoi( fields[1] );
+        int posIdx = pos - 1 ;
+        std::string key = fields[0] + "_" + std::to_string(posIdx);
+
+        PhasingResult::iterator psElementIter =  phasingResult.find(key);
+        std::map<int, RefAlt>::iterator posIter = chrVariant[fields[0]].find(posIdx);
+
+        // PS flag already exist, erase PS info
+        if( fields[8].find("PS")!= std::string::npos ){
+
+            // find PS flag
+            int colon_pos = 0;
+            int ps_pos = fields[8].find("PS");
+            for(int i =0 ; i< ps_pos ; i++){
+                if(fields[8][i]==':')
+                    colon_pos++;
+            }
+                                
+            // erase PS flag
+            if( fields[8].find(":",ps_pos+1) != std::string::npos ){
+                fields[8].erase(ps_pos, 3);
+            }
+            else{
+                fields[8].erase(ps_pos - 1, 3);
+            }
+                            
+            // find PS value start
+            int current_colon = 0;
+            int ps_start = 0;
+            for(unsigned int i =0; i < fields[9].length() ; i++){
+                if( current_colon >= colon_pos )
+                    break;
+                if(fields[9][i]==':')
+                    current_colon++;  
+                ps_start++;
+            }
+                            
+            // erase PS value
+            if( fields[9].find(":",ps_start+1) != std::string::npos ){
+                int ps_end_pos = fields[9].find(":",ps_start+1);
+                fields[9].erase(ps_start, ps_end_pos - ps_start + 1);
+            }
+            else{
+                fields[9].erase(ps_start-1, fields[9].length() - ps_start + 1);
+            }
+        }
+        // reset GT flag
+        if( fields[8].find("GT")!= std::string::npos ){
+            // find GT flag
+            int colon_pos = 0;
+            int gt_pos = fields[8].find("GT");
+            for(int i =0 ; i< gt_pos ; i++){
+                if(fields[8][i]==':')
+                    colon_pos++;
+            }
+            // find GT value start
+            int current_colon = 0;
+            int modifu_start = 0;
+            for(unsigned int i =0; i < fields[9].length() ; i++){
+                if( current_colon >= colon_pos )
+                    break;
+                if(fields[9][i]==':')
+                    current_colon++;  
+                modifu_start++;
+            }
+            if(fields[9][modifu_start+1] == '|'){
+                // direct modify GT value
+                if(fields[9][modifu_start] > fields[9][modifu_start+2]){
+                    fields[9][modifu_start+1] = fields[9][modifu_start];
+                    fields[9][modifu_start] = fields[9][modifu_start+2];
+                    fields[9][modifu_start+2] =fields[9][modifu_start+1];
+                }
+                fields[9][modifu_start+1] = '/';
+            }   
+        }
+
+        // this pos is phase
+        if( psElementIter != phasingResult.end() && posIter != chrVariant[fields[0]].end()){
+            // add PS flag and value
+            fields[8] = fields[8] + ":PS";
+            fields[9] = fields[9] + ":" + std::to_string((*psElementIter).second.block);
+                        
+            // find GT flag
+            int colon_pos = 0;
+            int gt_pos = fields[8].find("GT");
+            for(int i =0 ; i< gt_pos ; i++){
+                if(fields[8][i]==':')
+                    colon_pos++;
+                }
+            // find GT value start
+            int current_colon = 0;
+            int modifu_start = 0;
+            for(unsigned int i =0; i < fields[9].length() ; i++){
+                if( current_colon >= colon_pos )
+                    break;
+                if(fields[9][i]==':')
+                    current_colon++;  
+                modifu_start++;
+            }
+            // direct modify GT value
+            fields[9][modifu_start] = (*psElementIter).second.RAstatus[0];
+            fields[9][modifu_start+1] = '|';
+            fields[9][modifu_start+2] = (*psElementIter).second.RAstatus[2];
+        }
+        // this pos has not been phased
+        else{
+            // add PS flag and value
+            fields[8] = fields[8] + ":PS";
+            fields[9] = fields[9] + ":.";
+        }
+                    
+        for(std::vector<std::string>::iterator fieldIter = fields.begin(); fieldIter != fields.end(); ++fieldIter){
+            if( fieldIter != fields.begin() )
+                resultVcf<< "\t";
+            resultVcf << (*fieldIter);
+        }
+        resultVcf << "\n";
+    }
+}
+
 
 bool VariantParser::findSNP(std::string chr, int posistion){
     std::map<std::string, std::map<int, RefAlt> >::iterator chrIter = chrVariant.find(chr);
@@ -430,91 +492,19 @@ int VariantParser::homopolymerEnd(int snp_pos, const std::string &ref_string){
     return pos-1;
 }
 
-SVParser::SVParser(std::string variantFile, VariantParser snpFile):variantFile(variantFile){
-    std::ifstream originVcf(variantFile);
-    if(variantFile=="")
-        return;
-    if(!originVcf.is_open()){
-        std::cout<< "Fail to open vcf: " << variantFile << "\n";
-        exit(1);
+SVParser::SVParser(std::string variantFile, VariantParser &in_snpFile):variantFile(variantFile){
+    
+    snpFile = &in_snpFile;
+    
+    if( variantFile.find("gz") != std::string::npos ){
+        // .vcf.gz 
+        compressParser(variantFile);
     }
-    else{
-        std::string input;
-        while(! originVcf.eof() ){
-            std::getline(originVcf, input);
-            
-            if( input.find("#")!= std::string::npos){
-
-            }
-            else if( input.find("#")== std::string::npos ){
-                std::istringstream iss(input);
-                std::vector<std::string> fields((std::istream_iterator<std::string>(iss)),std::istream_iterator<std::string>());
-
-                if( fields.size() == 0 )
-                    break;
-                // trans to 0-base
-                int pos = std::stoi( fields[1] ) - 1;
-                std::string chr = fields[0];
-                
-                // find GT flag
-                int colon_pos = 0;
-                int gt_pos = fields[8].find("GT");
-                for(int i =0 ; i< gt_pos ; i++){
-                    if(fields[8][i]==':')
-                        colon_pos++;
-                }
-                // find GT value start
-                int current_colon = 0;
-                int modifu_start = 0;
-                for(unsigned int i =0; i < fields[9].length() ; i++){
-                    if( current_colon >= colon_pos )
-                        break;
-                    if(fields[9][i]==':')
-                        current_colon++;  
-                    modifu_start++;
-                }
-                bool filter = false;
-                
-                // homo GT
-                if(fields[9][modifu_start]==fields[9][modifu_start+2]){
-                    filter = true;
-                }
-                // conflict pos with SNP
-                if( snpFile.findSNP(chr,pos) ){
-                    filter = true;
-                }
-                
-                std::map<int, bool>::iterator posIter = posDuplicate[chr].find(pos);
-                // conflict pos with SV
-                if( posIter == posDuplicate[chr].end() )
-                    posDuplicate[chr][pos] = false;
-                else{
-                    posDuplicate[chr][pos] = true;
-                    filter = true;
-                }
-                
-                if(filter){
-                    continue;
-                }
-
-                // get read INFO
-                int read_pos = fields[7].find("RNAMES=");
-                read_pos = fields[7].find("=",read_pos);
-                read_pos++;
-                
-                int next_field = fields[7].find(";",read_pos);
-                std::string totalRead = fields[7].substr(read_pos,next_field-read_pos);
-                std::stringstream totalReadStream(totalRead);
-                
-                std::string read;
-                while(std::getline(totalReadStream, read, ','))
-                {
-                   chrVariant[chr][pos][read]= true;
-                }
-
-            }
-        }
+    else if( variantFile.find("vcf") != std::string::npos ){
+        // .vcf
+        unCompressParser(variantFile);
     }
+
     // erase SV pos if this pos appear two or more times
     for(std::map<std::string, std::map<int, bool> >::iterator chrIter = posDuplicate.begin(); chrIter != posDuplicate.end() ; chrIter++){
         for(std::map<int, bool>::iterator posIter = (*chrIter).second.begin() ; posIter != (*chrIter).second.end() ; posIter++ ){
@@ -526,11 +516,139 @@ SVParser::SVParser(std::string variantFile, VariantParser snpFile):variantFile(v
             }
         }
     }
-    
 }
-SVParser::~SVParser(){
-    
+SVParser::~SVParser(){ 
 }
+
+void SVParser::compressParser(std::string &variantFile){
+    gzFile file = gzopen(variantFile.c_str(), "rb");
+    if(variantFile=="")
+        return;
+    if(!file){
+        std::cout<< "Fail to open vcf: " << variantFile << "\n";
+    }
+    else{  
+        char buffer[1048576]; // 1M
+        char* offset = buffer;
+            
+        while(true) {
+            int len = sizeof(buffer)-(offset-buffer);
+            if (len == 0){
+                std::cerr<<"Buffer to small for input line lengths\n";
+                exit(EXIT_FAILURE);
+            }
+
+            len = gzread(file, offset, len);
+
+            if (len == 0) break;    
+            if (len <  0){ 
+                int err;
+                fprintf (stderr, "Error: %s.\n", gzerror(file, &err));
+                exit(EXIT_FAILURE);
+            }
+
+            char* cur = buffer;
+            char* end = offset+len;
+
+            for (char* eol; (cur<end) && (eol = std::find(cur, end, '\n')) < end; cur = eol + 1)
+            {
+                std::string input = std::string(cur, eol);
+                parserProcess(input);
+            }
+            // any trailing data in [eol, end) now is a partial line
+            offset = std::copy(cur, end, buffer);
+        }
+        gzclose (file);
+    }    
+}
+void SVParser::unCompressParser(std::string &variantFile){
+    std::ifstream originVcf(variantFile);
+    if(variantFile=="")
+        return;
+    if(!originVcf.is_open()){
+        std::cout<< "Fail to open vcf: " << variantFile << "\n";
+        exit(1);
+    }
+    else{
+        std::string input;
+        while(! originVcf.eof() ){
+            std::getline(originVcf, input);
+            parserProcess(input);
+        }
+    }
+}
+void SVParser::parserProcess(std::string &input){
+    if( input.find("#")!= std::string::npos){
+
+    }
+    else if( input.find("#")== std::string::npos ){
+        std::istringstream iss(input);
+        std::vector<std::string> fields((std::istream_iterator<std::string>(iss)),std::istream_iterator<std::string>());
+
+        if( fields.size() == 0 )
+            return;
+        // trans to 0-base
+        int pos = std::stoi( fields[1] ) - 1;
+        std::string chr = fields[0];
+                
+        // find GT flag
+        int colon_pos = 0;
+        int gt_pos = fields[8].find("GT");
+        for(int i =0 ; i< gt_pos ; i++){
+            if(fields[8][i]==':')
+                colon_pos++;
+        }
+        // find GT value start
+        int current_colon = 0;
+        int modifu_start = 0;
+        for(unsigned int i =0; i < fields[9].length() ; i++){
+            if( current_colon >= colon_pos )
+                break;
+            if(fields[9][i]==':')
+                current_colon++;  
+            modifu_start++;
+        }
+        bool filter = false;
+                
+        // homo GT
+        if(fields[9][modifu_start]==fields[9][modifu_start+2]){
+            filter = true;
+        }
+        // conflict pos with SNP
+        if( (*snpFile).findSNP(chr,pos) ){
+            filter = true;
+        }
+                
+        std::map<int, bool>::iterator posIter = posDuplicate[chr].find(pos);
+        // conflict pos with SV
+        if( posIter == posDuplicate[chr].end() )
+            posDuplicate[chr][pos] = false;
+        else{
+            posDuplicate[chr][pos] = true;
+            filter = true;
+        }
+                
+        if(filter){
+            return;
+        }
+
+        // get read INFO
+        int read_pos = fields[7].find("RNAMES=");
+        read_pos = fields[7].find("=",read_pos);
+        read_pos++;
+                
+        int next_field = fields[7].find(";",read_pos);
+        std::string totalRead = fields[7].substr(read_pos,next_field-read_pos);
+        std::stringstream totalReadStream(totalRead);
+                
+        std::string read;
+        while(std::getline(totalReadStream, read, ','))
+        {
+           chrVariant[chr][pos][read]= true;
+        }
+    }
+}
+
 
 std::map<int, std::map<std::string ,bool> > SVParser::getVariants(std::string chrName){
     std::map<int, std::map<std::string ,bool> > targetVariants;
@@ -544,11 +662,70 @@ std::map<int, std::map<std::string ,bool> > SVParser::getVariants(std::string ch
 
 void SVParser::writeResult(std::string resultPrefix, PhasingResult phasingResult){
     
+    if( variantFile.find("gz") != std::string::npos ){
+        // .vcf.gz 
+        compressInput(resultPrefix,phasingResult);
+    }
+    else if( variantFile.find("vcf") != std::string::npos ){
+        // .vcf
+        unCompressInput(resultPrefix,phasingResult);
+    }
+    return;
+}
+
+void SVParser::compressInput(std::string resultPrefix, PhasingResult phasingResult){
+    
+    gzFile file = gzopen(variantFile.c_str(), "rb");
+    std::ofstream resultVcf(resultPrefix+"_SV.vcf");
+    
+    if(!resultVcf.is_open()){
+        std::cout<< "Fail to open write file: " << resultPrefix+"_SV.vcf" << "\n";
+    }
+    else if(!file){
+        std::cout<< "Fail to open vcf: " << variantFile << "\n";
+    }
+    else{
+        bool ps_def = false;
+              
+        char buffer[1048576]; // 1M
+        char* offset = buffer;
+            
+        while(true) {
+            int len = sizeof(buffer)-(offset-buffer);
+            if (len == 0){
+                std::cerr<<"Buffer to small for input line lengths\n";
+                exit(EXIT_FAILURE);
+            }
+
+            len = gzread(file, offset, len);
+
+            if (len == 0) break;    
+            if (len <  0){ 
+                int err;
+                fprintf (stderr, "Error: %s.\n", gzerror(file, &err));
+                exit(EXIT_FAILURE);
+            }
+
+            char* cur = buffer;
+            char* end = offset+len;
+
+            for (char* eol; (cur<end) && (eol = std::find(cur, end, '\n')) < end; cur = eol + 1)
+            {
+                std::string input = std::string(cur, eol);
+                writeLine(input, ps_def, resultVcf, phasingResult);
+            }
+            // any trailing data in [eol, end) now is a partial line
+            offset = std::copy(cur, end, buffer);
+        }
+        gzclose (file);
+    }
+}
+void SVParser::unCompressInput(std::string resultPrefix, PhasingResult phasingResult){
     std::ifstream originVcf(variantFile);
     std::ofstream resultVcf(resultPrefix+"_SV.vcf");
     
     if(!resultVcf.is_open()){
-        std::cout<< "Fail to open write file: " << resultPrefix+".vcf" << "\n";
+        std::cout<< "Fail to open write file: " << resultPrefix+"_SV.vcf" << "\n";
     }
     else if(!originVcf.is_open()){
         std::cout<< "Fail to open vcf: " << variantFile << "\n";
@@ -561,148 +738,149 @@ void SVParser::writeResult(std::string resultPrefix, PhasingResult phasingResult
             if(input.length() == 0)
                 continue;
 
-            // header
-            if( input.find("#")!= std::string::npos){
-                // avoid double definition
-                if( input.find("ID=PS")!= std::string::npos){
-                    ps_def = true;
-                }
-                // format line 
-                if(input.find("##")== std::string::npos && ps_def == false){
-                    resultVcf <<  "##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase set identifier\">\n";
-                }
-                resultVcf << input << "\n";
+            writeLine(input, ps_def, resultVcf, phasingResult);
+        }
+    }
+}
+void SVParser::writeLine(std::string &input, bool &ps_def, std::ofstream &resultVcf, PhasingResult &phasingResult){
+    // header
+    if( input.find("#")!= std::string::npos){
+        // avoid double definition
+        if( input.find("ID=PS")!= std::string::npos){
+            ps_def = true;
+        }
+        // format line 
+        if(input.find("##")== std::string::npos && ps_def == false){
+            resultVcf <<  "##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase set identifier\">\n";
+        }
+        resultVcf << input << "\n";
+    }
+    else if( input.find("#")== std::string::npos ){
+        std::istringstream iss(input);
+        std::vector<std::string> fields((std::istream_iterator<std::string>(iss)),std::istream_iterator<std::string>());
+
+        std::string chr = fields[0];
+
+        if( fields.size() == 0 )
+            return;
+
+        int pos = std::stoi( fields[1] );
+        int posIdx = pos - 1 ;
+        std::string key = fields[0] + "_" + std::to_string(posIdx);
+
+        PhasingResult::iterator psElementIter =  phasingResult.find(key);
+        std::map<int, std::map<std::string ,bool> >::iterator posIter = chrVariant[chr].find(posIdx);
+                
+        // PS flag already exist, erase PS info
+        if( fields[8].find("PS")!= std::string::npos ){
+
+            // find PS flag
+            int colon_pos = 0;
+            int ps_pos = fields[8].find("PS");
+            for(int i =0 ; i< ps_pos ; i++){
+                if(fields[8][i]==':')
+                    colon_pos++;
             }
-            else if( input.find("#")== std::string::npos ){
-                std::istringstream iss(input);
-                std::vector<std::string> fields((std::istream_iterator<std::string>(iss)),std::istream_iterator<std::string>());
-
-                std::string chr = fields[0];
-
-                if( fields.size() == 0 )
-                    break;
-
-                int pos = std::stoi( fields[1] );
-                int posIdx = pos - 1 ;
-                std::string key = fields[0] + "_" + std::to_string(posIdx);
-
-                PhasingResult::iterator psElementIter =  phasingResult.find(key);
-                std::map<int, std::map<std::string ,bool> >::iterator posIter = chrVariant[chr].find(posIdx);
-                
-                // PS flag already exist, erase PS info
-                if( fields[8].find("PS")!= std::string::npos ){
-
-                    // find PS flag
-                    int colon_pos = 0;
-                    int ps_pos = fields[8].find("PS");
-                    for(int i =0 ; i< ps_pos ; i++){
-                        if(fields[8][i]==':')
-                            colon_pos++;
-                    }
                             
-                    // erase PS flag
-                    if( fields[8].find(":",ps_pos+1) != std::string::npos ){
-                        fields[8].erase(ps_pos, 3);
-                    }
-                    else{
-                        fields[8].erase(ps_pos - 1, 3);
-                    }
+            // erase PS flag
+            if( fields[8].find(":",ps_pos+1) != std::string::npos ){
+                fields[8].erase(ps_pos, 3);
+            }
+            else{
+                fields[8].erase(ps_pos - 1, 3);
+            }
                         
-                    // find PS value start
-                    int current_colon = 0;
-                    int ps_start = 0;
-                    for(unsigned int i =0; i < fields[9].length() ; i++){
-                        if( current_colon >= colon_pos )
-                            break;
-                        if(fields[9][i]==':')
-                            current_colon++;  
-                        ps_start++;
-                    }
+            // find PS value start
+            int current_colon = 0;
+            int ps_start = 0;
+            for(unsigned int i =0; i < fields[9].length() ; i++){
+                if( current_colon >= colon_pos )
+                    break;
+                if(fields[9][i]==':')
+                    current_colon++;  
+                ps_start++;
+            }
                         
-                    // erase PS value
-                    if( fields[9].find(":",ps_start+1) != std::string::npos ){
-                        int ps_end_pos = fields[9].find(":",ps_start+1);
-                        fields[9].erase(ps_start, ps_end_pos - ps_start + 1);
-                    }
-                    else{
-                        fields[9].erase(ps_start-1, fields[9].length() - ps_start + 1);
-                    }
-                }
-                // reset GT flag
-                if( fields[8].find("GT")!= std::string::npos ){
-                    // find GT flag
-                    int colon_pos = 0;
-                    int gt_pos = fields[8].find("GT");
-                    for(int i =0 ; i< gt_pos ; i++){
-                        if(fields[8][i]==':')
-                            colon_pos++;
-                    }
-                    // find GT value start
-                    int current_colon = 0;
-                    int modifu_start = 0;
-                    for(unsigned int i =0; i < fields[9].length() ; i++){
-                        if( current_colon >= colon_pos )
-                            break;
-                        if(fields[9][i]==':')
-                            current_colon++;  
-                        modifu_start++;
-                    }
-                    if(fields[9][modifu_start+1] == '|'){
-                        // direct modify GT value
-                        if(fields[9][modifu_start] > fields[9][modifu_start+2]){
-                            fields[9][modifu_start+1] = fields[9][modifu_start];
-                            fields[9][modifu_start] = fields[9][modifu_start+2];
-                            fields[9][modifu_start+2] =fields[9][modifu_start+1];
-                        }
-                        fields[9][modifu_start+1] = '/';
-                    }
-                    
-                }
-                
-                // this pos is phase and exist in map
-                if( psElementIter != phasingResult.end() && posIter != chrVariant[chr].end() ){
-                    
-                    // add PS flag and value
-                    fields[8] = fields[8] + ":PS";
-                    fields[9] = fields[9] + ":" + std::to_string((*psElementIter).second.block);
-                    
-                    // find GT flag
-                    int colon_pos = 0;
-                    int gt_pos = fields[8].find("GT");
-                    for(int i =0 ; i< gt_pos ; i++){
-                        if(fields[8][i]==':')
-                            colon_pos++;
-                    }
-                    // find GT value start
-                    int current_colon = 0;
-                    int modifu_start = 0;
-                    for(unsigned int i =0; i < fields[9].length() ; i++){
-                        if( current_colon >= colon_pos )
-                            break;
-                        if(fields[9][i]==':')
-                            current_colon++;  
-                        modifu_start++;
-                    }
-                    // direct modify GT value
-                    fields[9][modifu_start] = (*psElementIter).second.RAstatus[0];
-                    fields[9][modifu_start+1] = '|';
-                    fields[9][modifu_start+2] = (*psElementIter).second.RAstatus[2];
-
-                }
-                // this pos has not been phased
-                else{
-                    // add PS flag and value
-                    fields[8] = fields[8] + ":PS";
-                    fields[9] = fields[9] + ":.";
-                }
-                for(std::vector<std::string>::iterator fieldIter = fields.begin(); fieldIter != fields.end(); ++fieldIter){
-                    if( fieldIter != fields.begin() )
-                        resultVcf<< "\t";
-                    resultVcf << (*fieldIter);
-                }
-                resultVcf << "\n";
+            // erase PS value
+            if( fields[9].find(":",ps_start+1) != std::string::npos ){
+                int ps_end_pos = fields[9].find(":",ps_start+1);
+                fields[9].erase(ps_start, ps_end_pos - ps_start + 1);
+            }
+            else{
+                fields[9].erase(ps_start-1, fields[9].length() - ps_start + 1);
             }
         }
+        // reset GT flag
+        if( fields[8].find("GT")!= std::string::npos ){
+            // find GT flag
+            int colon_pos = 0;
+            int gt_pos = fields[8].find("GT");
+            for(int i =0 ; i< gt_pos ; i++){
+                if(fields[8][i]==':')
+                    colon_pos++;
+            }
+            // find GT value start
+            int current_colon = 0;
+            int modifu_start = 0;
+            for(unsigned int i =0; i < fields[9].length() ; i++){
+                if( current_colon >= colon_pos )
+                    break;
+                if(fields[9][i]==':')
+                    current_colon++;  
+                modifu_start++;
+            }
+            if(fields[9][modifu_start+1] == '|'){
+                // direct modify GT value
+                if(fields[9][modifu_start] > fields[9][modifu_start+2]){
+                    fields[9][modifu_start+1] = fields[9][modifu_start];
+                    fields[9][modifu_start] = fields[9][modifu_start+2];
+                    fields[9][modifu_start+2] =fields[9][modifu_start+1];
+                }
+                fields[9][modifu_start+1] = '/';
+            }        
+        }
+                
+        // this pos is phase and exist in map
+        if( psElementIter != phasingResult.end() && posIter != chrVariant[chr].end() ){
+                    
+            // add PS flag and value
+            fields[8] = fields[8] + ":PS";
+            fields[9] = fields[9] + ":" + std::to_string((*psElementIter).second.block);
+                    
+            // find GT flag
+            int colon_pos = 0;
+            int gt_pos = fields[8].find("GT");
+            for(int i =0 ; i< gt_pos ; i++){
+                if(fields[8][i]==':')
+                    colon_pos++;
+            }
+            // find GT value start
+            int current_colon = 0;
+            int modifu_start = 0;
+            for(unsigned int i =0; i < fields[9].length() ; i++){
+                if( current_colon >= colon_pos )
+                    break;
+                if(fields[9][i]==':')
+                    current_colon++;  
+                modifu_start++;
+            }
+            // direct modify GT value
+            fields[9][modifu_start] = (*psElementIter).second.RAstatus[0];
+            fields[9][modifu_start+1] = '|';
+            fields[9][modifu_start+2] = (*psElementIter).second.RAstatus[2];
+        }
+        // this pos has not been phased
+        else{
+            // add PS flag and value
+            fields[8] = fields[8] + ":PS";
+            fields[9] = fields[9] + ":.";
+        }
+        for(std::vector<std::string>::iterator fieldIter = fields.begin(); fieldIter != fields.end(); ++fieldIter){
+            if( fieldIter != fields.begin() )
+                resultVcf<< "\t";
+            resultVcf << (*fieldIter);
+        }
+        resultVcf << "\n";
     }
 }
 
@@ -1068,7 +1246,7 @@ void BamParser::svFilter(std::vector<ReadVariant> &readVariantVec){
         double occurSVNum = occurSVIter != occurSV.end() ? occurSV[currSVPos] : 0;
         double noSVNum    = noSVIter    != noSV.end()    ? noSV[currSVPos] : 0;
         
-        std::cout<<"SV\t"<< currSVPos << "\t"<< occurSVNum << "\t" << noSVNum << "\t" << occurSVNum+noSVNum << "\t" << std::min(occurSVNum,noSVNum)/(occurSVNum+noSVNum) << "\n";
+        //std::cout<<"SV\t"<< currSVPos << "\t"<< occurSVNum << "\t" << noSVNum << "\t" << occurSVNum+noSVNum << "\t" << std::min(occurSVNum,noSVNum)/(occurSVNum+noSVNum) << "\n";
         
         if( std::min(occurSVNum,noSVNum)/(occurSVNum+noSVNum)<=0.1 ){
         //if( occurSVNum + noSVNum < 10 || occurSVNum == 0 || noSVNum == 0 ){

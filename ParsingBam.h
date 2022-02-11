@@ -11,6 +11,8 @@
 #include <htslib/vcf.h>
 #include <htslib/vcfutils.h>
 
+#include <zlib.h>
+
 struct RefAlt{
     std::string Ref;
     std::string Alt;
@@ -45,6 +47,10 @@ class VariantParser{
         
         int homopolymerEnd(int snp_pos, const std::string &ref_string);
     
+        void compressInput(std::string resultPrefix, PhasingResult phasingResult);
+        void unCompressInput(std::string resultPrefix, PhasingResult phasingResult);
+        void writeLine(std::string &input, bool &ps_def, std::ofstream &resultVcf, PhasingResult &phasingResult);
+    
     public:
     
         VariantParser(std::string variantFile);
@@ -61,7 +67,7 @@ class VariantParser{
         int getLastSNP(std::string chrName);
         
         void writeResult(std::string resultPrefix, PhasingResult phasingResult);
-        
+
         bool findSNP(std::string chr, int posistion);
         
         void filterSNP(std::string chr, std::vector<ReadVariant> &readVariantVec, std::string &chr_reference);
@@ -70,16 +76,25 @@ class VariantParser{
 class SVParser{
     
     private:
-    
+        VariantParser *snpFile;
+        
         std::string variantFile;
         // chr , variant position (0-base), read
         std::map<std::string, std::map<int, std::map<std::string ,bool> > > chrVariant;
         // chr, variant position (0-base)
         std::map<std::string, std::map<int, bool> > posDuplicate;
+        
+        void compressParser(std::string &variantFile);
+        void unCompressParser(std::string &variantFile);
+        void parserProcess(std::string &input);
 
+        void compressInput(std::string resultPrefix, PhasingResult phasingResult);
+        void unCompressInput(std::string resultPrefix, PhasingResult phasingResult);
+        void writeLine(std::string &input, bool &ps_def, std::ofstream &resultVcf, PhasingResult &phasingResult);
+        
     public:
     
-        SVParser(std::string variantFile, VariantParser snpFile);
+        SVParser(std::string variantFile, VariantParser &snpFile);
         ~SVParser();
             
         std::map<int, std::map<std::string ,bool> > getVariants(std::string chrName);  
