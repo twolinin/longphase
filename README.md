@@ -152,7 +152,7 @@ require arguments:
       -b, --bam-file=NAME             input bam file.
 optional arguments:
       --tagSupplementary              tag supplementary alignment. default:false
-      -q, --qualityThreshold=Num      not tag alignment if the mapping quality less than threshold. default:0
+      -q, --qualityThreshold=Num      not tag alignment if the mapping quality less than threshold. default:20
       -p, --percentageThreshold=Num   the alignment will be tagged according to the haplotype corresponding to most alleles.
                                       if the alignment has no obvious corresponding haplotype, it will not be tagged. default:0.6
       -t, --threads=Num               number of thread. default:1
