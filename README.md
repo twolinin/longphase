@@ -4,21 +4,24 @@ LongPhase is an ultra-fast program for simultaneously co-phasing SNPs and SVs by
 ---
 - [Installation](#installation)
 - [Usage](#usage)
-	- [SNP-only phasing](#snp-only-phasing)
-	- [SNP and SV co-phasing](#snp-and-sv-co-phasing)
-	- [The complete list of parameters](#the-complete-list-of-parameters)
-- [Output files of SNP-only phasing](#output-files-of-snp-only-phasing)
-- [Output files of SNP and SV co-phasing](#output-files-of-snp-and-sv-co-phasing)
+	- [Phase commad](#phase-command)
+		- [SNP-only phasing](#snp-only-phasing)
+		- [SNP and SV co-phasing](#snp-and-sv-co-phasing)
+		- [The complete list of phase parameters](#the-complete-list-of-phase-parameters)
+		- [Output files of SNP-only phasing](#output-files-of-snp-only-phasing)
+		- [Output files of SNP and SV co-phasing](#output-files-of-snp-and-sv-co-phasing)
+	- [Haplotag command](#haplotag-command)
+		- [The complete list of haplotag parameters](#the-complete-list-of-haplotag-parameters)
 - [Input Preparation](#input-preparation)
 	- [Generate reference index](#generate-reference-index)
-	- [Generate alignment files and index files](#generate-alignment-files-and-index-files)
+	- [Generate alignment and index files](#generate-alignment-and-index-files)
 	- [Generate single nucleotide polymorphism (SNP) file](#generate-single-nucleotide-polymorphism-snp-file)
 	- [Generate Structural variation (SV) file](#generate-structural-variation-sv-file)
 - [Comparison with other SNP-phasing programs](#comparison-with-other-snp-phasing-programs)
 - [Citation](#citation)
 - [Contact](#contact)
 ---
-### Installation
+## Installation
 You are recommended to download a [linux 64bit binary release](https://github.com/twolinin/longphase/raw/1.0/longphase_linux-x64.tar.xz) without compilation. 
 
 ```
@@ -37,7 +40,8 @@ make -j 4
 ```
 
 ---
-### Usage
+## Usage
+### Phase command
 For SNP-only phasing, the input of LongPhase consists of SNPs in VCF (e.g., SNP.vcf), an indexed reference in Fasta (e.g., reference.fasta, reference.fasta.fai), and an indexed read-to-refernce alignment in BAM (e.g., alignment.bam, alignment.bai) (see [Input Preparation](#input-preparation)). An exampe input of Nanopore HG002 (60x ULR) can be downloaded from [here](http://bioinfo.cs.ccu.edu.tw/bioinfo/HG002_60x/). The users should specify the sequencing patform (--ont for Nanopore and --pb for PacBio). An example of SNP phasing usage is shown below.
 #### SNP-only phasing
 ```
@@ -46,7 +50,7 @@ longphase phase \
 -b alignment.bam \
 -r reference.fasta \
 -t 8 \
--o output_prefix \
+-o phased_prefix \
 --ont # or --pb for PacBio Hifi
 ```
 
@@ -59,11 +63,11 @@ longphase phase \
 -b alignment.bam \
 -r reference.fasta \
 -t 8 \
--o output_prefix \
+-o phased_prefix \
 --ont # or --pb for PacBio Hifi
 ```
 
-#### The complete list of parameters
+#### The complete list of phase parameters
 ```
 Usage:  phase [OPTION] ... READSFILE
       --help                          display this help and exit.
@@ -126,8 +130,37 @@ An example of SV VCF file
 1       545892  8       N       ACACGCGGGCCGTGGCCAGCAGGCGGCGCTGCAGGAGAGGAGATGCCCAGGCCTGGCGGCC   .       PASS    IMPRECISE;SVMETHOD=Snifflesv1.0.11;CHR2=1;END=545893;STD_quant_start=28.919840;STD_quant_stop=28.543200;Kurtosis_quant_start=-0.382251;Kurtosis_quant_stop=-0.130808;SVTYPE=INS;RNAMES=0120d560-50f0-4298-8b03-7bd30f3cf139,030ac5d4-e616-4ce9-8ad3-243835335085,0cf1b0d9-2b4d-463d-a658-01b4b040dc63,22e11f79-0067-4735-8b69-97d951ca702f,2ca8a6f4-be9d-4df5-80d2-dc1743f97a84,3977c988-9901-4e5b-9f9c-b8ebfcce8e93,3e333422-12ca-4f16-afb8-ed7611dcbc2c,4191371c-49ea-466d-aadc-06f27cdf1050,4aaae789-54fe-4fa5-84b3-5524dc2b3796,5933e1b7-1aeb-4437-a875-3befbf703420,623804bb-e2fe-415d-96ae-3d06aec63e5d,672244ce-2d5d-45cf-beb2-ddeddae917e8,6b79aa23-7c9c-49dc-9b88-8419c88c7a36,7842d9f1-9a77-4c9a-ab5b-5a644ed2d355,7ba26d64-d9b0-475f-8d5f-1fa73fc42d93,8e10bf13-9674-489c-924e-182a42e08a34,a2b1b2ef-1e28-465e-8b3f-c44e15990d8b,a45514f1-4aae-40eb-94eb-2969722a7b05,b8181546-6839-49cd-b64f-b65c96369a2b,c140eaba-e0e7-44e7-9f16-c8c67fd4a2f2,c7835cf7-44c0-44da-b10e-b2468fc8caab,ca4aa84d-34d1-4639-8634-b6a5540129ca,d56f0abe-4389-4197-a151-0eb567fb99f0,e6992c7d-c00e-40e7-b80b-562094a9b60f,e8bb376c-20e0-4bed-a61f-b82b5c37ef6f,ec325153-0c55-4ece-8f3c-c432701e6750,f3242a61-deec-49e7-b99f-335a1ba13791,f91a7627-7fdb-4f03-8f33-0ed1649d96fe;SUPTYPE=AL;SVLEN=62;STRANDS=+-;RE=28;REF_strand=51;AF=0.54902        GT:DR:DV:PS     1|0:23:28:382189
 ```
 
+### Haplotag command
+This command labels the reads of the BAM file according to the phased VCF. All read will be classified as HP:i:1 or HP:i:2 represents which haplotype it belongs to. We also tags each read with PS tag represents which haplotype block it belongs to. The input VCF may have been phased by any program as long as the phasing info is recorded with a PS or HP tag.
+
+```
+longphase haplotag \
+-s phased_prefix.vcf \
+-b alignment.bam \
+-t 8 \
+-o tagged_bam_prefix
+```
+
+#### The complete list of haplotag parameters
+
+```
+Usage:  haplotag [OPTION] ... READSFILE
+      --help                          display this help and exit.
+
+require arguments:
+      -s, --snp-file=NAME             input SNP vcf file.
+      -b, --bam-file=NAME             input bam file.
+optional arguments:
+      --tagSupplementary              tag supplementary alignment. default:false
+      -q, --qualityThreshold=Num      not tag alignment if the mapping quality less than threshold. default:0
+      -p, --percentageThreshold=Num   the alignment will be tagged according to the haplotype corresponding to most alleles.
+                                      if the alignment has no obvious corresponding haplotype, it will not be tagged. default:0.6
+      -t, --threads=Num               number of thread. default:1
+      -o, --out-prefix=NAME           prefix of phasing result. default:result
+```
+
 ---
-### Input Preparation
+## Input Preparation
 #### Generate reference index
 Index the reference genome with [samtools](https://github.com/samtools/samtools).
 ```
@@ -190,17 +223,17 @@ cuteSV alignment.bam reference.fasta SV.vcf work_dir --report_readid --genotype
 ```
 
 ---
-### Comparison with other SNP-phasing programs
+## Comparison with other SNP-phasing programs
 LongPhase is 10x faster than WhatsHap and Margin and produces much larger blocks when tested on HG002, HG003,and HG004.
 
 <img src="http://bioinfo.cs.ccu.edu.tw/bioinfo/HG002_60x/compare2.png" width="600">
 
 ---
-### Citation
+## Citation
 Jyun-Hong Lin, Liang-Chi Chen, Shu-Qi Yu and Yao-Ting Huang, [LongPhase: an ultra-fast chromosome-scale phasing algorithm for small and large variants](https://academic.oup.com/bioinformatics/advance-article-abstract/doi/10.1093/bioinformatics/btac058/6519151), Bioinformatics, 2022.
 
 ---
-### Contact
+## Contact
 Yao-Ting Huang, ythuang at cs.ccu.edu.tw
 
 
