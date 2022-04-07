@@ -14,27 +14,30 @@ static const char *CORRECT_USAGE_MESSAGE =
 "      -b, --bam-file=NAME             input bam file.\n"
 "optional arguments:\n"
 "      --tagSupplementary              tag supplementary alignment. default:false\n"
+"      --sv-file=NAME                  input phased SV vcf file.\n"
 "      -q, --qualityThreshold=Num      not tag alignment if the mapping quality less than threshold. default:0\n"
 "      -p, --percentageThreshold=Num   the alignment will be tagged according to the haplotype corresponding to most alleles.\n"
 "                                      if the alignment has no obvious corresponding haplotype, it will not be tagged. default:0.6\n"
 "      -t, --threads=Num               number of thread. default:1\n"
-"      -o, --out-prefix=NAME           prefix of phasing result. default:result\n";
-
+"      -o, --out-prefix=NAME           prefix of phasing result. default:result\n"
+"      --log                           an additional log file records the result of each read. default:false\n";
 
 
 static const char* shortopts = "s:b:o:t:q:p:";
 
-enum { OPT_HELP = 1, TAG_SUP};
+enum { OPT_HELP = 1, TAG_SUP, SV_FILE, LOG};
 
 static const struct option longopts[] = { 
     { "help",                 no_argument,        NULL, OPT_HELP },
     { "snp-file",             required_argument,  NULL, 's' },
     { "bam-file",             required_argument,  NULL, 'b' },
     { "tagSupplementary",     no_argument,        NULL, TAG_SUP },
+    { "sv-file",              required_argument,  NULL, SV_FILE },
     { "out-prefix",           required_argument,  NULL, 'o' },
     { "threads",              required_argument,  NULL, 't' },
     { "qualityThreshold",     required_argument,  NULL, 'q' },
     { "percentageThreshold",  required_argument,  NULL, 'p' },
+    { "log",                  no_argument,        NULL, LOG },
     { NULL, 0, NULL, 0 }
 };
 
@@ -44,9 +47,11 @@ namespace opt
     static int qualityThreshold = 20;
     static double percentageThreshold = 0.6;
     static std::string snpFile="";
+    static std::string svFile="";
     static std::string bamFile="";
     static std::string resultPrefix="result";
     static bool tagSupplementary = false;
+    static bool writeReadLog = false;
 }
 
 void HaplotagOptions(int argc, char** argv)
@@ -65,8 +70,9 @@ void HaplotagOptions(int argc, char** argv)
         case 'o': arg >> opt::resultPrefix; break;
         case 'q': arg >> opt::qualityThreshold; break;
         case 'p': arg >> opt::percentageThreshold; break;
-        case TAG_SUP:
-             opt::tagSupplementary = true;
+        case SV_FILE: arg >> opt::svFile; break;
+        case TAG_SUP: opt::tagSupplementary = true; break;
+        case LOG: opt::writeReadLog = true; break;
         case OPT_HELP:
             std::cout << CORRECT_USAGE_MESSAGE;
             exit(EXIT_SUCCESS);
@@ -91,6 +97,16 @@ void HaplotagOptions(int argc, char** argv)
     else{
         std::cerr << SUBPROGRAM ": missing SNP file.\n";
         die = true;
+    }
+    
+    if( opt::svFile != "")
+    {
+        std::ifstream openFile( opt::svFile.c_str() );
+        if( !openFile.is_open() )
+        {
+            std::cerr<< "File " << opt::svFile << " not exist.\n\n";
+            die = true;
+        }
     }
     
     if( opt::bamFile != "")
@@ -138,10 +154,12 @@ int HaplotagMain(int argc, char** argv)
     ecParams.numThreads=opt::numThreads;
     ecParams.qualityThreshold=opt::qualityThreshold;
     ecParams.snpFile=opt::snpFile;
+    ecParams.svFile=opt::svFile;
     ecParams.bamFile=opt::bamFile;
     ecParams.resultPrefix=opt::resultPrefix;
     ecParams.tagSupplementary=opt::tagSupplementary;
     ecParams.percentageThreshold=opt::percentageThreshold;
+    ecParams.writeReadLog=opt::writeReadLog;
 
     HaplotagProcess processor(ecParams);
 

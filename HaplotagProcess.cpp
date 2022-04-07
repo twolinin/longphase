@@ -12,7 +12,7 @@ void HaplotagProcess::variantParser(std::string variantFile){
         unCompressParser(variantFile);
     }
     else{
-        std::cerr<<"not vcf file. please check filename extension\n";
+        std::cerr<<"file: "<< variantFile << "\nnot vcf file. please check filename extension\n";
         exit(EXIT_FAILURE);
     }
     return;
@@ -78,7 +78,7 @@ void HaplotagProcess::unCompressParser(std::string &variantFile){
 }
 
 void HaplotagProcess::parserProcess(std::string &input){
-    if( input.find("#")!= std::string::npos){
+    if( input.find("#")!= std::string::npos && !parseSVFile ){
         if( input.find("contig=")!= std::string::npos ){
             int id_start  = input.find("ID=")+3;
             int id_end    = input.find(",length=");
@@ -165,38 +165,74 @@ void HaplotagProcess::parserProcess(std::string &input){
                 psValue = fields[9].substr(ps_start, fields[9].length() - ps_start);
             }
             
-            RefAlt tmp;
-            tmp.Ref = fields[3]; 
-            tmp.Alt = fields[4];
+            // snp file
+            if( !parseSVFile ){
+                RefAlt tmp;
+                tmp.Ref = fields[3]; 
+                tmp.Alt = fields[4];
 
-            chrVariant[chr][pos]=tmp;
-            
-            if(integerPS){
-                chrVariantPS[chr][pos]=std::stoi(psValue);
-            }
-            else{
-                std::map<std::string, int>::iterator psIter = psIndex.find(psValue);
+                chrVariant[chr][pos]=tmp;
                 
-                if( psIter == psIndex.end() ){
-                    psIndex[psValue] = psIndex.size();
+                if(integerPS){
+                    chrVariantPS[chr][pos]=std::stoi(psValue);
                 }
-                chrVariantPS[chr][pos]=psIndex[psValue];
+                else{
+                    std::map<std::string, int>::iterator psIter = psIndex.find(psValue);
+                    
+                    if( psIter == psIndex.end() ){
+                        psIndex[psValue] = psIndex.size();
+                    }
+                    chrVariantPS[chr][pos]=psIndex[psValue];
+                }
+                
+                // record haplotype allele
+                if( fields[9][modifu_start] == '0' && fields[9][modifu_start+2] == '1' ){
+                    chrVariantHP1[chr][pos]=fields[3];
+                    chrVariantHP2[chr][pos]=fields[4];
+                }
+                else if( fields[9][modifu_start] == '1' && fields[9][modifu_start+2] == '0' ){
+                    chrVariantHP1[chr][pos]=fields[4];
+                    chrVariantHP2[chr][pos]=fields[3];
+                }
             }
-            
-            if( fields[9][modifu_start] == '0' && fields[9][modifu_start+2] == '1' ){
-                chrVariantHP1[chr][pos]=fields[3];
-                chrVariantHP2[chr][pos]=fields[4];
-            }
-            else if( fields[9][modifu_start] == '1' && fields[9][modifu_start+2] == '0' ){
-                chrVariantHP1[chr][pos]=fields[4];
-                chrVariantHP2[chr][pos]=fields[3];
+            // sv file
+            if( parseSVFile ){
+                // get read INFO
+                int read_pos = fields[7].find("RNAMES=");
+                read_pos = fields[7].find("=",read_pos);
+                read_pos++;
+                        
+                int next_field = fields[7].find(";",read_pos);
+                std::string totalRead = fields[7].substr(read_pos,next_field-read_pos);
+                std::stringstream totalReadStream(totalRead);
+                
+                int svHaplotype;
+                // In which haplotype does SV occur
+                if( fields[9][modifu_start] == '0' && fields[9][modifu_start+2] == '1' ){
+                    svHaplotype = 1;
+                }
+                else if( fields[9][modifu_start] == '1' && fields[9][modifu_start+2] == '0' ){
+                    svHaplotype = 0;
+                }
+                
+                std::string read;
+                while(std::getline(totalReadStream, read, ','))
+                {
+                   auto readIter = readSVHapCount.find(read);
+                   if(readIter==readSVHapCount.end()){
+                       readSVHapCount[read][0]=0;
+                       readSVHapCount[read][1]=0;
+                   }
+                   readSVHapCount[read][svHaplotype]++;
+                }
+                
             }
         }
     }
 }
 
 void HaplotagProcess::tagRead(HaplotagParameters &params){
-
+    
     // input file management
     std::string openBamFile = params.bamFile;
     // open bam file
@@ -225,7 +261,36 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
         std::cerr<<"ERROR: Cannot open index for bam file\n";
         exit(1);
     }
-         
+
+    // write tag read detail information
+    std::ofstream *tagResult=NULL;
+    if(params.writeReadLog){
+        tagResult=new std::ofstream(params.resultPrefix+".out");
+        if(!tagResult->is_open()){
+            std::cerr<< "Fail to open write file: " << params.resultPrefix+".out" << "\n";
+            exit(1);
+        }
+        else{
+            (*tagResult) << "##snpFile:"             << params.snpFile             << "\n";
+            (*tagResult) << "##svFile:"              << params.svFile              << "\n";
+            (*tagResult) << "##bamFile:"             << params.bamFile             << "\n";
+            (*tagResult) << "##resultPrefix:"        << params.resultPrefix        << "\n";
+            (*tagResult) << "##numThreads:"          << params.numThreads          << "\n";
+            (*tagResult) << "##qualityThreshold:"    << params.qualityThreshold    << "\n";
+            (*tagResult) << "##percentageThreshold:" << params.percentageThreshold << "\n";
+            (*tagResult) << "#tagSupplementary:"     << params.tagSupplementary    << "\n";
+            (*tagResult) << "#Read\t" 
+                      << "Chr\t"
+                      << "ReadStart\t"
+                      << "Confidnet(%)\t"
+                      << "Haplotype\t"
+                      << "TotalAllele\t"
+                      << "HP1Allele\t"
+                      << "HP2Allele\t"
+                      << "(Variant,HP)\n";
+                      
+        }
+    }     
     // init data structure and get core n
     htsThreadPool threadPool = {NULL, 0};
     // creat thread pool
@@ -335,7 +400,7 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
                 totalUnTagCuonnt++;
             }
             else if(tmp.refStart <= (*last).first){
-                int haplotype = judgeHaplotype(tmp, chr, params.percentageThreshold/*, chr_reference*/);
+                int haplotype = judgeHaplotype(tmp, chr, params.percentageThreshold, tagResult);
                 
                 initFlag(aln, "HP");
                 initFlag(aln, "PS");
@@ -379,12 +444,12 @@ void HaplotagProcess::initFlag(bam1_t *aln, std::string flag){
     return;
 }
 
-int HaplotagProcess::judgeHaplotype(Alignment align, std::string chrName, double percentageThreshold/*, std::string &ref_string*/){
+int HaplotagProcess::judgeHaplotype(Alignment align, std::string chrName, double percentageThreshold, std::ofstream *tagResult){
 
     int hp1Count = 0;
     int hp2Count = 0;
-    //debug
-    //std::map<int,int> tmp;
+    //record variants on this read
+    std::map<int,int> variants;
 
     // Skip variants that are to the left of this read
     while( firstVariantIter != currentVariants.end() && (*firstVariantIter).first < align.refStart )
@@ -445,13 +510,11 @@ int HaplotagProcess::judgeHaplotype(Alignment align, std::string chrName, double
                         else{
                             if( base == chrVariantHP1[chrName][(*currentVariantIter).first]){
                                 hp1Count++;
-                                //debug
-                                //tmp[(*currentVariantIter).first]=0;
+                                variants[(*currentVariantIter).first]=0;
                             }
                             if( base == chrVariantHP2[chrName][(*currentVariantIter).first]){
                                 hp2Count++;
-                                //debug
-                                //tmp[(*currentVariantIter).first]=1;
+                                variants[(*currentVariantIter).first]=1;
                             }
                         }
                     }
@@ -490,6 +553,12 @@ int HaplotagProcess::judgeHaplotype(Alignment align, std::string chrName, double
     
     double min,max;
     
+    auto readIter = readSVHapCount.find(align.qname);
+    if( readIter != readSVHapCount.end() ){
+        hp1Count += readSVHapCount[align.qname][0];
+        hp2Count += readSVHapCount[align.qname][1];
+    }
+    
     if(hp1Count > hp2Count){
         min = hp2Count;
         max = hp1Count;
@@ -498,38 +567,52 @@ int HaplotagProcess::judgeHaplotype(Alignment align, std::string chrName, double
        min = hp1Count;
        max = hp2Count;
     }
-    /*    
-        //debug
-        std::cout<< align.qname << "\t" << align.chr << "\t" << align.refStart << "\t" << max/(max+min) << "\t" << hp1Count+hp2Count << "\t" << hp1Count << "\t" << hp2Count  << "\t";
-        for(auto v : tmp ){
-            std::cout<< " " << v.first << "," << v.second ;
-        }
-         std::cout<< "\n";  
-    */     
+
+    int hpResult = 0;
     if( max/(max+min) < percentageThreshold){
-        
-        return 0;
+        // no tag
     }
     else{
+        if(hp1Count > hp2Count){
+            hpResult = 1;
+        }
+        if(hp1Count < hp2Count){
+            hpResult = 2;
+        }
     }
     
-    if(hp1Count > hp2Count){
-        return 1;
+    if(tagResult!=NULL){
+        //write tag log file
+        std::string hpResultStr = ((hpResult == 0 )? "." : std::to_string(hpResult) );
+        (*tagResult)<< align.qname       << "\t" 
+                 << align.chr         << "\t" 
+                 << align.refStart    << "\t" 
+                 << max/(max+min)     << "\t" 
+                 << hpResultStr       << "\t"
+                 << hp1Count+hp2Count << "\t" 
+                 << hp1Count          << "\t" 
+                 << hp2Count          << "\t";
+        // loop each variant         
+        for(auto v : variants ){
+            (*tagResult)<< " " << v.first << "," << v.second ;
+        }
+        (*tagResult)<< "\n";  
     }
-    if(hp1Count < hp2Count){
-        return 2;
-    }
-    return 0;
+    
+    return hpResult;
 }
 
 
 HaplotagProcess::HaplotagProcess(HaplotagParameters params):
 totalAlignment(0),totalSupplementary(0),totalSecondary(0),totalUnmapped(0),totalTagCuonnt(0),totalUnTagCuonnt(0),processBegin(time(NULL)),integerPS(false)
 {
-    std::cerr<< "phased VCF file:   " << params.snpFile             << "\n";
+    std::cerr<< "phased SNP file:   " << params.snpFile             << "\n";
+    std::cerr<< "phased SV file:    " << params.svFile              << "\n";
     std::cerr<< "input bam file:    " << params.bamFile             << "\n";
     std::cerr<< "output bam file:   " << params.resultPrefix+".bam" << "\n";
     std::cerr<< "number of threads: " << params.numThreads          << "\n";
+    std::cerr<< "write log file:    " << (params.writeReadLog ? "true" : "false") << "\n";
+    std::cerr<< "log file:          " << (params.writeReadLog ? (params.resultPrefix+".out") : "") << "\n";
     std::cerr<< "-------------------------------------------\n";
     std::cerr<< "filter mapping quality below:  " << params.qualityThreshold    << "\n";
     std::cerr<< "percentage threshold:          " << params.percentageThreshold << "\n";
@@ -538,9 +621,19 @@ totalAlignment(0),totalSupplementary(0),totalSecondary(0),totalUnmapped(0),total
 
     // load SNP vcf file
     std::time_t begin = time(NULL);
-    std::cerr<< "parsing VCF ... ";
+    std::cerr<< "parsing SNP VCF ... ";
+    parseSVFile = false;
     variantParser(params.snpFile);
     std::cerr<< difftime(time(NULL), begin) << "s\n";
+
+    // load SV vcf file
+    if(params.svFile!=""){
+        begin = time(NULL);
+        std::cerr<< "parsing SV VCF ...\n";
+        parseSVFile = true;
+        variantParser(params.svFile);
+        std::cerr<< difftime(time(NULL), begin) << "s\n";    
+    }
 
     // tag read
     begin = time(NULL);

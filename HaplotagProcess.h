@@ -13,11 +13,12 @@ struct HaplotagParameters
     double percentageThreshold;
     
     std::string snpFile;
+    std::string svFile;
     std::string bamFile;
     std::string resultPrefix;
     
     bool tagSupplementary;
-
+    bool writeReadLog;
 };
 
 class HaplotagProcess
@@ -43,10 +44,12 @@ class HaplotagProcess
 
     std::map<int, RefAlt> currentVariants;
     std::map<int, RefAlt>::iterator firstVariantIter;
+    // The number of SVs occurring on different haplotypes in a read
+    std::map<std::string, std::map<int, int> > readSVHapCount;
 
     void initFlag(bam1_t *aln, std::string flag);
     
-    int judgeHaplotype(Alignment align, std::string chrName, double percentageThreshold);
+    int judgeHaplotype(Alignment align, std::string chrName, double percentageThreshold, std::ofstream *tagResult);
     
     int totalAlignment;
     int totalSupplementary;
@@ -57,6 +60,7 @@ class HaplotagProcess
     
     std::time_t processBegin;
     bool integerPS;
+    bool parseSVFile;
     
     public:
         HaplotagProcess(HaplotagParameters params);
