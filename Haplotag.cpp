@@ -14,12 +14,8 @@ static const char *CORRECT_USAGE_MESSAGE =
 "      -b, --bam-file=NAME             input bam file.\n"
 "optional arguments:\n"
 "      --tagSupplementary              tag supplementary alignment. default:false\n"
-<<<<<<< HEAD
 "      --sv-file=NAME                  input phased SV vcf file.\n"
 "      -q, --qualityThreshold=Num      not tag alignment if the mapping quality less than threshold. default:0\n"
-=======
-"      -q, --qualityThreshold=Num      not tag alignment if the mapping quality less than threshold. default:20\n"
->>>>>>> fa0a7136c89f71a3f1f03274004475c289cc2e61
 "      -p, --percentageThreshold=Num   the alignment will be tagged according to the haplotype corresponding to most alleles.\n"
 "                                      if the alignment has no obvious corresponding haplotype, it will not be tagged. default:0.6\n"
 "      -t, --threads=Num               number of thread. default:1\n"
