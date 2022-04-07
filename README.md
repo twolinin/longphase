@@ -22,7 +22,7 @@ LongPhase is an ultra-fast program for simultaneously co-phasing SNPs and SVs by
 - [Contact](#contact)
 ---
 ## Installation
-You are recommended to download a [linux 64bit binary release](https://github.com/twolinin/longphase/raw/1.0/longphase_linux-x64.tar.xz) without compilation. 
+You are recommended to download a [linux 64bit binary release](https://github.com/twolinin/longphase/releases/download/v1.1/longphase_linux-x64.tar.xz) without compilation. 
 
 ```
 wget https://github.com/twolinin/longphase/releases/download/v1.1/longphase_linux-x64.tar.xz
