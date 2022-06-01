@@ -91,7 +91,7 @@ void HaplotagProcess::parserProcess(std::string &input){
             chrVec.push_back(chr);
             chrLength[chr]=chrLen;
         }
-        if( input.find("PS")!= std::string::npos ){
+        if( input.find("ID=PS")!= std::string::npos ){
             if( input.find("Type=Integer")!= std::string::npos ){
                 integerPS = true;
             }

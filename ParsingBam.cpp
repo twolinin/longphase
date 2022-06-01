@@ -397,6 +397,7 @@ void VariantParser::filterSNP(std::string chr, std::vector<ReadVariant> &readVar
     
     // pos, <allele, <strand, True>
     std::map<int, std::map<int, std::map<int, bool> > > posAlleleStrand;
+    //std::map<int, int> snpDepth;
     std::map< int, bool > methylation;
     
     // iter all variant, record the strand contained in each SNP
@@ -404,16 +405,20 @@ void VariantParser::filterSNP(std::string chr, std::vector<ReadVariant> &readVar
         // tag allele on forward or reverse strand
         for(auto variantIter : readSNPVecIter.variantVec ){
             posAlleleStrand[variantIter.position][variantIter.allele][readSNPVecIter.is_reverse] = true;
+            //snpDepth[variantIter.position]++;
         }
     }
     // iter all SNP, both alleles that require SNP need to appear in the two strand
     for(auto pos: posAlleleStrand){
+        //if(snpDepth[pos.first]<=15)
+        //    continue;
+        
         // this position contain two allele, REF allele appear in the two strand, ALT allele appear in the two strand
         if(pos.second.size() == 2 && pos.second[0].size() == 2 && pos.second[1].size() == 2 ){
             // high confident SNP
         }
         else{
-            methylation[pos.first] = true;
+            //methylation[pos.first] = true;
         }
     }
 
@@ -1130,7 +1135,11 @@ void BamParser::get_snp(Alignment align, std::vector<ReadVariant> &readVariantVe
                     int refAlleleLen = (*currentVariantIter).second.Ref.length();
                     int altAlleleLen = (*currentVariantIter).second.Alt.length();
                     int offset = (*currentVariantIter).first - ref_pos;
-
+                    
+                    if( query_pos + offset + 1 > int(qseq.length()) ){
+                        return;
+                    }
+                    
                     std::string base = qseq.substr(query_pos + offset, 1);
                     
                     int allele = -1;
@@ -1183,6 +1192,9 @@ void BamParser::get_snp(Alignment align, std::vector<ReadVariant> &readVariantVe
                             int refAlleleLen = (*currentVariantIter).second.Ref.length();
                             int altAlleleLen = (*currentVariantIter).second.Alt.length();
                             
+                            if( query_pos + 1 > int(qseq.length()) ){
+                                return;
+                            }
                             // get the next match
                             std::string base = qseq.substr(query_pos , 1);
 
