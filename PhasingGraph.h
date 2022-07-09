@@ -32,6 +32,9 @@ class SubEdge{
         
         int getQuality(PosAllele targetPos);
         int getAvgQuality(PosAllele targetPos);
+        int getRefReadCount(int targetPos);
+        int getAltReadCount(int targetPos);
+        
         void addSubEdge(int currentQuality, Variant connectNode, std::string readName);
         std::vector<std::string> showEdge(std::string message);
         std::pair<int,int> BestPair(int targetPos);
@@ -63,6 +66,8 @@ class VairiantGrpah{
     private:
         PhasingParameters *params;
         std::string *ref;
+        std::vector<std::string> dotResult;
+        std::vector<ReadVariant> *readVariant;
         
         // By default, a Map in C++ is sorted in increasing order based on its key.
         // position, edge
@@ -84,25 +89,17 @@ class VairiantGrpah{
         std::map<PosAllele,int> subNodeHP;
         // store each block and containing positions
         std::map<int,std::vector<int> >  blockVec;
-
-        // homopolymer map
-        std::map<int,bool> homopolymerMap;
-    
-        // disjoint path
-        void initialDisjointPath();
+        
         // block phasing
         std::map<std::string,int> getBlockRead(std::pair<int,std::vector<int> > currentBlockVec, std::map<std::string,int> &readQuality, BlockRead &totalRead , int sampleNum);
         bool connectBlockByCommonRead(int nextBlcok, double diffRatioThreshold);
-        // connect block by total quality
-        void checkTotalQuality();
-        
-        void checkAverageQuality(double diffRatioThreshold);
-        
-        void checkDisjointPath(double diffRatioThreshold);
-        
+
         // produce PS tag and determine phased GT tag
         void findResultPath();
+        
+        void readTest();
 
+        void initialResult();
 
     public:
     
