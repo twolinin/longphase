@@ -1,7 +1,7 @@
 /// @file htslib/hts.h
 /// Format-neutral I/O, indexing, and iterator API functions.
 /*
-    Copyright (C) 2012-2021 Genome Research Ltd.
+    Copyright (C) 2012-2022 Genome Research Ltd.
     Copyright (C) 2010, 2012 Broad Institute.
     Portions copyright (C) 2003-2006, 2008-2010 by Heng Li <lh3@live.co.uk>
 
@@ -205,11 +205,13 @@ enum htsExactFormat {
     empty_format,  // File is empty (or empty after decompression)
     fasta_format, fastq_format, fai_format, fqi_format,
     hts_crypt4gh_format,
+    d4_format,
     format_maximum = 32767
 };
 
 enum htsCompression {
     no_compression, gzip, bgzf, custom, bzip2_compression, razf_compression,
+    xz_compression, zstd_compression,
     compression_maximum = 32767
 };
 
@@ -359,6 +361,11 @@ enum hts_fmt_option {
     // Two character string.
     // Barcode aux tag for CASAVA; defaults to "BC".
     FASTQ_OPT_BARCODE,
+
+    // Process SRA and ENA read names which pointlessly move the original
+    // name to the second field and insert a constructed <run>.<number>
+    // name in its place.
+    FASTQ_OPT_NAME2,
 };
 
 // Profile options for encoding; primarily used at present in CRAM
@@ -449,16 +456,19 @@ The input character may be either an IUPAC ambiguity code, '=' for 0, or
 '0'/'1'/'2'/'3' for a result of 1/2/4/8.  The result is encoded as 1/2/4/8
 for A/C/G/T or combinations of these bits for ambiguous bases.
 */
+HTSLIB_EXPORT
 extern const unsigned char seq_nt16_table[256];
 
 /*! @abstract Table for converting a 4-bit encoded nucleotide to an IUPAC
 ambiguity code letter (or '=' when given 0).
 */
+HTSLIB_EXPORT
 extern const char seq_nt16_str[];
 
 /*! @abstract Table for converting a 4-bit encoded nucleotide to about 2 bits.
 Returns 0/1/2/3 for 1/2/4/8 (i.e., A/C/G/T), or 4 otherwise (0 or ambiguous).
 */
+HTSLIB_EXPORT
 extern const int seq_nt16_int[];
 
 /*!
@@ -479,7 +489,7 @@ const char *hts_version(void);
 // Immediately after release, bump ZZ to 90 to distinguish in-development
 // Git repository builds from the release; you may wish to increment this
 // further when significant features are merged.
-#define HTS_VERSION 101300
+#define HTS_VERSION 101600
 
 /*! @abstract Introspection on the features enabled in htslib
  *
@@ -527,9 +537,28 @@ const char *hts_feature_string(void);
   @param fp    File opened for reading, positioned at the beginning
   @param fmt   Format structure that will be filled out on return
   @return      0 for success, or negative if an error occurred.
+
+  Equivalent to hts_detect_format2(fp, NULL, fmt).
 */
 HTSLIB_EXPORT
 int hts_detect_format(struct hFILE *fp, htsFormat *fmt);
+
+/*!
+  @abstract    Determine format primarily by peeking at the start of a file
+  @param fp    File opened for reading, positioned at the beginning
+  @param fname Name of the file, or NULL if not available
+  @param fmt   Format structure that will be filled out on return
+  @return      0 for success, or negative if an error occurred.
+  @since       1.15
+
+Some formats are only recognised if the filename is available and has the
+expected extension, as otherwise more generic files may be misrecognised.
+In particular:
+ - FASTA/Q indexes must have .fai/.fqi extensions; without this requirement,
+   some similar BED files would be misrecognised as indexes.
+*/
+HTSLIB_EXPORT
+int hts_detect_format2(struct hFILE *fp, const char *fname, htsFormat *fmt);
 
 /*!
   @abstract    Get a human-readable description of the file format
@@ -600,6 +629,15 @@ HTSLIB_EXPORT
 htsFile *hts_hopen(struct hFILE *fp, const char *fn, const char *mode);
 
 /*!
+  @abstract  For output streams, flush any buffered data
+  @param fp  The file handle to be flushed
+  @return    0 for success, or negative if an error occurred.
+  @since     1.14
+*/
+HTSLIB_EXPORT
+int hts_flush(htsFile *fp);
+
+/*!
   @abstract  Close a file handle, flushing buffered data for output streams
   @param fp  The file handle to be closed
   @return    0 for success, or negative if an error occurred.
@@ -638,7 +676,7 @@ int hts_set_opt(htsFile *fp, enum hts_fmt_option opt, ...);
   @param fp         The file handle
   @param delimiter  Unused, but must be '\n' (or KS_SEP_LINE)
   @param str        The line (not including the terminator) is written here
-  @return           Length of the string read;
+  @return           Length of the string read (capped at INT_MAX);
                     -1 on end-of-file; <= -2 on error
 */
 HTSLIB_EXPORT
@@ -1102,10 +1140,26 @@ int hts_idx_nseq(const hts_idx_t *idx);
     @param strend  If non-NULL, set on return to point to the first character
                    in @a str after those forming the parsed number
     @param flags   Or'ed-together combination of HTS_PARSE_* flags
-    @return  Converted value of the parsed number.
+    @return  Integer value of the parsed number, or 0 if no valid number
 
-    When @a strend is NULL, a warning will be printed (if hts_verbose is HTS_LOG_WARNING
-    or more) if there are any trailing characters after the number.
+    The input string is parsed as: optional whitespace; an optional '+' or
+    '-' sign; decimal digits possibly including ',' characters (if @a flags
+    includes HTS_PARSE_THOUSANDS_SEP) and a '.' decimal point; and an optional
+    case-insensitive suffix, which may be either 'k', 'M', 'G', or scientific
+    notation consisting of 'e'/'E' followed by an optional '+' or '-' sign and
+    decimal digits. To be considered a valid numeric value, the main part (not
+    including any suffix or scientific notation) must contain at least one
+    digit (either before or after the decimal point).
+
+    When @a strend is NULL, @a str is expected to contain only (optional
+    whitespace followed by) the numeric value. A warning will be printed
+    (if hts_verbose is HTS_LOG_WARNING or more) if no valid parsable number
+    is found or if there are any unused characters after the number.
+
+    When @a strend is non-NULL, @a str starts with (optional whitespace
+    followed by) the numeric value. On return, @a strend is set to point
+    to the first unused character after the numeric value, or to @a str
+    if no valid parsable number is found.
 */
 HTSLIB_EXPORT
 long long hts_parse_decimal(const char *str, char **strend, int flags);

@@ -1,7 +1,7 @@
 /* The MIT License
 
    Copyright (C) 2011 by Attractive Chaos <attractor@live.co.uk>
-   Copyright (C) 2013-2014, 2016, 2018-2020 Genome Research Ltd.
+   Copyright (C) 2013-2014, 2016, 2018-2020, 2022 Genome Research Ltd.
 
    Permission is hereby granted, free of charge, to any person obtaining
    a copy of this software and associated documentation files (the
@@ -53,6 +53,13 @@
 #if defined __GNUC__ && (__GNUC__ > 3 || (__GNUC__ == 3 && __GNUC_MINOR__ >= 4))
 #define HAVE___BUILTIN_CLZ 1
 #endif
+#endif
+
+// Ensure ssize_t exists within this header. All #includes must precede this,
+// and ssize_t must be undefined again at the end of this header.
+#if defined _MSC_VER && defined _INTPTR_T_DEFINED && !defined _SSIZE_T_DEFINED && !defined ssize_t
+#define HTSLIB_SSIZE_T
+#define ssize_t intptr_t
 #endif
 
 /* kstring_t is a simple non-opaque type whose fields are likely to be
@@ -395,5 +402,10 @@ static inline int *ksplit(kstring_t *s, int delimiter, int *n)
 	*n = ksplit_core(s->s, delimiter, &max, &offsets);
 	return offsets;
 }
+
+#ifdef HTSLIB_SSIZE_T
+#undef HTSLIB_SSIZE_T
+#undef ssize_t
+#endif
 
 #endif
