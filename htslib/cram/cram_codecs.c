@@ -2030,10 +2030,10 @@ static int cram_xrle_decode_expand_char(cram_slice *slice, cram_codec *c) {
     int nb = var_get_u64(len_dat, len_dat+len_sz, &out_sz);
     if (!(b->data = malloc(out_sz)))
         return -1;
-    hts_rle_decode(lit_dat, lit_sz,
-                   len_dat+nb, len_sz-nb,
-                   rle_syms, rle_nsyms,
-                   b->data, &out_sz);
+    rle_decode(lit_dat, lit_sz,
+               len_dat+nb, len_sz-nb,
+               rle_syms, rle_nsyms,
+               b->data, &out_sz);
     b->uncomp_size = out_sz;
 
     return 0;
@@ -2200,10 +2200,10 @@ int cram_xrle_encode_flush(cram_codec *c) {
 
     int nb = var_put_u64(out_len, NULL, c->u.e_xrle.to_flush_size);
 
-    out_lit = hts_rle_encode((uint8_t *)c->u.e_xrle.to_flush, c->u.e_xrle.to_flush_size,
-                             out_len+nb, &out_len_size,
-                             rle_syms, &rle_nsyms,
-                             NULL, &out_lit_size);
+    out_lit = rle_encode((uint8_t *)c->u.e_xrle.to_flush, c->u.e_xrle.to_flush_size,
+                         out_len+nb, &out_len_size,
+                         rle_syms, &rle_nsyms,
+                         NULL, &out_lit_size);
     out_len_size += nb;
 
 
@@ -3069,7 +3069,7 @@ cram_codec *cram_huffman_encode_init(cram_stats *st,
                                      int version, varint_vec *vv) {
     int *vals = NULL, *freqs = NULL, *lens = NULL, code, len;
     int *new_vals, *new_freqs;
-    int i, max_val = 0, min_val = INT_MAX, k;
+    int i, ntot = 0, max_val = 0, min_val = INT_MAX, k;
     size_t nvals, vals_alloc = 0;
     cram_codec *c;
     cram_huffman_code *codes;
@@ -3095,6 +3095,7 @@ cram_codec *cram_huffman_encode_init(cram_stats *st,
         vals[nvals] = i;
         freqs[nvals] = st->freqs[i];
         assert(st->freqs[i] > 0);
+        ntot += freqs[nvals];
         if (max_val < i) max_val = i;
         if (min_val > i) min_val = i;
         nvals++;
@@ -3117,6 +3118,7 @@ cram_codec *cram_huffman_encode_init(cram_stats *st,
             vals[nvals]= kh_key(st->h, k);
             freqs[nvals] = kh_val(st->h, k);
             assert(freqs[nvals] > 0);
+            ntot += freqs[nvals];
             if (max_val < i) max_val = i;
             if (min_val > i) min_val = i;
             nvals++;

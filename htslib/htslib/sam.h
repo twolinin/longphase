@@ -1,7 +1,7 @@
 /// @file htslib/sam.h
 /// High-level SAM/BAM/CRAM sequence file operations.
 /*
-    Copyright (C) 2008, 2009, 2013-2022 Genome Research Ltd.
+    Copyright (C) 2008, 2009, 2013-2021 Genome Research Ltd.
     Copyright (C) 2010, 2012, 2013 Broad Institute.
 
     Author: Heng Li <lh3@sanger.ac.uk>
@@ -32,13 +32,6 @@ DEALINGS IN THE SOFTWARE.  */
 #include <sys/types.h>
 #include "hts.h"
 #include "hts_endian.h"
-
-// Ensure ssize_t exists within this header. All #includes must precede this,
-// and ssize_t must be undefined again at the end of this header.
-#if defined _MSC_VER && defined _INTPTR_T_DEFINED && !defined _SSIZE_T_DEFINED && !defined ssize_t
-#define HTSLIB_SSIZE_T
-#define ssize_t intptr_t
-#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -118,7 +111,6 @@ typedef sam_hdr_t bam_hdr_t;
 Result is operator code or -1. Be sure to cast the index if it is a plain char:
     int op = bam_cigar_table[(unsigned char) ch];
 */
-HTSLIB_EXPORT
 extern const int8_t bam_cigar_table[256];
 
 #define bam_cigar_op(c) ((c)&BAM_CIGAR_MASK)
@@ -945,12 +937,10 @@ void bam_destroy1(bam1_t *b);
    // ... use data ...
 
  cleanup:
-   if (recs) {
-      for (size_t i = 0; i < nrecs; i++)
-         bam_destroy1(&recs[i]);
-      free(recs);
-   }
+   for (size_t i = 0; i < nrecs; i++)
+     bam_destroy1(i);
    free(buffer);
+   free(recs);
 
    \endcode
 */
@@ -1380,7 +1370,6 @@ const char *sam_parse_region(sam_hdr_t *h, const char *s, int *tid,
 
     #define sam_open(fn, mode) (hts_open((fn), (mode)))
     #define sam_open_format(fn, mode, fmt) (hts_open_format((fn), (mode), (fmt)))
-    #define sam_flush(fp) hts_flush((fp))
     #define sam_close(fp) hts_close(fp)
 
     HTSLIB_EXPORT
@@ -1502,8 +1491,7 @@ static inline const uint8_t *sam_format_aux1(const uint8_t *key,
         ++s;
     } else if (type == 'f') {
         if (end - s >= 4) {
-            // cast to avoid triggering -Wdouble-promotion
-            ksprintf(ks, "f:%g", (double)le_to_float(s));
+            ksprintf(ks, "f:%g", le_to_float(s));
             s += 4;
         } else goto bad_aux;
 
@@ -1525,7 +1513,7 @@ static inline const uint8_t *sam_format_aux1(const uint8_t *key,
         ++s;
     } else if (type == 'B') {
         uint8_t sub_type = *(s++);
-        unsigned sub_type_size;
+        int sub_type_size;
 
         // or externalise sam.c's aux_type2size function?
         switch (sub_type) {
@@ -1548,7 +1536,7 @@ static inline const uint8_t *sam_format_aux1(const uint8_t *key,
             goto bad_aux;
         n = le_to_u32(s);
         s += 4; // now points to the start of the array
-        if ((size_t)(end - s) / sub_type_size < n)
+        if ((end - s) / sub_type_size < n)
             goto bad_aux;
         r |= kputsn_("B:", 2, ks) < 0;
         r |= kputc(sub_type, ks) < 0; // write the type
@@ -1605,8 +1593,7 @@ static inline const uint8_t *sam_format_aux1(const uint8_t *key,
             if (ks_expand(ks, n*8) < 0) goto mem_err;
             for (i = 0; i < n; ++i) {
                 ks->s[ks->l++] = ',';
-                // cast to avoid triggering -Wdouble-promotion
-                r |= kputd((double)le_to_float(s), ks) < 0;
+                r |= kputd(le_to_float(s), ks) < 0;
                 s += 4;
             }
             break;
@@ -1961,13 +1948,10 @@ typedef struct bam_mplp_s *bam_mplp_t;
     /**
      *  bam_plp_constructor() - sets a callback to initialise any per-pileup1_t fields.
      *  @plp:       The bam_plp_t initialised using bam_plp_init.
-     *  @func:      The callback function itself.  When called, it is given
-     *              the data argument (specified in bam_plp_init), the bam
-     *              structure and a pointer to a locally allocated
-     *              bam_pileup_cd union.  This union will also be present in
-     *              each bam_pileup1_t created.
-     *              The callback function should have a negative return
-     *              value to indicate an error. (Similarly for destructor.)
+     *  @func:      The callback function itself.  When called, it is given the
+     *              data argument (specified in bam_plp_init), the bam structure and
+     *              a pointer to a locally allocated bam_pileup_cd union.  This union
+     *              will also be present in each bam_pileup1_t created.
      */
     HTSLIB_EXPORT
     void bam_plp_constructor(bam_plp_t plp,
@@ -1991,36 +1975,6 @@ typedef struct bam_mplp_s *bam_mplp_t;
      */
     HTSLIB_EXPORT
     int bam_plp_insertion(const bam_pileup1_t *p, kstring_t *ins, int *del_len) HTS_RESULT_USED;
-
-
-    /*! @typedef
-     @abstract An opaque type used for caching base modification state between
-     successive calls to bam_mods_* functions.
-    */
-    typedef struct hts_base_mod_state hts_base_mod_state;
-
-    /// Get pileup padded insertion sequence, including base modifications
-    /**
-     * @param p       pileup data
-     * @param m       state data for the base modification finder
-     * @param ins     the kstring where the insertion sequence will be written
-     * @param del_len location for deletion length
-     * @return the number of insertion string on success, with string length
-     *         being accessable via ins->l; -1 on failure.
-     *
-     * Fills out the kstring with the padded insertion sequence for the current
-     * location in 'p'.  If this is not an insertion site, the string is blank.
-     *
-     * The modification state needs to have been previously initialised using
-     * bam_parse_basemod.  It is permitted to be passed in as NULL, in which
-     * case this function outputs identically to bam_plp_insertion.
-     *
-     * If del_len is not NULL, the location pointed to is set to the length of
-     * any deletion immediately following the insertion, or zero if none.
-     */
-    HTSLIB_EXPORT
-    int bam_plp_insertion_mod(const bam_pileup1_t *p, hts_base_mod_state *m,
-                              kstring_t *ins, int *del_len) HTS_RESULT_USED;
 
     /// Create a new bam_mplp_t structure
     /** The struct returned by a successful call should be freed
@@ -2147,176 +2101,8 @@ correct thing to do.  It would be wise to avoid this situation if possible.
 HTSLIB_EXPORT
 int sam_prob_realn(bam1_t *b, const char *ref, hts_pos_t ref_len, int flag);
 
-// ---------------------------
-// Base modification retrieval
-
-/*! @typedef
- @abstract Holds a single base modification.
- @field modified_base     The short base code (m, h, etc) or -ChEBI (negative)
- @field canonical_base    The canonical base referred to in the MM tag.
-                          One of A, C, G, T or N.  Note this may not be the
-                          explicit base recorded in the SEQ column (esp. if N).
- @field stran             0 or 1, indicating + or - strand from MM tag.
- @field qual              Quality code (256*probability), or -1 if unknown
-
- @discussion
- Note this doesn't hold any location data or information on which other
- modifications may be possible at this site.
-*/
-typedef struct hts_base_mod {
-    int modified_base;
-    int canonical_base;
-    int strand;
-    int qual;
-} hts_base_mod;
-
-/// Allocates an hts_base_mode_state.
-/**
- * @return An hts_base_mode_state pointer on success,
- *         NULL on failure.
- *
- * This just allocates the memory.  The initialisation of the contents is
- * done using bam_parse_basemod.  Successive calls may be made to that
- * without the need to free and allocate a new state.
- *
- * The state be destroyed using the hts_base_mode_state_free function.
- */
-HTSLIB_EXPORT
-hts_base_mod_state *hts_base_mod_state_alloc(void);
-
-/// Destroys an  hts_base_mode_state.
-/**
- * @param state    The base modification state pointer.
- *
- * The should have previously been created by hts_base_mode_state_alloc.
- */
-HTSLIB_EXPORT
-void hts_base_mod_state_free(hts_base_mod_state *state);
-
-/// Parses the Mm and Ml tags out of a bam record.
-/**
- * @param b        BAM alignment record
- * @param state    The base modification state pointer.
- * @return 0 on success,
- *         -1 on failure.
- *
- * This fills out the contents of the modification state, resetting the
- * iterator location to the first sequence base.
- */
-HTSLIB_EXPORT
-int bam_parse_basemod(const bam1_t *b, hts_base_mod_state *state);
-
-/// Returns modification status for the next base position in the query seq.
-/**
- * @param b        BAM alignment record
- * @param state    The base modification state pointer.
- * @param mods     A supplied array for returning base modifications
- * @param n_mods   The size of the mods array
- * @return The number of modifications found on success,
- *         -1 on failure.
- *
- * This is intended to be used as an iterator, with one call per location
- * along the query sequence.
- *
- * If no modifications are found, the returned value is zero.
- * If more than n_mods modifications are found, the total found is returned.
- * Note this means the caller needs to check whether this is higher than
- * n_mods.
- */
-HTSLIB_EXPORT
-int bam_mods_at_next_pos(const bam1_t *b, hts_base_mod_state *state,
-                         hts_base_mod *mods, int n_mods);
-
-/// Finds the next location containing base modifications and returns them
-/**
- * @param b        BAM alignment record
- * @param state    The base modification state pointer.
- * @param mods     A supplied array for returning base modifications
- * @param n_mods   The size of the mods array
- * @return The number of modifications found on success,
- *         0 if no more modifications are present,
- *         -1 on failure.
- *
- * Unlike bam_mods_at_next_pos this skips ahead to the next site
- * with modifications.
- *
- * If more than n_mods modifications are found, the total found is returned.
- * Note this means the caller needs to check whether this is higher than
- * n_mods.
- */
-HTSLIB_EXPORT
-int bam_next_basemod(const bam1_t *b, hts_base_mod_state *state,
-                     hts_base_mod *mods, int n_mods, int *pos);
-
-/// Returns modification status for a specific query position.
-/**
- * @param b        BAM alignment record
- * @param state    The base modification state pointer.
- * @param mods     A supplied array for returning base modifications
- * @param n_mods   The size of the mods array
- * @return The number of modifications found on success,
- *         -1 on failure.
- *
- * Note if called multipled times, qpos must be higher than the previous call.
- * Hence this is suitable for use from a pileup iterator.  If more random
- * access is required, bam_parse_basemod must be called each time to reset
- * the state although this has an efficiency cost.
- *
- * If no modifications are found, the returned value is zero.
- * If more than n_mods modifications are found, the total found is returned.
- * Note this means the caller needs to check whether this is higher than
- * n_mods.
- */
-HTSLIB_EXPORT
-int bam_mods_at_qpos(const bam1_t *b, int qpos, hts_base_mod_state *state,
-                     hts_base_mod *mods, int n_mods);
-
-
-/// Returns data about a specific modification type for the alignment record.
-/**
- * @param b          BAM alignment record
- * @param state      The base modification state pointer.
- * @param code       Modification code.  If positive this is a character code,
- *                   if negative it is a -ChEBI code.
- *
- * @param strand     Boolean for top (0) or bottom (1) strand
- * @param implicit   Boolean for whether unlisted positions should be
- *                   implicitly assumed to be unmodified, or require an
- *                   explicit score and should be considered as unknown.
- *                   Returned.
- * @param canonical  Canonical base type associated with this modification
- *                   Returned.
- *
- * @return 0 on success or -1 if not found.  The strand, implicit and canonical
- * fields are filled out if passed in as non-NULL pointers.
- */
-HTSLIB_EXPORT
-int bam_mods_query_type(hts_base_mod_state *state, int code,
-                        int *strand, int *implicit, char *canonical);
-
-/// Returns the list of base modification codes provided for this
-/// alignment record as an array of character codes (+ve) or ChEBI numbers
-/// (negative).
-/*
- * @param b          BAM alignment record
- * @param state      The base modification state pointer.
- * @param ntype      Filled out with the number of array elements returned
- *
- * @return the type array, with *ntype filled out with the size.
- *         The array returned should not be freed.
- *         It is a valid pointer until the state is freed using
- *         hts_base_mod_free().
- */
-HTSLIB_EXPORT
-int *bam_mods_recorded(hts_base_mod_state *state, int *ntype);
-
 #ifdef __cplusplus
 }
-#endif
-
-#ifdef HTSLIB_SSIZE_T
-#undef HTSLIB_SSIZE_T
-#undef ssize_t
 #endif
 
 #endif
