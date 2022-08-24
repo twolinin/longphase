@@ -397,7 +397,6 @@ void VariantParser::filterSNP(std::string chr, std::vector<ReadVariant> &readVar
     
     // pos, <allele, <strand, True>
     std::map<int, std::map<int, std::map<int, bool> > > posAlleleStrand;
-    //std::map<int, int> snpDepth;
     std::map< int, bool > methylation;
     
     // iter all variant, record the strand contained in each SNP
@@ -405,14 +404,10 @@ void VariantParser::filterSNP(std::string chr, std::vector<ReadVariant> &readVar
         // tag allele on forward or reverse strand
         for(auto variantIter : readSNPVecIter.variantVec ){
             posAlleleStrand[variantIter.position][variantIter.allele][readSNPVecIter.is_reverse] = true;
-            //snpDepth[variantIter.position]++;
         }
     }
     // iter all SNP, both alleles that require SNP need to appear in the two strand
     for(auto pos: posAlleleStrand){
-        //if(snpDepth[pos.first]<=15)
-        //    continue;
-        
         // this position contain two allele, REF allele appear in the two strand, ALT allele appear in the two strand
         if(pos.second.size() == 2 && pos.second[0].size() == 2 && pos.second[1].size() == 2 ){
             // high confident SNP
@@ -975,21 +970,17 @@ void BamParser::direct_detect_alleles(int lastSNPPos, PhasingParameters params, 
         tmp.is_reverse = bam_is_rev(aln);
         
         //quality string
-        uint8_t *q = bam_get_seq(aln); 
-        //length of the read
-        uint32_t len = aln->core.l_qseq; 
+        uint8_t *qstring = bam_get_seq(aln); 
         // set string size
-        tmp.qseq = (char *)malloc(len+1);
-        // gets nucleotide id and converts them into IUPAC id.
-        for(unsigned int i=0; i< len ; i++){
-			tmp.qseq[i] = seq_nt16_str[bam_seqi(q,i)]; 
-		}
-
+        tmp.qseq = (char *)malloc(tmp.qlen+1);
         // set string size
-        tmp.quality = (char *)malloc(len+1);
+        tmp.quality = (char *)malloc(tmp.qlen+1);
         uint8_t *quality = bam_get_qual(aln);
-        // get base quality
-        for(unsigned int i=0; i< len ; i++){
+        
+        for(int i=0; i< tmp.qlen ; i++){
+            // gets nucleotide id and converts them into IUPAC id.
+            tmp.qseq[i] = seq_nt16_str[bam_seqi(qstring,i)]; 
+            // get base quality
 			tmp.quality[i] = quality[i];
 		}
  
@@ -1042,7 +1033,7 @@ bool BamParser::continueHomopolimer(int snp_pos, const std::string &ref_string){
     return false;
 }
 
-void BamParser::get_snp(Alignment align, std::vector<ReadVariant> &readVariantVec,const std::string &ref_string, bool isONT){
+void BamParser::get_snp(const Alignment &align, std::vector<ReadVariant> &readVariantVec,const std::string &ref_string, bool isONT){
 
     ReadVariant *tmpReadResult = new ReadVariant();
         (*tmpReadResult).read_name = align.qname;

@@ -126,7 +126,7 @@ class BamParser{
         // SV map and iter
         std::map<int, std::map<std::string ,bool> > currentSV;
         std::map<int, std::map<std::string ,bool> >::iterator firstSVIter;
-        void get_snp(Alignment align, std::vector<ReadVariant> &readVariantVec, const std::string &ref_string, bool isONT);
+        void get_snp(const Alignment &align, std::vector<ReadVariant> &readVariantVec, const std::string &ref_string, bool isONT);
         //int homopolymerLength(int snp_pos, const std::string &ref_string);
         bool continueHomopolimer(int snp_pos, const std::string &ref_string);
         

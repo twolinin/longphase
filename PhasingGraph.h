@@ -97,7 +97,7 @@ class VairiantGrpah{
         // produce PS tag and determine phased GT tag
         void findResultPath();
         
-        void readTest();
+        void readCorrection();
 
         void initialResult();
 
