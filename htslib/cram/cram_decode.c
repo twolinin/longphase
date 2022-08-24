@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2012-2020 Genome Research Ltd.
+Copyright (c) 2012-2020, 2022 Genome Research Ltd.
 Author: James Bonfield <jkb@sanger.ac.uk>
 
 Redistribution and use in source and binary forms, with or without
@@ -668,6 +668,13 @@ int cram_dependent_data_series(cram_fd *fd,
             s->data_series |= CRAM_CF | CRAM_NF;
         if (s->data_series & (CRAM_BA | CRAM_QS | CRAM_BB | CRAM_QQ))
             s->data_series |= CRAM_BF | CRAM_CF | CRAM_RL;
+        if (s->data_series & CRAM_FN) {
+            // The CRAM_FN loop checks for reference length boundaries,
+            // which needs a working seq_pos.  Some fields are fixed size
+            // irrespective of if we decode (BS), but others need to know
+            // the size of the string fetched back (SC, IN, BB).
+            s->data_series |= CRAM_SC | CRAM_IN | CRAM_BB;
+        }
 
         orig_ds = s->data_series;
 
@@ -1770,7 +1777,7 @@ static int cram_decode_seq(cram_fd *fd, cram_container *c, cram_slice *s,
     }
 
     cr->ncigar = ncigar - cr->cigar;
-    cr->aend = ref_pos;
+    cr->aend = ref_pos > cr->apos ? ref_pos : cr->apos;
 
     //printf("2: %.*s %d .. %d\n", cr->name_len, DSTRING_STR(name_ds) + cr->name, cr->apos, ref_pos);
 
@@ -2030,12 +2037,30 @@ static int cram_decode_aux(cram_fd *fd,
             m = map_find(c->comp_hdr->tag_encoding_map, tag_data, id);
             if (!m)
                 return -1;
+
             BLOCK_APPEND(s->aux_blk, (char *)tag_data, 3);
 
             if (!m->codec) return -1;
             r |= m->codec->decode(s, m->codec, blk, (char *)s->aux_blk, &out_sz);
             if (r) break;
             cr->aux_size += out_sz + 3;
+
+            // cF CRAM flags.
+            if (TN[-3]=='c' && TN[-2]=='F' && TN[-1]=='C' && out_sz == 1) {
+                // Remove cF tag
+                uint8_t cF = BLOCK_END(s->aux_blk)[-1];
+                BLOCK_SIZE(s->aux_blk) -= out_sz+3;
+                cr->aux_size -= out_sz+3;
+
+                // bit 1 => don't auto-decode MD.
+                // Pretend MD is present verbatim, so we don't auto-generate
+                if ((cF & 1) && has_MD && *has_MD == 0)
+                    *has_MD = 1;
+
+                // bit 1 => don't auto-decode NM
+                if ((cF & 2) && has_NM && *has_NM == 0)
+                    *has_NM = 1;
+            }
         }
     }
 
@@ -2416,10 +2441,17 @@ int cram_decode_slice(cram_fd *fd, cram_container *c, cram_slice *s,
         if ((!s->ref && s->hdr->ref_base_id < 0)
             || memcmp(digest, s->hdr->md5, 16) != 0) {
             char M[33];
-            hts_log_error("MD5 checksum reference mismatch at #%d:%d-%d",
-                          ref_id, s->ref_start, s->ref_end);
-            hts_log_error("CRAM: %s", md5_print(s->hdr->md5, M));
-            hts_log_error("Ref : %s", md5_print(digest, M));
+            const char *rname = sam_hdr_tid2name(sh, ref_id);
+            if (!rname) rname="?"; // cannot happen normally
+            hts_log_error("MD5 checksum reference mismatch at %s:%d-%d",
+                          rname, s->ref_start, s->ref_end);
+            hts_log_error("CRAM  : %s", md5_print(s->hdr->md5, M));
+            hts_log_error("Ref   : %s", md5_print(digest, M));
+            kstring_t ks = KS_INITIALIZE;
+            if (sam_hdr_find_tag_id(sh, "SQ", "SN", rname, "M5", &ks) == 0)
+                hts_log_error("@SQ M5: %s", ks.s);
+            hts_log_error("Please check the reference given is correct");
+            ks_free(&ks);
             return -1;
         }
     }
@@ -3221,7 +3253,8 @@ static cram_slice *cram_next_slice(cram_fd *fd, cram_container **cp) {
                     }
 
                     // position beyond end of range; bail out
-                    if (c_next->ref_seq_start > fd->range.end) {
+                    if (fd->range.refid != -1 &&
+                        c_next->ref_seq_start > fd->range.end) {
                         cram_free_container(c_next);
                         fd->ctr_mt = NULL;
                         fd->ooc = 1;
@@ -3229,7 +3262,8 @@ static cram_slice *cram_next_slice(cram_fd *fd, cram_container **cp) {
                     }
 
                     // before start of range; skip to next container
-                    if (c_next->ref_seq_start + c_next->ref_seq_span-1 <
+                    if (fd->range.refid != -1 &&
+                        c_next->ref_seq_start + c_next->ref_seq_span-1 <
                         fd->range.start) {
                         c_next->curr_slice_mt = c_next->max_slice;
                         cram_seek(fd, c_next->length, SEEK_CUR);
@@ -3294,7 +3328,8 @@ static cram_slice *cram_next_slice(cram_fd *fd, cram_container **cp) {
                 }
 
                 // position beyond end of range; bail out
-                if (s_next->hdr->ref_seq_start > fd->range.end) {
+                if (fd->range.refid != -1 &&
+                    s_next->hdr->ref_seq_start > fd->range.end) {
                     fd->ooc = 1;
                     cram_free_slice(s_next);
                     c_next->slice = s_next = NULL;
@@ -3302,7 +3337,8 @@ static cram_slice *cram_next_slice(cram_fd *fd, cram_container **cp) {
                 }
 
                 // before start of range; skip to next slice
-                if (s_next->hdr->ref_seq_start + s_next->hdr->ref_seq_span-1 <
+                if (fd->range.refid != -1 &&
+                    s_next->hdr->ref_seq_start + s_next->hdr->ref_seq_span-1 <
                     fd->range.start) {
                     cram_free_slice(s_next);
                     c_next->slice = s_next = NULL;

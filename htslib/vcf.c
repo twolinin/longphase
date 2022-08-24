@@ -1,7 +1,7 @@
 /*  vcf.c -- VCF/BCF API functions.
 
     Copyright (C) 2012, 2013 Broad Institute.
-    Copyright (C) 2012-2021 Genome Research Ltd.
+    Copyright (C) 2012-2022 Genome Research Ltd.
     Portions copyright (C) 2014 Intel Corporation.
 
     Author: Heng Li <lh3@sanger.ac.uk>
@@ -143,21 +143,33 @@ int bcf_hdr_add_sample(bcf_hdr_t *h, const char *s)
     return bcf_hdr_add_sample_len(h, s, 0);
 }
 
-int HTS_RESULT_USED bcf_hdr_parse_sample_line(bcf_hdr_t *h, const char *str)
+int HTS_RESULT_USED bcf_hdr_parse_sample_line(bcf_hdr_t *hdr, const char *str)
 {
-    int ret = 0;
-    int i = 0;
-    const char *p, *q;
-    // add samples
-    for (p = q = str;; ++q) {
-        if ((unsigned char) *q > '\n') continue;
-        if (++i > 9) {
-            if ( bcf_hdr_add_sample_len(h, p, q - p) < 0 ) ret = -1;
-        }
-        if (*q == 0 || *q == '\n' || ret < 0) break;
-        p = q + 1;
+    const char *mandatory = "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO";
+    if ( strncmp(str,mandatory,strlen(mandatory)) )
+    {
+        hts_log_error("Could not parse the \"#CHROM..\" line, either the fields are incorrect or spaces are present instead of tabs:\n\t%s",str);
+        return -1;
     }
 
+    const char *beg = str + strlen(mandatory), *end;
+    if ( !*beg || *beg=='\n' ) return 0;
+    if ( strncmp(beg,"\tFORMAT\t",8) )
+    {
+        hts_log_error("Could not parse the \"#CHROM..\" line, either FORMAT is missing or spaces are present instead of tabs:\n\t%s",str);
+        return -1;
+    }
+    beg += 8;
+
+    int ret = 0;
+    while ( *beg )
+    {
+        end = beg;
+        while ( *end && *end!='\t' && *end!='\n' ) end++;
+        if ( bcf_hdr_add_sample_len(hdr, beg, end-beg) < 0 ) ret = -1;
+        if ( !*end || *end=='\n' || ret<0 ) break;
+        beg = end + 1;
+    }
     return ret;
 }
 
@@ -364,6 +376,126 @@ int bcf_hrec_find_key(bcf_hrec_t *hrec, const char *key)
     return -1;
 }
 
+static void bcf_hrec_set_type(bcf_hrec_t *hrec)
+{
+    if ( !strcmp(hrec->key, "contig") ) hrec->type = BCF_HL_CTG;
+    else if ( !strcmp(hrec->key, "INFO") ) hrec->type = BCF_HL_INFO;
+    else if ( !strcmp(hrec->key, "FILTER") ) hrec->type = BCF_HL_FLT;
+    else if ( !strcmp(hrec->key, "FORMAT") ) hrec->type = BCF_HL_FMT;
+    else if ( hrec->nkeys>0 ) hrec->type = BCF_HL_STR;
+    else hrec->type = BCF_HL_GEN;
+}
+
+
+/**
+    The arrays were generated with
+
+    valid_ctg:
+        perl -le '@v = (split(//,q[!#$%&*+./:;=?@^_|~-]),"a"..."z","A"..."Z","0"..."9"); @a = (0) x 256; foreach $c (@v) { $a[ord($c)] = 1; } print join(", ",@a)' | fold -w 48
+
+    valid_tag:
+        perl -le '@v = (split(//,q[_.]),"a"..."z","A"..."Z","0"..."9"); @a = (0) x 256; foreach $c (@v) { $a[ord($c)] = 1; } print join(", ",@a)' | fold -w 48
+*/
+static const uint8_t valid_ctg[256] =
+{
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 1, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 0, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1,
+    0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+};
+static const uint8_t valid_tag[256] =
+{
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0,
+    0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1,
+    0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+};
+
+/**
+    bcf_hrec_check() - check the validity of structured header lines
+
+    Returns 0 on success or negative value on error.
+
+    Currently the return status is not checked by the caller
+    and only a warning is printed on stderr. This should be improved
+    to propagate the error all the way up to the caller and let it
+    decide what to do: throw an error or proceed anyway.
+ */
+static int bcf_hrec_check(bcf_hrec_t *hrec)
+{
+    int i;
+    bcf_hrec_set_type(hrec);
+
+    if ( hrec->type==BCF_HL_CTG )
+    {
+        i = bcf_hrec_find_key(hrec,"ID");
+        if ( i<0 ) goto err_missing_id;
+        char *val = hrec->vals[i];
+        if ( val[0]=='*' || val[0]=='=' || !valid_ctg[(uint8_t)val[0]] ) goto err_invalid_ctg;
+        while ( *(++val) )
+            if ( !valid_ctg[(uint8_t)*val] ) goto err_invalid_ctg;
+        return 0;
+    }
+    if ( hrec->type==BCF_HL_INFO )
+    {
+        i = bcf_hrec_find_key(hrec,"ID");
+        if ( i<0 ) goto err_missing_id;
+        char *val = hrec->vals[i];
+        if ( !strcmp(val,"1000G") ) return 0;
+        if ( val[0]=='.' || (val[0]>='0' && val[0]<='9') || !valid_tag[(uint8_t)val[0]] ) goto err_invalid_tag;
+        while ( *(++val) )
+            if ( !valid_tag[(uint8_t)*val] ) goto err_invalid_tag;
+        return 0;
+    }
+    if ( hrec->type==BCF_HL_FMT )
+    {
+        i = bcf_hrec_find_key(hrec,"ID");
+        if ( i<0 ) goto err_missing_id;
+        char *val = hrec->vals[i];
+        if ( val[0]=='.' || (val[0]>='0' && val[0]<='9') || !valid_tag[(uint8_t)val[0]] ) goto err_invalid_tag;
+        while ( *(++val) )
+            if ( !valid_tag[(uint8_t)*val] ) goto err_invalid_tag;
+        return 0;
+    }
+    return 0;
+
+  err_missing_id:
+    hts_log_warning("Missing ID attribute in one or more header lines");
+    return -1;
+
+  err_invalid_ctg:
+    hts_log_warning("Invalid contig name: \"%s\"", hrec->vals[i]);
+    return -1;
+
+  err_invalid_tag:
+    hts_log_warning("Invalid tag name: \"%s\"", hrec->vals[i]);
+    return -1;
+}
+
 static inline int is_escaped(const char *min, const char *str)
 {
     int n = 0;
@@ -390,6 +522,7 @@ bcf_hrec_t *bcf_hdr_parse_line(const bcf_hdr_t *h, const char *line, int *len)
     if (!hrec->key) goto fail;
     memcpy(hrec->key,p,n);
     hrec->key[n] = 0;
+    hrec->type = -1;
 
     p = ++q;
     if ( *p!='<' ) // generic field, e.g. ##samtoolsVersion=0.1.18-r579
@@ -471,8 +604,14 @@ bcf_hrec_t *bcf_hdr_parse_line(const bcf_hdr_t *h, const char *line, int *len)
         if (bcf_hrec_set_val(hrec, hrec->nkeys-1, p, r-p, quoted) < 0)
             goto fail;
         if ( quoted && *q==ending ) q++;
-        if ( *q=='>' ) { nopen--; q++; }
+        if ( *q=='>' )
+        {
+            if (nopen) nopen--;     // this can happen with nested angle brackets <>
+            q++;
+        }
     }
+    if ( nopen )
+        hts_log_warning("Incomplete header line, trying to proceed anyway:\n\t[%s]\n\t[%d]",line,q[0]);
 
     // Skip to end of line
     int nonspace = 0;
@@ -543,10 +682,11 @@ static int bcf_hdr_register_hrec(bcf_hdr_t *hdr, bcf_hrec_t *hrec)
     khint_t k;
     char *str = NULL;
 
-    if ( !strcmp(hrec->key, "contig") )
+    bcf_hrec_set_type(hrec);
+
+    if ( hrec->type==BCF_HL_CTG )
     {
         hts_pos_t len = 0;
-        hrec->type = BCF_HL_CTG;
 
         // Get the contig ID ($str) and length ($j)
         i = bcf_hrec_find_key(hrec,"length");
@@ -611,11 +751,8 @@ static int bcf_hdr_register_hrec(bcf_hdr_t *hdr, bcf_hrec_t *hrec)
         return 1;
     }
 
-    if ( !strcmp(hrec->key, "INFO") ) hrec->type = BCF_HL_INFO;
-    else if ( !strcmp(hrec->key, "FILTER") ) hrec->type = BCF_HL_FLT;
-    else if ( !strcmp(hrec->key, "FORMAT") ) hrec->type = BCF_HL_FMT;
-    else if ( hrec->nkeys>0 ) { hrec->type = BCF_HL_STR; return 1; }
-    else return 0;
+    if ( hrec->type==BCF_HL_STR ) return 1;
+    if ( hrec->type!=BCF_HL_INFO && hrec->type!=BCF_HL_FLT && hrec->type!=BCF_HL_FMT ) return 0;
 
     // INFO/FILTER/FORMAT
     char *id = NULL;
@@ -672,6 +809,12 @@ static int bcf_hdr_register_hrec(bcf_hdr_t *hdr, bcf_hrec_t *hrec)
                 *hrec->key == 'I' ? "An" : "A", hrec->key);
             var = BCF_VL_VAR;
         }
+        if ( type==BCF_HT_FLAG && (var!=BCF_VL_FIXED || num!=0) )
+        {
+            hts_log_warning("The definition of Flag \"%s/%s\" is invalid, forcing Number=0", hrec->key,id);
+            var = BCF_VL_FIXED;
+            num = 0;
+        }
     }
     uint32_t info = ((((uint32_t)num) & 0xfffff)<<12 |
                      (var & 0xf) << 8 |
@@ -726,7 +869,8 @@ int bcf_hdr_add_hrec(bcf_hdr_t *hdr, bcf_hrec_t *hrec)
     int res;
     if ( !hrec ) return 0;
 
-    hrec->type = BCF_HL_GEN;
+    bcf_hrec_check(hrec);   // todo: check return status and propagate errors up
+
     res = bcf_hdr_register_hrec(hdr,hrec);
     if (res < 0) return -1;
     if ( !res )
@@ -786,6 +930,8 @@ bcf_hrec_t *bcf_hdr_get_hrec(const bcf_hdr_t *hdr, int type, const char *key, co
     }
     else if ( type==BCF_HL_STR )
     {
+        if (!str_class)
+            return NULL;
         for (i=0; i<hdr->nhrec; i++)
         {
             if ( hdr->hrec[i]->type!=type ) continue;
@@ -873,7 +1019,7 @@ int bcf_hdr_parse(bcf_hdr_t *hdr, char *htxt)
         // operations do not really care about a few malformed lines).
         // In the future we may want to add a strict mode that errors in
         // this case.
-        if ( strncmp("#CHROM\tPOS",p,10) != 0 ) {
+        if ( strncmp("#CHROM\t",p,7) && strncmp("#CHROM ",p,7) ) {
             char *eol = strchr(p, '\n');
             if (*p != '\0') {
                 char buffer[320];
@@ -1267,6 +1413,7 @@ static inline int bcf_read1_core(BGZF *fp, bcf1_t *v)
     if (ks_resize(&v->indiv, indiv_len ? indiv_len : 1) != 0) return -2;
     v->rid  = le_to_i32(x + 8);
     v->pos  = le_to_u32(x + 12);
+    if ( v->pos==UINT32_MAX ) v->pos = -1;  // this is for telomere coordinate, e.g. MT:0
     v->rlen = le_to_i32(x + 16);
     v->qual = le_to_float(x + 20);
     v->n_info = le_to_u16(x + 24);
@@ -1452,7 +1599,8 @@ static int bcf_record_check(const bcf_hdr_t *hdr, bcf1_t *rec) {
             err |= BCF_ERR_TAG_UNDEF;
         }
         if (bcf_dec_size_safe(ptr, end, &ptr, &num, &type) != 0) goto bad_shared;
-        if (((1 << type) & is_valid_type) == 0) {
+        if (((1 << type) & is_valid_type) == 0
+            || (type == BCF_BT_NULL && num > 0)) {
             if (!reports++ || hts_verbose >= HTS_LOG_DEBUG)
                 hts_log_warning("Bad BCF record at %s:%"PRIhts_pos": Invalid %s type %d (%s)", bcf_seqname_safe(hdr,rec), rec->pos+1, "INFO", type, get_type_name(type));
             err |= BCF_ERR_TAG_INVALID;
@@ -1476,7 +1624,8 @@ static int bcf_record_check(const bcf_hdr_t *hdr, bcf1_t *rec) {
             err |= BCF_ERR_TAG_UNDEF;
         }
         if (bcf_dec_size_safe(ptr, end, &ptr, &num, &type) != 0) goto bad_indiv;
-        if (((1 << type) & is_valid_type) == 0) {
+        if (((1 << type) & is_valid_type) == 0
+            || (type == BCF_BT_NULL && num > 0)) {
             bcf_record_check_err(hdr, rec, "type", &reports, type);
             err |= BCF_ERR_TAG_INVALID;
         }
@@ -2088,10 +2237,12 @@ int vcf_hdr_write(htsFile *fp, const bcf_hdr_t *h)
     }
     while (htxt.l && htxt.s[htxt.l-1] == '\0') --htxt.l; // kill trailing zeros
     int ret;
-    if ( fp->format.compression!=no_compression )
+    if ( fp->format.compression!=no_compression ) {
         ret = bgzf_write(fp->fp.bgzf, htxt.s, htxt.l);
-    else
+        if (bgzf_flush(fp->fp.bgzf) != 0) return -1;
+    } else {
         ret = hwrite(fp->fp.hfile, htxt.s, htxt.l);
+    }
     free(htxt.s);
     return ret<0 ? -1 : 0;
 }
@@ -3263,10 +3414,13 @@ int vcf_write(htsFile *fp, const bcf_hdr_t *h, bcf1_t *v)
     fp->line.l = 0;
     if (vcf_format1(h, v, &fp->line) != 0)
         return -1;
-    if ( fp->format.compression!=no_compression )
+    if ( fp->format.compression!=no_compression ) {
+        if (bgzf_flush_try(fp->fp.bgzf, fp->line.l) < 0)
+            return -1;
         ret = bgzf_write(fp->fp.bgzf, fp->line.s, fp->line.l);
-    else
+    } else {
         ret = hwrite(fp->fp.hfile, fp->line.s, fp->line.l);
+    }
 
     if (fp->idx) {
         int tid;
@@ -3584,7 +3738,7 @@ bcf_hdr_t *bcf_hdr_merge(bcf_hdr_t *dst, const bcf_hdr_t *src)
         return dst;
     }
 
-    int i, ndst_ori = dst->nhrec, need_sync = 0, ret = 0, res;
+    int i, ndst_ori = dst->nhrec, need_sync = 0, res;
     for (i=0; i<src->nhrec; i++)
     {
         if ( src->hrec[i]->type==BCF_HL_GEN && src->hrec[i]->value )
@@ -3641,13 +3795,11 @@ bcf_hdr_t *bcf_hdr_merge(bcf_hdr_t *dst, const bcf_hdr_t *src)
                 {
                     hts_log_warning("Trying to combine \"%s\" tag definitions of different lengths",
                         src->hrec[i]->vals[0]);
-                    ret |= 1;
                 }
                 if ( (kh_val(d_src,k_src).info[rec->type]>>4 & 0xf) != (kh_val(d_dst,k_dst).info[rec->type]>>4 & 0xf) )
                 {
                     hts_log_warning("Trying to combine \"%s\" tag definitions of different types",
                         src->hrec[i]->vals[0]);
-                    ret |= 1;
                 }
             }
         }
@@ -4030,19 +4182,26 @@ static void bcf_set_variant_type(const char *ref, const char *alt, bcf_variant_t
         return;
     }
 
+    // Catch "joined before" breakend case
+    if ( alt[0]==']' || alt[0] == '[' )
+    {
+        var->type = VCF_BND; return;
+    }
+
+    // Iterate through alt characters that match the reference
     const char *r = ref, *a = alt;
     while (*r && *a && toupper_c(*r)==toupper_c(*a) ) { r++; a++; }     // unfortunately, matching REF,ALT case is not guaranteed
 
     if ( *a && !*r )
     {
-        if ( *a==']' || *a=='[' ) { var->type = VCF_BND; return; }
+        if ( *a==']' || *a=='[' ) { var->type = VCF_BND; return; } // "joined after" breakend
         while ( *a ) a++;
-        var->n = (a-alt)-(r-ref); var->type = VCF_INDEL; return;
+        var->n = (a-alt)-(r-ref); var->type = VCF_INDEL | VCF_INS; return;
     }
     else if ( *r && !*a )
     {
         while ( *r ) r++;
-        var->n = (a-alt)-(r-ref); var->type = VCF_INDEL; return;
+        var->n = (a-alt)-(r-ref); var->type = VCF_INDEL | VCF_DEL; return;
     }
     else if ( !*r && !*a )
     {
@@ -4057,13 +4216,13 @@ static void bcf_set_variant_type(const char *ref, const char *alt, bcf_variant_t
     {
         if ( re==r ) { var->n = 1; var->type = VCF_SNP; return; }
         var->n = -(re-r);
-        if ( toupper_c(*re)==toupper_c(*ae) ) { var->type = VCF_INDEL; return; }
+        if ( toupper_c(*re)==toupper_c(*ae) ) { var->type = VCF_INDEL | VCF_DEL; return; }
         var->type = VCF_OTHER; return;
     }
     else if ( re==r )
     {
         var->n = ae-a;
-        if ( toupper_c(*re)==toupper_c(*ae) ) { var->type = VCF_INDEL; return; }
+        if ( toupper_c(*re)==toupper_c(*ae) ) { var->type = VCF_INDEL | VCF_INS; return; }
         var->type = VCF_OTHER; return;
     }
 
@@ -4079,7 +4238,10 @@ static int bcf_set_variant_types(bcf1_t *b)
     bcf_dec_t *d = &b->d;
     if ( d->n_var < b->n_allele )
     {
-        d->var = (bcf_variant_t *) realloc(d->var, sizeof(bcf_variant_t)*b->n_allele);
+        bcf_variant_t *new_var = realloc(d->var, sizeof(bcf_variant_t)*b->n_allele);
+        if (!new_var)
+            return -1;
+        d->var = new_var;
         d->n_var = b->n_allele;
     }
     int i;
@@ -4095,15 +4257,80 @@ static int bcf_set_variant_types(bcf1_t *b)
     return 0;
 }
 
+// bcf_get_variant_type/bcf_get_variant_types should only return the following,
+// to be compatible with callers that are not expecting newer values
+// like VCF_INS, VCF_DEL.  The full set is available from the newer
+// vcf_has_variant_type* interfaces.
+#define ORIG_VAR_TYPES (VCF_SNP|VCF_MNP|VCF_INDEL|VCF_OTHER|VCF_BND|VCF_OVERLAP)
 int bcf_get_variant_types(bcf1_t *rec)
 {
-    if ( rec->d.var_type==-1 ) bcf_set_variant_types(rec);
-    return rec->d.var_type;
+    if ( rec->d.var_type==-1 ) {
+        if (bcf_set_variant_types(rec) != 0) {
+            hts_log_error("Couldn't get variant types: %s", strerror(errno));
+            exit(1); // Due to legacy API having no way to report failures
+        }
+    }
+    return rec->d.var_type & ORIG_VAR_TYPES;
 }
+
 int bcf_get_variant_type(bcf1_t *rec, int ith_allele)
 {
-    if ( rec->d.var_type==-1 ) bcf_set_variant_types(rec);
-    return rec->d.var[ith_allele].type;
+    if ( rec->d.var_type==-1 ) {
+        if (bcf_set_variant_types(rec) != 0) {
+            hts_log_error("Couldn't get variant types: %s", strerror(errno));
+            exit(1); // Due to legacy API having no way to report failures
+        }
+    }
+    if (ith_allele < 0 || ith_allele >= rec->n_allele) {
+        hts_log_error("Requested allele outside valid range");
+        exit(1);
+    }
+    return rec->d.var[ith_allele].type & ORIG_VAR_TYPES;
+}
+#undef ORIG_VAR_TYPES
+
+int bcf_has_variant_type(bcf1_t *rec, int ith_allele, uint32_t bitmask)
+{
+    if ( rec->d.var_type==-1 ) {
+        if (bcf_set_variant_types(rec) != 0) return -1;
+    }
+    if (ith_allele < 0 || ith_allele >= rec->n_allele) return -1;
+    if (bitmask == VCF_REF) {  // VCF_REF is 0, so handled as a special case
+        return rec->d.var[ith_allele].type == VCF_REF;
+    }
+    return bitmask & rec->d.var[ith_allele].type;
+}
+
+int bcf_variant_length(bcf1_t *rec, int ith_allele)
+{
+    if ( rec->d.var_type==-1 ) {
+        if (bcf_set_variant_types(rec) != 0) return bcf_int32_missing;
+    }
+    if (ith_allele < 0 || ith_allele >= rec->n_allele) return bcf_int32_missing;
+    return rec->d.var[ith_allele].n;
+}
+
+int bcf_has_variant_types(bcf1_t *rec, uint32_t bitmask,
+                          enum bcf_variant_match mode)
+{
+    if ( rec->d.var_type==-1 ) {
+        if (bcf_set_variant_types(rec) != 0) return -1;
+    }
+    uint32_t type = rec->d.var_type;
+    if ( mode==bcf_match_overlap ) return bitmask & type;
+
+    // VCF_INDEL is always set with VCF_INS and VCF_DEL by bcf_set_variant_type[s], but the bitmask may
+    // ask for say `VCF_INS` or `VCF_INDEL` only
+    if ( bitmask&(VCF_INS|VCF_DEL) && !(bitmask&VCF_INDEL) ) type &= ~VCF_INDEL;
+    else if ( bitmask&VCF_INDEL && !(bitmask&(VCF_INS|VCF_DEL)) ) type &= ~(VCF_INS|VCF_DEL);
+
+    if ( mode==bcf_match_subset )
+    {
+        if ( ~bitmask & type ) return 0;
+        else return bitmask & type;
+    }
+    // mode == bcf_match_exact
+    return type==bitmask ? type : 0;
 }
 
 int bcf_update_info(const bcf_hdr_t *hdr, bcf1_t *line, const char *key, const void *values, int n, int type)

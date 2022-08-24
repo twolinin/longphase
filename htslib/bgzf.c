@@ -574,6 +574,8 @@ int bgzf_compress(void *_dst, size_t *dlen, const void *src, size_t slen, int le
     } else {
         level = level > 0 ? level : 6; // libdeflate doesn't honour -1 as default
         // NB levels go up to 12 here.
+        int lvl_map[] = {0,1,2,3,5,6,7,8,10,12};
+        level = lvl_map[level>9 ?9 :level];
         struct libdeflate_compressor *z = libdeflate_alloc_compressor(level);
         if (!z) return -1;
 
@@ -1022,7 +1024,7 @@ int bgzf_read_block(BGZF *fp)
         if (j->hit_eof) {
             if (!fp->last_block_eof && !fp->no_eof_block) {
                 fp->no_eof_block = 1;
-                hts_log_warning("EOF marker is absent. The input is probably truncated");
+                hts_log_warning("EOF marker is absent. The input may be truncated");
             }
             fp->mt->hit_eof = 1;
         }
@@ -1124,7 +1126,7 @@ int bgzf_read_block(BGZF *fp)
         if (count == 0) { // no data read
             if (!fp->last_block_eof && !fp->no_eof_block && !fp->is_gzip) {
                 fp->no_eof_block = 1;
-                hts_log_warning("EOF marker is absent. The input is probably truncated");
+                hts_log_warning("EOF marker is absent. The input may be truncated");
             }
             fp->block_length = 0;
             return 0;
@@ -1467,7 +1469,7 @@ static void *bgzf_mt_writer(void *vp) {
 int bgzf_mt_read_block(BGZF *fp, bgzf_job *j)
 {
     uint8_t header[BLOCK_HEADER_LENGTH], *compressed_block;
-    int count, size = 0, block_length, remaining;
+    int count, block_length, remaining;
 
     // NOTE: Guaranteed to be compressed as we block multi-threading in
     // uncompressed mode.  However it may be gzip compression instead
@@ -1496,7 +1498,6 @@ int bgzf_mt_read_block(BGZF *fp, bgzf_job *j)
     if (count != sizeof(header)) // no data read
         return -1;
 
-    size = count;
     block_length = unpackInt16((uint8_t*)&header[16]) + 1; // +1 because when writing this number, we used "-1"
     if (block_length < BLOCK_HEADER_LENGTH) {
         j->errcode |= BGZF_ERR_HEADER;
@@ -1510,7 +1511,6 @@ int bgzf_mt_read_block(BGZF *fp, bgzf_job *j)
         j->errcode |= BGZF_ERR_IO;
         return -1;
     }
-    size += count;
     j->comp_len = block_length;
     j->uncomp_len = BGZF_MAX_BLOCK_SIZE;
     j->block_address = block_address;

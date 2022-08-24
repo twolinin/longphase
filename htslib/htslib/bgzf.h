@@ -3,7 +3,7 @@
 /*
    Copyright (c) 2008 Broad Institute / Massachusetts Institute of Technology
                  2011, 2012 Attractive Chaos <attractor@live.co.uk>
-   Copyright (C) 2009, 2013, 2014, 2017, 2018-2019 Genome Research Ltd
+   Copyright (C) 2009, 2013, 2014, 2017, 2018-2019, 2022 Genome Research Ltd
 
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
@@ -34,6 +34,13 @@
 #include <sys/types.h>
 
 #include "hts_defs.h"
+
+// Ensure ssize_t exists within this header. All #includes must precede this,
+// and ssize_t must be undefined again at the end of this header.
+#if defined _MSC_VER && defined _INTPTR_T_DEFINED && !defined _SSIZE_T_DEFINED && !defined ssize_t
+#define HTSLIB_SSIZE_T
+#define ssize_t intptr_t
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -448,6 +455,11 @@ typedef struct BGZF BGZF;
 
 #ifdef __cplusplus
 }
+#endif
+
+#ifdef HTSLIB_SSIZE_T
+#undef HTSLIB_SSIZE_T
+#undef ssize_t
 #endif
 
 #endif

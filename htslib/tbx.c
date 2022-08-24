@@ -93,12 +93,11 @@ int tbx_name2id(tbx_t *tbx, const char *ss)
 
 int tbx_parse1(const tbx_conf_t *conf, int len, char *line, tbx_intv_t *intv)
 {
-    int i, b = 0, id = 1, ncols = 0;
+    int i, b = 0, id = 1;
     char *s;
     intv->ss = intv->se = 0; intv->beg = intv->end = -1;
     for (i = 0; i <= len; ++i) {
         if (line[i] == '\t' || line[i] == 0) {
-            ++ncols;
             if (id == conf->sc) {
                 intv->ss = line + b; intv->se = line + i;
             } else if (id == conf->bc) {
@@ -107,7 +106,11 @@ int tbx_parse1(const tbx_conf_t *conf, int len, char *line, tbx_intv_t *intv)
                 if ( s==line+b ) return -1; // expected int
                 if (!(conf->preset&TBX_UCSC)) --intv->beg;
                 else ++intv->end;
-                if (intv->beg < 0) intv->beg = 0;
+                if (intv->beg < 0) {
+                    hts_log_warning("Coordinate <= 0 detected. "
+                                    "Did you forget to use the -0 option?");
+                    intv->beg = 0;
+                }
                 if (intv->end < 1) intv->end = 1;
             } else {
                 if ((conf->preset&0xffff) == TBX_GENERIC) {
