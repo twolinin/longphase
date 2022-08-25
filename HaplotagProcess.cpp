@@ -287,6 +287,7 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
                       << "TotalAllele\t"
                       << "HP1Allele\t"
                       << "HP2Allele\t"
+                      << "phasingQuality(PQ)\t"
                       << "(Variant,HP)\n";
                       
         }
@@ -400,16 +401,19 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
                 totalUnTagCuonnt++;
             }
             else if(tmp.refStart <= (*last).first){
-                int haplotype = judgeHaplotype(tmp, chr, params.percentageThreshold, tagResult);
+                int pqValue = 0;
+                int haplotype = judgeHaplotype(tmp, chr, params.percentageThreshold, tagResult, pqValue);
                 
                 initFlag(aln, "HP");
                 initFlag(aln, "PS");
+                initFlag(aln, "PQ");
                 
                 if (haplotype != 0) {
                     
                     int psValue = chrVariantPS[chr][(*firstVariantIter).first];
                     bam_aux_append(aln, "HP", 'i', sizeof(haplotype), (uint8_t*) &haplotype);
                     bam_aux_append(aln, "PS", 'i', sizeof(psValue), (uint8_t*) &psValue);
+                    bam_aux_append(aln, "PQ", 'i', sizeof(pqValue), (uint8_t*) &pqValue);
                     totalTagCuonnt++;
                 }
                 else{
@@ -444,7 +448,7 @@ void HaplotagProcess::initFlag(bam1_t *aln, std::string flag){
     return;
 }
 
-int HaplotagProcess::judgeHaplotype(Alignment align, std::string chrName, double percentageThreshold, std::ofstream *tagResult){
+int HaplotagProcess::judgeHaplotype(Alignment align, std::string chrName, double percentageThreshold, std::ofstream *tagResult, int &pqValue){
 
     int hp1Count = 0;
     int hp2Count = 0;
@@ -571,6 +575,7 @@ int HaplotagProcess::judgeHaplotype(Alignment align, std::string chrName, double
     int hpResult = 0;
     if( max/(max+min) < percentageThreshold){
         // no tag
+        pqValue = 0;
     }
     else{
         if(hp1Count > hp2Count){
@@ -579,6 +584,16 @@ int HaplotagProcess::judgeHaplotype(Alignment align, std::string chrName, double
         if(hp1Count < hp2Count){
             hpResult = 2;
         }
+    }
+    
+    if( max == 0 ){
+        pqValue=0;
+    }
+    else if( max == ( max + min ) ){
+        pqValue=40;
+    }
+    else{
+        pqValue=-10*(std::log10((double)min/double(max+min)));
     }
     
     if(tagResult!=NULL){
@@ -591,7 +606,8 @@ int HaplotagProcess::judgeHaplotype(Alignment align, std::string chrName, double
                  << hpResultStr       << "\t"
                  << hp1Count+hp2Count << "\t" 
                  << hp1Count          << "\t" 
-                 << hp2Count          << "\t";
+                 << hp2Count          << "\t"
+                 << pqValue           << "\t";
         // loop each variant         
         for(auto v : variants ){
             (*tagResult)<< " " << v.first << "," << v.second ;

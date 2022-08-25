@@ -3,7 +3,7 @@
 
 #include "Util.h"
 #include "ParsingBam.h"
-
+#include <cmath>
 
 struct HaplotagParameters
 {
@@ -49,7 +49,7 @@ class HaplotagProcess
 
     void initFlag(bam1_t *aln, std::string flag);
     
-    int judgeHaplotype(Alignment align, std::string chrName, double percentageThreshold, std::ofstream *tagResult);
+    int judgeHaplotype(Alignment align, std::string chrName, double percentageThreshold, std::ofstream *tagResult, int &pqValue);
     
     int totalAlignment;
     int totalSupplementary;
