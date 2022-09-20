@@ -1172,9 +1172,9 @@ void BamParser::get_snp(const Alignment &align, std::vector<ReadVariant> &readVa
                 if(ref_string != "" && isONT){
                     int del_len = length;
                     if ( ref_pos + del_len + 1 == (*currentVariantIter).first ){
-                        if( homopolymerLength((*currentVariantIter).first , ref_string) >=3 ){
+                        //if( homopolymerLength((*currentVariantIter).first , ref_string) >=3 ){
                             // special case
-                        }
+                        //}
                     }
                     else if( (*currentVariantIter).first >= ref_pos  && (*currentVariantIter).first < ref_pos + del_len ){
                         // check snp in homopolymer
