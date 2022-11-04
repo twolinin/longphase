@@ -7,7 +7,7 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
     // load SNP vcf file
     std::time_t begin = time(NULL);
     std::cerr<< "parsing VCF ... ";
-    VariantParser snpFile(params.snpFile);
+    VariantParser snpFile(params);
     std::cerr<< difftime(time(NULL), begin) << "s\n";
     
     // load SV vcf file
@@ -23,7 +23,7 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
     for(auto chr :snpFile.getChrVec()){
         last_pos.push_back(snpFile.getLastSNP(chr));
     }
-    FastaParser FastaParser(params.fastaFile , snpFile.getChrVec(), last_pos);
+    FastaParser fastaParser(params.fastaFile , snpFile.getChrVec(), last_pos);
     std::cerr<< difftime(time(NULL), begin) << "s\n";
 
     // record all phasing result
@@ -33,6 +33,7 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
  
     // loop all chromosome
     for(std::vector<std::string>::iterator chrIter = chrName.begin(); chrIter != chrName.end() ; chrIter++ ){
+        
         std::cerr<< "parsing contig/chromosome: " << (*chrIter) << " ... ";
         begin = time(NULL);
         
@@ -49,7 +50,7 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
         std::cerr<< "fetch SNP ... ";
         // this method does not store the read information to be used
         BamParser *bamParser = new BamParser((*chrIter), params.bamFile, snpFile, svFile);
-        std::string chr_reference = FastaParser.chrString.at(*chrIter);
+        std::string chr_reference = fastaParser.chrString.at(*chrIter);
         bamParser->direct_detect_alleles(lastSNPpos, params, readVariantVec ,chr_reference);
         
         if(params.isONT){
@@ -58,7 +59,7 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
         }
 
         delete bamParser;
-        
+
         // bam files are partial file or no read support this chromosome's SNP
         if( readVariantVec.size() == 0 ){
             std::cerr<< "skip\n";
@@ -67,16 +68,19 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
     
         std::cerr<< "run algorithm ... ";
         
-        VairiantGrpah *vGraph = new VairiantGrpah(chr_reference, params);
+        VairiantGraph *vGraph = new VairiantGraph(chr_reference, params);
         // trans read-snp info to edge info
         vGraph->addEdge(readVariantVec);
-        // run man algorithm
+        
+        // run main algorithm
         vGraph->phasingProcess();
         // push result to phasingResult
         vGraph->exportResult((*chrIter),phasingResult);
+        
         //  generate dot file
         if(params.generateDot)
             vGraph->writingDotFile((*chrIter));
+        
         // free memory
         readVariantVec.clear();
         readVariantVec.shrink_to_fit();

@@ -8,8 +8,8 @@ struct PhasingParameters
 {
     int numThreads;
     int distance;
-    int crossBlock;
-    int islandBlockLength;
+    int crossSNP;
+    //int islandBlockLength;
     std::string snpFile;
     std::string svFile;
     std::string bamFile;
@@ -19,10 +19,26 @@ struct PhasingParameters
     bool isONT;
     bool isPB;
     
+    int connectAdjacent;
+    int mappingQuality;
+    
+    double confidentHaplotype;
+    double judgeInconsistent;
+    int inconsistentThreshold;
+    
+    double alleleConsistentRatio;
+    double maxAlleleRatio;
+    
     double readsThreshold;
-    double qualityThreshold;
-    double blockReadThreshold;
+    //double qualityThreshold;
+    //double blockReadThreshold;
     double svReadsThreshold;
+    
+    std::string version;
+    std::string command;
+    
+    double test1;
+    double test2;
 };
 
 class PhasingProcess

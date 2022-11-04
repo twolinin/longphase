@@ -11,7 +11,6 @@
 #include <iterator>
 #include <ctime>
 #include <vector>
-#include <map>
 
 struct PhasingElement{
     // i.e. 0|1  or   1|0

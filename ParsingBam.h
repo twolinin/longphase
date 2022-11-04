@@ -36,7 +36,7 @@ class FastaParser{
 class VariantParser{
     
     private:
-    
+        PhasingParameters *params;
         std::string variantFile;
         // chr, variant position (0-base), allele haplotype
         std::map<std::string, std::map<int, RefAlt> > chrVariant;
@@ -53,7 +53,7 @@ class VariantParser{
     
     public:
     
-        VariantParser(std::string variantFile);
+        VariantParser(PhasingParameters &in_params);
         ~VariantParser();
             
         std::map<int, RefAlt> getVariants(std::string chrName);  

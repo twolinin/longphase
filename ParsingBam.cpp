@@ -42,7 +42,9 @@ FastaParser::~FastaParser(){
  
 }
 
-VariantParser::VariantParser(std::string variantFile):variantFile(variantFile){
+VariantParser::VariantParser(PhasingParameters &in_params){
+    params = &in_params;
+    variantFile = params->snpFile;
     // open vcf file
     htsFile * inf = bcf_open(variantFile.c_str(), "r");
     // read header
@@ -247,7 +249,11 @@ void VariantParser::writeLine(std::string &input, bool &ps_def, std::ofstream &r
         }
         // format line 
         if(input.find("##")== std::string::npos && ps_def == false){
-            resultVcf <<  "##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase set identifier\">\n";
+            resultVcf << "##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase set identifier\">\n";
+        }
+        if( input.find("##")== std::string::npos){
+            resultVcf << "##longphaseVersion=" << params->version << "\n";
+            resultVcf << "##commandline=\"" << params->command << "\"\n";
         }
         resultVcf << input << "\n";
     }
@@ -379,13 +385,13 @@ void VariantParser::writeLine(std::string &input, bool &ps_def, std::ofstream &r
 }
 
 
-bool VariantParser::findSNP(std::string chr, int posistion){
+bool VariantParser::findSNP(std::string chr, int position){
     std::map<std::string, std::map<int, RefAlt> >::iterator chrIter = chrVariant.find(chr);
     // empty chromosome
     if( chrIter == chrVariant.end() )
         return false;
     
-    std::map<int, RefAlt>::iterator posIter = chrVariant[chr].find(posistion);
+    std::map<int, RefAlt>::iterator posIter = chrVariant[chr].find(position);
     // empty position
     if( posIter == chrVariant[chr].end() )
         return false;
@@ -753,6 +759,10 @@ void SVParser::writeLine(std::string &input, bool &ps_def, std::ofstream &result
         if(input.find("##")== std::string::npos && ps_def == false){
             resultVcf <<  "##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase set identifier\">\n";
         }
+        /*if( input.find("##")== std::string::npos){
+            resultVcf << "##longphaseVersion=" << params->version << "\n";
+            resultVcf << "##commandline=\"" << params->command << "\"\n";
+        }*/
         resultVcf << input << "\n";
     }
     else if( input.find("#")== std::string::npos ){
@@ -946,7 +956,7 @@ void BamParser::direct_detect_alleles(int lastSNPPos, PhasingParameters params, 
     while ((result = sam_itr_multi_next(fp_in, iter, aln)) >= 0) { 
         int flag = aln->core.flag;
 
-        if (    aln->core.qual < 20  // mapping quality
+        if (    aln->core.qual < params.mappingQuality  // mapping quality
              || (flag & 0x4)   != 0  // read unmapped
              || (flag & 0x100) != 0  // secondary alignment. repeat. 
                                      // A secondary alignment occurs when a given read could align reasonably well to more than one place.

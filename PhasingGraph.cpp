@@ -64,21 +64,19 @@ std::pair<int,int> SubEdge::BestPair(int targetPos){
     return std::make_pair( refResult, altResult );
 }
 
-std::vector<std::string> SubEdge::getSupportRead(int breakNodePosition){
+void SubEdge::getReadVariant(std::map< std::string,std::map<int,int> > &readVariantMap){
 
-    std::vector<std::string> readVec;
     for(std::map<int, std::vector<std::string> >::iterator edgeIter = refRead.begin() ; edgeIter != refRead.end() ; edgeIter++ ){
         for(std::vector<std::string>::iterator readIter = (*edgeIter).second.begin() ; readIter != (*edgeIter).second.end() ; readIter++ ){
-            readVec.push_back((*readIter));
+            readVariantMap[(*readIter)][(*edgeIter).first]=0;
         }
     }
     
     for(std::map<int, std::vector<std::string> >::iterator edgeIter = altRead.begin() ; edgeIter != altRead.end() ; edgeIter++ ){
         for(std::vector<std::string>::iterator readIter = (*edgeIter).second.begin() ; readIter != (*edgeIter).second.end() ; readIter++ ){
-            readVec.push_back((*readIter));
+            readVariantMap[(*readIter)][(*edgeIter).first]=1;
         }
     }
-    return readVec;
 }
 
 int SubEdge::getQuality(PosAllele targetPos){
@@ -144,7 +142,7 @@ VariantEdge::VariantEdge(int inCurrPos){
 }
 
 //VariantEdge
-std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool isONT, double diffRatioThreshold, double svDiffRatioThreshold, bool containSV){
+std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool isONT, double diffRatioThreshold, double svDiffRatioThreshold, bool containSV, bool repair){
     std::pair<int,int> refBestPair  = ref->BestPair(targetPos);
     std::pair<int,int> altBestPair  = alt->BestPair(targetPos);
     // get the weight of each pair
@@ -175,15 +173,7 @@ std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool
     
     double readsThreshold = (double)std::min((rr+aa),(ar+ra)) / (double)std::max((rr+aa),(ar+ra));
 
-    if( readsThreshold > diffRatioThreshold && !containSV){
-        // SNP-SNP
-        // The number of RR and RA is similar, and it is easily affected by sequence errors.
-    }
-    else if( readsThreshold > svDiffRatioThreshold && containSV){
-        // SNP-SV or SV-SNP
-        // The number of RR and RA is similar, and it is easily affected by sequence errors.
-    }
-    else if( rr + aa > ra + ar ){
+    if( rr + aa > ra + ar ){
         // RR conect
         refAllele = 1;
         altAllele = 2;
@@ -197,6 +187,12 @@ std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool
         // no connect 
         // not sure which is better
     }
+    
+    if( readsThreshold > diffRatioThreshold && repair){
+        refAllele = -1;
+        altAllele = -1;
+    }
+    
     // create edge pairs
     PosAllele refEdge = std::make_pair( targetPos, refAllele );
     PosAllele altEdge = std::make_pair( targetPos, altAllele );
@@ -224,8 +220,8 @@ void BlockRead::recordRead(std::string readName){
         readVec[readName]++;
 }
 
-//VairiantGrpah
-void VairiantGrpah::initialResult(){
+//VairiantGraph
+void VairiantGraph::edgeConnectResult(){
     
     // current snp, haplotype (1 or 2), support snp
     std::map<int, std::map<int,std::vector<int> > > hpCountMap;
@@ -235,19 +231,25 @@ void VairiantGrpah::initialResult(){
     std::map<int,int> inconsistentSnpMap;
     // < block start, <snp in this block> >
     std::map<int,std::vector<int> > phasedBlocks;
-    int blockStart;
+    int blockStart = -1;
+    
+    int currPos = -1;
+    int nextPos = -1;
+    
+    int lastConnectPos = -1;
     
     // Visit all position and assign SNPs to haplotype
     // Only one of the two alleles needs to be used for each SNP
     for(std::map<int,ReadBase>::iterator nodeIter = nodeInfo.begin() ; nodeIter != nodeInfo.end() ; nodeIter++ ){
         // check next position
         std::map<int,ReadBase>::iterator nextNodeIter = std::next(nodeIter, 1);
-        if( nextNodeIter == nodeInfo.end() )
+        if( nextNodeIter == nodeInfo.end() ){
              break;
+        }
         
-        int currPos = (*nodeIter).first;
-        int nextPos = (*nextNodeIter).first;
-
+        currPos = (*nodeIter).first;
+        nextPos = (*nextNodeIter).first;
+        
         // check distance between two position 
         if(std::abs(nextPos-currPos) > params->distance ){
             continue;
@@ -257,26 +259,46 @@ void VairiantGrpah::initialResult(){
         int h1 = hpCountMap[currPos][1].size();
         int h2 = hpCountMap[currPos][2].size();
         
+        double haplotypeConsistentRatio   = (double)std::max(h1,h2)/(double)(h1+h2);
+        double haplotypeInconsistentRatio = (double)std::min(h1,h2)/(double)(h1+h2);
+        
         // check and record inconsistent snp
-        if( (h1==1 || h2==1) && h1 + h2 > 3 ){
-            // if number of HP1 supported is 1, this supported snp is inconsistent
-            int inconsistentSnp = hpCountMap[currPos][ (h1==1 ? 1 : 2) ][0];
-            inconsistentSnpMap[inconsistentSnp]++;
+        // using haplotype ratio to determine whether inconsistency occurs
+        if( h1!=0 && h2!=0 && haplotypeInconsistentRatio <= params->judgeInconsistent ){
+            // calculate h1 ratio
+            double h1ratio = (double)h1/(double)(h1+h2);
+
+            // support h1 reads are inconsistent
+            if( h1ratio == haplotypeInconsistentRatio ){
+                for( unsigned int i = 0 ; i < hpCountMap[currPos][1].size() ; i++ ){
+                    inconsistentSnpMap[hpCountMap[currPos][1][i]]++;
+                }
+            }
+            // support h2 reads are inconsistent
+            else{
+                for( unsigned int i = 0 ; i < hpCountMap[currPos][2].size() ; i++ ){
+                    inconsistentSnpMap[hpCountMap[currPos][2][i]]++;
+                }
+            }
         }
         
         // new block, set this position as block start 
         if( h1 == 0 && h2 == 0 ){
-            if( hpCountMap[nextPos][1].size() !=0 || hpCountMap[nextPos][2].size() !=0 ){
+            // No new blocks should be created if the next SNP has already been picked up
+            if( currPos < lastConnectPos ){
                 continue;
             }
+            
             blockStart=currPos;
             phasedBlocks[blockStart].push_back(currPos);
             hpResult[currPos] = 1;
         }
+        
         // ignore poorly classified SNPs
-        else if( (h1==2&&h2==3) || (h1==3&&h2==2) || (h1==2&&h2==1) || (h1==1&&h2==2) ){
+        // this SNP can not judge by forword n SNPs
+        // using the reads between previous SNP to judge current SNP haplotype
+        else if( 1 - params->confidentHaplotype <= haplotypeConsistentRatio  && haplotypeConsistentRatio <= params->confidentHaplotype ){
             hpResult[currPos] = 0;
-            continue;
         }
         else{
             if( h1 > h2 || h1 < h2 ){
@@ -284,54 +306,15 @@ void VairiantGrpah::initialResult(){
                 hpResult[currPos] = currHP;
                 phasedBlocks[blockStart].push_back(currPos);
             }
-            else{
-                // equal weight node, go back to judge result
-                std::map<int,ReadBase>::iterator preStartIter = std::prev(nodeIter, 1);
-                int preStart = (*preStartIter).first;
-                int preNext  = (*nodeIter).first;
-                // check previos SNP in edge list
-                std::map<int,VariantEdge*>::iterator edgeIter = edgeList.find( preStart );
-                if( edgeIter==edgeList.end() ){
-                    hpResult[currPos] = 0;
-                    continue;
-                }
-                // just consider reads from the previous SNP and currnt SNP 
-                std::pair<PosAllele,PosAllele> preResult = (*edgeIter).second->findBestEdgePair(preNext, params->isONT, 1, 1, false);
-
-                // greedy RR or RA by number of read 
-                if( preResult.first.second == 1 ){
-                    hpResult[currPos] = hpResult[preStart];
-                }
-                else if( preResult.first.second == 2 ){
-                    hpResult[currPos] = (hpResult[preStart] == 1 ? 2 : 1);
-                }
-                else{
-                    // RR and RA are equal read, judge by base quality
-                    PosAllele refEnd = std::make_pair(preNext, 1);
-                    PosAllele altEnd = std::make_pair(preNext, 2);
-                    
-                    // get four edge quality
-                    int rrAvgQuality = edgeList[preStart]->ref->getAvgQuality(refEnd);
-                    int raAvgQuality = edgeList[preStart]->ref->getAvgQuality(altEnd);
-                    int arAvgQuality = edgeList[preStart]->alt->getAvgQuality(refEnd);
-                    int aaAvgQuality = edgeList[preStart]->alt->getAvgQuality(altEnd);
-                    
-                    if( rrAvgQuality + aaAvgQuality > raAvgQuality + arAvgQuality )
-                        hpResult[currPos] = hpResult[preStart];
-                    else
-                        hpResult[currPos] = (hpResult[preStart] == 1 ? 2 : 1);
-                }
-            }
         }
-        
         // Check if there is no edge from current node
         std::map<int,VariantEdge*>::iterator edgeIter = edgeList.find( currPos );
         if( edgeIter==edgeList.end() )
             continue;
-        // check connect between surrent SNP and next 5 SNPs
-        for(int i = 0 ; i < 5 ; i++ ){
+        // check connect between surrent SNP and next n SNPs
+        for(int i = 0 ; i < params->connectAdjacent ; i++ ){
             // consider reads from the currnt SNP and the next (i+1)'s SNP
-            std::pair<PosAllele,PosAllele> tmp = (*edgeIter).second->findBestEdgePair((*nextNodeIter).first, params->isONT, 1, 1, false);
+            std::pair<PosAllele,PosAllele> tmp = (*edgeIter).second->findBestEdgePair((*nextNodeIter).first, params->isONT, 1, 1, false, false);
             // -1 : no connect  
             //  1 : the haplotype of next (i+1)'s SNP are same as previous
             //  2 : the haplotype of next (i+1)'s SNP are different as previous
@@ -360,6 +343,8 @@ void VairiantGrpah::initialResult(){
                     dotResult.push_back(e1);
                     dotResult.push_back(e2);
                 }
+                
+                lastConnectPos = (*nextNodeIter).first;
             }
             nextNodeIter++;
             if( nextNodeIter == nodeInfo.end() )
@@ -367,10 +352,10 @@ void VairiantGrpah::initialResult(){
         }
     }
 
-    // Correction for inconsistent SNPs
+    // Correction inconsistent SNPs
     std::vector<std::string>::iterator edgeIter = dotResult.begin();
     for(std::map<int,int>::iterator snpIter = inconsistentSnpMap.begin();snpIter != inconsistentSnpMap.end();snpIter++){
-        if((*snpIter).second>=4){
+        if( (*snpIter).second >= params->inconsistentThreshold ){
             // change haplotype result
             hpResult[(*snpIter).first] = (hpResult[(*snpIter).first] == 1 ? 2 : 1);
             // modify dot file
@@ -411,8 +396,9 @@ void VairiantGrpah::initialResult(){
     // loop all block
     for(auto blockIter = phasedBlocks.begin() ; blockIter != phasedBlocks.end() ; blockIter++ ){
         // check block size
-        if( (*blockIter).second.size()<=1 )
+        if( (*blockIter).second.size()<=1 ){
             continue;
+        }
         
         // loop block's node
         for(auto currIter = (*blockIter).second.begin() ; currIter != (*blockIter).second.end() ; currIter++ ){
@@ -442,13 +428,12 @@ void VairiantGrpah::initialResult(){
         }
     }
 }
+ 
+std::vector<ReadVariant> VairiantGraph::getBlockRead(std::pair<int,std::vector<int> > currentBlockVec, BlockRead &totalRead , int sampleNum){
 
-std::map<std::string,int> VairiantGrpah::getBlockRead(std::pair<int,std::vector<int> > currentBlockVec, std::map<std::string,int> &readQuality, BlockRead &totalRead , int sampleNum){
-    //BlockRead hp1Read;
-    //BlockRead hp2Read;
-    BlockRead currentTotalRead;
-    std::map<std::string,int> readTag;
-    std::map<std::string,int> readTmpQuality;
+    std::vector<ReadVariant> resultVector;
+    // get ref reads
+    std::map< std::string,std::map<int,int> > readVariantMap;
     
     // tag read belongs to which haplotype
     int SNPcount = 0;
@@ -464,62 +449,37 @@ std::map<std::string,int> VairiantGrpah::getBlockRead(std::pair<int,std::vector<
         if( edgeIter==edgeList.end() )
             continue;
         
-        // get ref reads
-        std::vector<std::string> rReadVec = (*edgeIter).second->ref->getSupportRead((*posIter));
-        // tag REF haplotype read
-        for(std::vector<std::string>::iterator readIter = rReadVec.begin() ; readIter != rReadVec.end() ; readIter++ ){
-            // Cumulative read quality
-            std::map<std::string,int>::iterator readQuaIter = readTmpQuality.find((*readIter));
-            if( readQuaIter == readTmpQuality.end() ){
-                readTmpQuality[(*readIter)] = nodeInfo[(*posIter)][(*readIter)];
-            }
-            else{
-                readTmpQuality[(*readIter)] += nodeInfo[(*posIter)][(*readIter)];
-            }
-            currentTotalRead.recordRead((*readIter));
-            totalRead.recordRead((*readIter));
+        (*edgeIter).second->ref->getReadVariant(readVariantMap);
+        (*edgeIter).second->alt->getReadVariant(readVariantMap);
+
+    }  
+    
+    //translate readVariantMap struct to ReadVariant struct
+    for(auto readIter = readVariantMap.begin() ; readIter != readVariantMap.end() ; readIter++ ){
+        ReadVariant tmpReadVariant;
+        tmpReadVariant.read_name = (*readIter).first;
+        for(auto variantIter = (*readIter).second.begin(); variantIter != (*readIter).second.end() ; variantIter++ ){
+            Variant tmpVariant((*variantIter).first, (*variantIter).second, 30);
+            tmpReadVariant.variantVec.push_back(tmpVariant);
         }
+        resultVector.push_back(tmpReadVariant);
         
-        // get alt reads
-        std::vector<std::string> aReadVec = (*edgeIter).second->alt->getSupportRead((*posIter));
-        // tag ALT haplotype read    
-        for(std::vector<std::string>::iterator readIter = aReadVec.begin() ; readIter != aReadVec.end() ; readIter++ ){ 
-            // Cumulative read quality
-            std::map<std::string,int>::iterator readQuaIter = readTmpQuality.find((*readIter));
-            if( readQuaIter == readTmpQuality.end() ){
-                readTmpQuality[(*readIter)] = nodeInfo[(*posIter)][(*readIter)] * (-1);
-            }
-            else{
-                readTmpQuality[(*readIter)] -= nodeInfo[(*posIter)][(*readIter)];
-            }       
-            currentTotalRead.recordRead((*readIter));
-            totalRead.recordRead((*readIter));
-        }
-    }   
-    // Divide read into two different haplotypes
-    for( std::map<std::string,int>::iterator readIter = currentTotalRead.readVec.begin() ; readIter != currentTotalRead.readVec.end() ; readIter++ ){
-        if( readTmpQuality[(*readIter).first] > 0 ){
-            readTag[(*readIter).first] = 0;
-        }
-        else if( readTmpQuality[(*readIter).first] < 0){
-            readTag[(*readIter).first] = 1;
-        }
-        else{
-        }
-        readQuality[(*readIter).first] = std::abs(readTmpQuality[(*readIter).first]);
+        totalRead.recordRead((*readIter).first);
     }
-    return readTag;
+    return resultVector;
 }
 
-bool VairiantGrpah::connectBlockByCommonRead(int nextBlcok, double diffRatioThreshold){
+bool VairiantGraph::blockPhaseing(){
+    
     bool connect = false;
+    
     // loop all block, prepare to create new edges between two block
     // PS number, < position vector >
     for(std::map<int,std::vector<int> >::iterator blockVecIter = blockVec.begin() ; blockVecIter != blockVec.end() ; blockVecIter++ ){
         // Number of SNPs checked
-        int sampleNum = 15;
+        //int sampleNum = 15;
         // get next block
-        std::map<int,std::vector<int> >::iterator nextBlockIter = std::next(blockVecIter, nextBlcok);
+        std::map<int,std::vector<int> >::iterator nextBlockIter = std::next(blockVecIter, 1);
         if( nextBlockIter == blockVec.end() )
             break;
         if( nextBlockIter == blockVecIter )
@@ -541,93 +501,119 @@ bool VairiantGrpah::connectBlockByCommonRead(int nextBlcok, double diffRatioThre
         if( edgeIter==edgeList.end() ){
             continue;
         }
-        std::map<int,std::vector<int> >::iterator midBlockIter = std::next(blockVecIter, 1);
-
-        if(nextBlcok==2){
-            // Some small blocks will be in the middle of two large blocks.
-            // This small block looks like an island.
-            // if the middle block is very large, it should not be crossed over
-            std::map<int,std::vector<int> >::iterator midBlockIter = std::next(blockVecIter, 1);
-            int midBlockStart = (*midBlockIter).second[0];
-            int midBlockEnd   = (*midBlockIter).second[(*midBlockIter).second.size()-1];
-            // middle block size threshold
-            if( midBlockEnd - midBlockStart >= params->islandBlockLength ){
-                continue;
-            }
-        }
 
         BlockRead totalRead;
-        std::map<std::string,int> frontReadQuality;
-        std::map<std::string,int> backReadQuality;
-        std::map<std::string,int> frontReadtag = this->getBlockRead((*blockVecIter), frontReadQuality, totalRead, sampleNum);
-        std::map<std::string,int> backReadtag  = this->getBlockRead((*nextBlockIter), backReadQuality, totalRead, sampleNum);
+        std::vector<ReadVariant> frontRead = this->getBlockRead((*blockVecIter), totalRead, params->crossSNP);
+        std::vector<ReadVariant> backRead  = this->getBlockRead((*nextBlockIter), totalRead, params->crossSNP);
+        
+        std::map<std::string,int> frontReadHP;
+        std::map<std::string,int> backReadHP;
+        
+        // frontReadHP
+        // iter all read, determine the haplotype of the read and mark abnormal SNPs
+        for(std::vector<ReadVariant>::iterator readIter = frontRead.begin() ; readIter != frontRead.end() ; readIter++ ){
+            double hp1Count = 0;
+            double hp2Count = 0;
+            // loop all variant 
+            for( auto variant : (*readIter).variantVec ){
+                // get the SNP of the front block
+                if( variant.position >= (*breakNode).first ){
+                    continue;
+                }
+                
+                PosAllele node = std::make_pair( variant.position , variant.allele+1);
+                
+                auto hpIter = subNodeHP.find(node);
+                
+                if( hpIter != subNodeHP.end() ){
+                    if(subNodeHP[node]==0){
+                        hp1Count++;
+                    }
+                    else if(subNodeHP[node]==1){
+                        hp2Count++;
+                    }
+                } 
+                
+            }
+
+            // the result of tagging is determined by phased alleles
+            if( std::max(hp1Count,hp2Count)/(hp1Count+hp2Count) >= 0.6 && hp1Count+hp2Count >= 1 ){
+                int belongHP = ( hp1Count > hp2Count ? 0 : 1 );
+                frontReadHP[(*readIter).read_name] = belongHP;
+            }
+            else{
+                frontReadHP[(*readIter).read_name] = -1;
+            }
+        }    
+
+        // backReadHP
+        // iter all read, determine the haplotype of the read and mark abnormal SNPs
+        for(std::vector<ReadVariant>::iterator readIter = backRead.begin() ; readIter != backRead.end() ; readIter++ ){
+            double hp1Count = 0;
+            double hp2Count = 0;
+            // loop all variant 
+            for( auto variant : (*readIter).variantVec ){
+                // get the SNP of the back block
+                if( variant.position <= (*nodeIter).first ){
+                    continue;
+                }
+                
+                PosAllele node = std::make_pair( variant.position , variant.allele+1);
+                std::map<PosAllele,int>::iterator nodePS = bkResult.find(node);
+                if( nodePS != bkResult.end() ){
+                        if(subNodeHP[node]==0){
+                            hp1Count++;
+                        }
+                        else{
+                            hp2Count++;
+                        }
+                }
+            }
+
+            // the result of tagging is determined by phased alleles
+            if( std::max(hp1Count,hp2Count)/(hp1Count+hp2Count) >= 0.6 && hp1Count+hp2Count >= 1 ){
+                int belongHP = ( hp1Count > hp2Count ? 0 : 1 );
+                backReadHP[(*readIter).read_name] = belongHP;
+            }
+            else{
+                backReadHP[(*readIter).read_name] = -1;
+            }
+
+        }   
+
         int rr=0;
         int ra=0;
         int ar=0;
         int aa=0;
-        int rrTmpQyality=0;
-        int raTmpQyality=0;
-        int arTmpQyality=0;
-        int aaTmpQyality=0;
         int selectConnect = -1;
         
         // loop all block read, judge each read connect result
         for( std::map<std::string,int>::iterator readIter = totalRead.readVec.begin() ; readIter != totalRead.readVec.end() ; readIter++ ){
-            std::map<std::string,int>::iterator frontReadIter = frontReadtag.find((*readIter).first);
-            std::map<std::string,int>::iterator backReadIter  = backReadtag.find((*readIter).first);
+            auto frontReadIter = frontReadHP.find((*readIter).first);
+            auto backReadIter = backReadHP.find((*readIter).first);
+
             // this read exists in two blocks
-            if( frontReadIter != frontReadtag.end() && backReadIter != backReadtag.end() ){
-                if( (*frontReadIter).second == 0 && (*backReadIter).second == 0 ){
-                    rrTmpQyality += frontReadQuality[(*readIter).first] + backReadQuality[(*readIter).first];
+            if( frontReadIter != frontReadHP.end() && backReadIter != backReadHP.end() ){
+                if( frontReadHP[(*readIter).first] == 0 && backReadHP[(*readIter).first] == 0 ){
                     rr++;
                 }
-                else if( (*frontReadIter).second == 0 && (*backReadIter).second == 1 ){
-                    raTmpQyality += frontReadQuality[(*readIter).first] + backReadQuality[(*readIter).first];
+                else if( frontReadHP[(*readIter).first] == 0 && backReadHP[(*readIter).first] == 1 ){
                     ra++;
                 }
-                else if( (*frontReadIter).second == 1 && (*backReadIter).second == 0 ){
-                    arTmpQyality += frontReadQuality[(*readIter).first] + backReadQuality[(*readIter).first];
+                else if( frontReadHP[(*readIter).first] == 1 && backReadHP[(*readIter).first] == 0 ){
                     ar++;
                 } 
-                else if( (*frontReadIter).second == 1 && (*backReadIter).second == 1 ){
-                    aaTmpQyality += frontReadQuality[(*readIter).first] + backReadQuality[(*readIter).first];
+                else if( frontReadHP[(*readIter).first] == 1 && backReadHP[(*readIter).first] == 1 ){
                     aa++;
                 }
             }
         }
-        // two sides in a combination with higher credibility
-        if( rr + aa == ra + ar ){
-            if( rr+aa == ra +ar ){
-                if(rr!=0 && aa !=0){
-                    rr+=1;
-                    aa+=1;
-                }
-                if(ra!=0 && ar !=0){
-                    ra+=1;
-                    ar+=1;
-                }
-            }
-        }
-
+        
         if( rr + aa > ra + ar ){
             selectConnect = 1;
         }
-        else if(rr + aa < ra + ar){
+        else if(rr + aa < ra + ar ){
             selectConnect = 2;
-        }
-        else{
-            // weight(aa + rr) == weight(ar+ ra)
-            // the edges are equal but the quality may be different
-            if( rr + aa + ra + ar !=0 ){
-                if( rrTmpQyality + aaTmpQyality > raTmpQyality + arTmpQyality ){
-                    selectConnect = 1;
-                }
-                else if(rrTmpQyality + aaTmpQyality < raTmpQyality + arTmpQyality){
-                    selectConnect = 2;
-                }
-                else{
-                }
-            }
         }
 
         if ( selectConnect == 1 ){
@@ -652,7 +638,8 @@ bool VairiantGrpah::connectBlockByCommonRead(int nextBlcok, double diffRatioThre
     return connect;
 }
 
-void VairiantGrpah::findResultPath(){
+
+void VairiantGraph::storeResultPath(){
     // Initialize the parameters of the stored results
     posAppear.clear();
     blockStart.clear();
@@ -733,15 +720,15 @@ void VairiantGrpah::findResultPath(){
 }
 
 
-VairiantGrpah::VairiantGrpah(std::string &in_ref, PhasingParameters &in_params){
+VairiantGraph::VairiantGraph(std::string &in_ref, PhasingParameters &in_params){
     params=&in_params;
     ref=&in_ref;
 }
 
-VairiantGrpah::~VairiantGrpah(){
+VairiantGraph::~VairiantGraph(){
 }
 
-void VairiantGrpah::addEdge(std::vector<ReadVariant> &in_readVariant){
+void VairiantGraph::addEdge(std::vector<ReadVariant> &in_readVariant){
     readVariant = &in_readVariant;
     // iter all read
     for(std::vector<ReadVariant>::iterator readIter = in_readVariant.begin() ; readIter != in_readVariant.end() ; readIter++ ){
@@ -770,7 +757,7 @@ void VairiantGrpah::addEdge(std::vector<ReadVariant> &in_readVariant){
                 edgeList[(*variant1Iter).position] = new VariantEdge((*variant1Iter).position);
 
             // add edge process
-            for(int nextNode = 0 ; nextNode < 5; nextNode++){
+            for(int nextNode = 0 ; nextNode < params->connectAdjacent; nextNode++){
                 // this allele support ref
                 if( (*variant1Iter).allele == 0 )
                     edgeList[(*variant1Iter).position]->ref->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).read_name);
@@ -791,13 +778,13 @@ void VairiantGrpah::addEdge(std::vector<ReadVariant> &in_readVariant){
     }
 } 
 
-void VairiantGrpah::readCorrection(){
-    std::map<int,int> inconsistentSnpMap;
+void VairiantGraph::readCorrection(){
+    //std::map<int,int> inconsistentSnpMap;
     std::map<int,int> snpAlleleCountMap;
-    std::map<int,int> deleteSnpMap;
+    //std::map<int,int> deleteSnpMap;
     std::map<std::string,int> readHP;
 
-    // iter all read, determine which haplotype each read belongs to and mark abnormal SNPs
+    // iter all read, determine the haplotype of the read and mark abnormal SNPs
     for(std::vector<ReadVariant>::iterator readIter = (*readVariant).begin() ; readIter != (*readVariant).end() ; readIter++ ){
         double refCount = 0;
         double altCount = 0;
@@ -816,54 +803,28 @@ void VairiantGrpah::readCorrection(){
             }
         }
 
-        // mark abnormal SNPs. the result of tagging is determined by the allele after phasing on the read
+        // mark abnormal SNPs. the result of tagging is determined by phased alleles
         if( std::max(refCount,altCount)/(refCount+altCount) >= 0.6 ){
             int belongHP = ( refCount > altCount ? 0 : 1 );
             readHP[(*readIter).read_name] = belongHP;
-            // loop all variant
-            for( auto variant : (*readIter).variantVec ){
-                PosAllele node = std::make_pair( variant.position , variant.allele+1);
-                std::map<PosAllele,int>::iterator nodePS = bkResult.find(node);
-                // check this snp in phasing results
-                if( nodePS != bkResult.end() ){
-                    // the phasing results are inconsistent with the tagging results
-                    if( subNodeHP[node] != belongHP ){
-                        inconsistentSnpMap[variant.position]++;
-                    }
-                }
-            }
         }
         else{
             readHP[(*readIter).read_name] = -1;
         }
     }
 
-    // identify abnormal SNPs
-    for(auto snpIter = inconsistentSnpMap.begin() ; snpIter != inconsistentSnpMap.end() ; snpIter++ ){
-        double totalCount = snpAlleleCountMap[(*snpIter).first];
-        double inConsisentCount = (*snpIter).second;
-        double consisentCount   = totalCount - inConsisentCount;
-        double inConsisentRatio = std::min(inConsisentCount,consisentCount)/totalCount;
-
-        if( inConsisentRatio >= 0.4 ){
-            deleteSnpMap[(*snpIter).first]=1;
-        }
-    }
-
     std::map<int,std::map<int,std::map<int,int>>> hpAlleleCountMap;
 
-    // count each haplotype's SNP allele
+    // count each haplotype's allele on SNP locus
     for(auto readIter = (*readVariant).begin() ; readIter != (*readVariant).end() ; readIter++ ){
         
         auto hpIter = readHP.find((*readIter).read_name);
-        
         if( hpIter == readHP.end() )
             continue;
         if( readHP[(*readIter).read_name] == -1 )
             continue;
-
-        int rHP = readHP[(*readIter).read_name];
         
+        int rHP = readHP[(*readIter).read_name];
         for(auto variantIter = (*readIter).variantVec.begin() ; variantIter != (*readIter).variantVec.end() ; variantIter++ ){
             if( (*variantIter).allele == 0 || (*variantIter).allele == 1){
                 int allele = (*variantIter).allele;
@@ -888,8 +849,8 @@ void VairiantGrpah::readCorrection(){
         double hp1ConsistentRatio = std::max(hp1R,hp1A)/(hp1R + hp1A);
         double hp2ConsistentRatio = std::max(hp2R,hp2A)/(hp2R + hp2A);
         double maxAlleleRatio = std::max(hp1R + hp2R, hp1A + hp2A)/(hp1R + hp2R + hp1A + hp2A);
-        
-        if(hp1ConsistentRatio >= 0.8){
+
+        if(hp1ConsistentRatio >= params->alleleConsistentRatio){
             // decide hp1 allele. at least two identical alleles are required to determine haplotype
             if( hp1R > hp1A && hp1R >= 2 )
                 hpAllele[1][position] = 0;
@@ -902,7 +863,7 @@ void VairiantGrpah::readCorrection(){
             hpAllele[1][position] = -1;
         }
         
-        if(hp2ConsistentRatio >= 0.8){
+        if(hp2ConsistentRatio >= params->alleleConsistentRatio){
             // decide hp2 allele. at least two identical alleles are required to determine haplotype
             if( hp2R > hp2A && hp2R >= 2 )
                 hpAllele[2][position] = 0;
@@ -914,15 +875,8 @@ void VairiantGrpah::readCorrection(){
         else{
             hpAllele[2][position] = -1; 
         }
-        
-        // skip delete snp
-        auto delIter = deleteSnpMap.find(position);
-        if( delIter != deleteSnpMap.end() ){
-            hpAllele[1][position] = -1; 
-            hpAllele[2][position] = -1; 
-        }
-        
-        if( maxAlleleRatio >= 0.75 && hp1ConsistentRatio >= 0.6 && hp2ConsistentRatio >= 0.6 ){
+
+        if( maxAlleleRatio > params->maxAlleleRatio ){
             if( ( hp1R > hp1A && hp2R > hp2A ) || ( hp1R < hp1A && hp2R < hp2A ) ){
                 hpAllele[1][position] = -1; 
                 hpAllele[2][position] = -1; 
@@ -932,11 +886,6 @@ void VairiantGrpah::readCorrection(){
         if( hpAllele[1][position] == hpAllele[2][position] ){
             hpAllele[1][position] = -1;
             hpAllele[2][position] = -1;
-            
-            bkResult.erase(A);
-            bkResult.erase(aOtherSide);
-            subNodeHP.erase(A);
-            subNodeHP.erase(aOtherSide);
         }
         else if( hpAllele[1][position] == -1 && hpAllele[2][position] != -1){
             hpAllele[1][position] = (hpAllele[2][position] == 0 ? 1 : 0);
@@ -952,11 +901,16 @@ void VairiantGrpah::readCorrection(){
         else if( hpAllele[1][position] == 1 || hpAllele[2][position] == 0 ){
             subNodeHP[A] = 1;
             subNodeHP[aOtherSide] = 0;
+        }
+        else{
+            bkResult.erase(A);
+            bkResult.erase(aOtherSide);
         }  
     }
 }
 
-void VairiantGrpah::writingDotFile(std::string dotPrefix){
+
+void VairiantGraph::writingDotFile(std::string dotPrefix){
     
     std::ofstream resultVcf(dotPrefix+".dot");
 
@@ -974,7 +928,7 @@ void VairiantGrpah::writingDotFile(std::string dotPrefix){
     return;
 }
 
-void VairiantGrpah::exportResult(std::string chrName, PhasingResult &result){
+void VairiantGraph::exportResult(std::string chrName, PhasingResult &result){
     
     // loop all position
     for( std::map<int,ReadBase>::iterator nodeIter = nodeInfo.begin() ; nodeIter != nodeInfo.end() ; nodeIter++ ){
@@ -1004,27 +958,26 @@ void VairiantGrpah::exportResult(std::string chrName, PhasingResult &result){
     }
 }
 
-int VairiantGrpah::totalNode(){
+int VairiantGraph::totalNode(){
     return nodeInfo.size();
 }
 
-void VairiantGrpah::phasingProcess(){
+void VairiantGraph::phasingProcess(){
 
-    this->initialResult();
-    this->findResultPath();
-      
-    for(int i = 1 ; i <= params->crossBlock ; i++ ){
-        while(true){
-            bool connect = this->connectBlockByCommonRead(i, params->blockReadThreshold);
-            this->findResultPath();
+    this->edgeConnectResult();
+    this->storeResultPath();
+    /*
+    while(true){
+        //bool connect = this->connectBlockByCommonRead();
+        bool connect = this->blockPhaseing();
+        this->storeResultPath();
 
-            if(!connect){
-                break;
-            }
+        if(!connect){
+            break;
         }
     }
-    
-    this->readCorrection();
+    */
+    this->readCorrection();  
 }
 
 

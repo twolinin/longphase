@@ -4,8 +4,12 @@
 #include "Haplotag.h"
 
 #define PROGRAM_BIN "main"
+#define VERSION "1.4dev"
+
+static std::string version = VERSION;
 
 static const char *STRIDE_USAGE_MESSAGE =
+"Version: " VERSION " \n"
 "Usage: " PROGRAM_BIN " <command> [options]\n"  
 "               phase      run phasing algorithm.\n"
 "               haplotag   tag reads by haplotype.\n"
@@ -23,7 +27,7 @@ int main(int argc, char** argv)
     
     if(command=="phase")
     {
-        PhasingMain(argc - 1, argv + 1);
+        PhasingMain(argc - 1, argv + 1, version);
     }
     else if(command=="haplotag")
     {

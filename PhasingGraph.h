@@ -39,6 +39,7 @@ class SubEdge{
         std::vector<std::string> showEdge(std::string message);
         std::pair<int,int> BestPair(int targetPos);
         std::vector<std::string> getSupportRead(int breakNodePosition);
+        void getReadVariant(std::map< std::string,std::map<int,int> > &readVariantMap);
 };
 
 
@@ -49,7 +50,7 @@ struct VariantEdge{
 
     VariantEdge(int currPos);
     // node pair 
-    std::pair<PosAllele,PosAllele> findBestEdgePair(int targetPos, bool isONT, double diffRatioThreshold, double svReadSimilarRatio, bool conatinSV);
+    std::pair<PosAllele,PosAllele> findBestEdgePair(int targetPos, bool isONT, double diffRatioThreshold, double svReadSimilarRatio, bool conatinSV, bool repair);
     // number of read of two node. AA and AB combination
     std::pair<int,int> findNumberOfRead(int targetPos);
 };
@@ -61,7 +62,7 @@ struct BlockRead{
     void recordRead(std::string readName);
 };
 
-class VairiantGrpah{
+class VairiantGraph{
     
     private:
         PhasingParameters *params;
@@ -82,7 +83,9 @@ class VairiantGrpah{
         std::map<int,int>  posAppear;
         std::map<int,int>  blockStart;
         
-        // phasing result 
+        // phasing result
+        // current snp, result haplotype (1 or 2)
+        std::map<int,int> hpResult;        
         // PosAllele , block_start    
         std::map<PosAllele,int> bkResult;
         // record each position haplotype
@@ -91,20 +94,21 @@ class VairiantGrpah{
         std::map<int,std::vector<int> >  blockVec;
         
         // block phasing
-        std::map<std::string,int> getBlockRead(std::pair<int,std::vector<int> > currentBlockVec, std::map<std::string,int> &readQuality, BlockRead &totalRead , int sampleNum);
-        bool connectBlockByCommonRead(int nextBlcok, double diffRatioThreshold);
+        std::vector<ReadVariant> getBlockRead(std::pair<int,std::vector<int> > currentBlockVec, BlockRead &totalRead , int sampleNum);
+        bool connectBlockByCommonRead();
+        bool blockPhaseing();
 
         // produce PS tag and determine phased GT tag
-        void findResultPath();
+        void storeResultPath();
         
         void readCorrection();
 
-        void initialResult();
+        void edgeConnectResult();
 
     public:
     
-        VairiantGrpah(std::string &ref, PhasingParameters &params);
-        ~VairiantGrpah();
+        VairiantGraph(std::string &ref, PhasingParameters &params);
+        ~VairiantGraph();
     
         void addEdge(std::vector<ReadVariant> &readVariant);
         
