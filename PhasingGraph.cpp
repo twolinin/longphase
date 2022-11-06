@@ -142,7 +142,7 @@ VariantEdge::VariantEdge(int inCurrPos){
 }
 
 //VariantEdge
-std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool isONT, double diffRatioThreshold, double svDiffRatioThreshold, bool containSV, bool repair){
+std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool isONT, double diffRatioThreshold, bool repair){
     std::pair<int,int> refBestPair  = ref->BestPair(targetPos);
     std::pair<int,int> altBestPair  = alt->BestPair(targetPos);
     // get the weight of each pair
@@ -233,6 +233,7 @@ void VairiantGraph::edgeConnectResult(){
     std::map<int,std::vector<int> > phasedBlocks;
     int blockStart = -1;
     
+    int prevSNP = -1;
     int currPos = -1;
     int nextPos = -1;
     
@@ -247,6 +248,7 @@ void VairiantGraph::edgeConnectResult(){
              break;
         }
         
+        prevSNP = currPos;
         currPos = (*nodeIter).first;
         nextPos = (*nextNodeIter).first;
         
@@ -284,6 +286,7 @@ void VairiantGraph::edgeConnectResult(){
         
         // new block, set this position as block start 
         if( h1 == 0 && h2 == 0 ){
+            
             // No new blocks should be created if the next SNP has already been picked up
             if( currPos < lastConnectPos ){
                 continue;
@@ -295,10 +298,17 @@ void VairiantGraph::edgeConnectResult(){
         }
         
         // ignore poorly classified SNPs
-        // this SNP can not judge by forword n SNPs
-        // using the reads between previous SNP to judge current SNP haplotype
         else if( 1 - params->confidentHaplotype <= haplotypeConsistentRatio  && haplotypeConsistentRatio <= params->confidentHaplotype ){
-            hpResult[currPos] = 0;
+            // check previos SNP in edge list
+            std::map<int,VariantEdge*>::iterator edgeIter = edgeList.find( prevSNP );
+            if( edgeIter != edgeList.end() ){
+                // record none haplotype
+                std::pair<PosAllele,PosAllele> preResult = (*edgeIter).second->findBestEdgePair(currPos, params->isONT, params->readsThreshold, true);  
+                if( preResult.first.second == 1 || preResult.first.second == 2 ){
+                    hpResult[currPos] = 0;
+                    phasedBlocks[blockStart].push_back(currPos);
+                }
+            }
         }
         else{
             if( h1 > h2 || h1 < h2 ){
@@ -314,7 +324,7 @@ void VairiantGraph::edgeConnectResult(){
         // check connect between surrent SNP and next n SNPs
         for(int i = 0 ; i < params->connectAdjacent ; i++ ){
             // consider reads from the currnt SNP and the next (i+1)'s SNP
-            std::pair<PosAllele,PosAllele> tmp = (*edgeIter).second->findBestEdgePair((*nextNodeIter).first, params->isONT, 1, 1, false, false);
+            std::pair<PosAllele,PosAllele> tmp = (*edgeIter).second->findBestEdgePair((*nextNodeIter).first, params->isONT, 1, false);
             // -1 : no connect  
             //  1 : the haplotype of next (i+1)'s SNP are same as previous
             //  2 : the haplotype of next (i+1)'s SNP are different as previous
@@ -428,7 +438,7 @@ void VairiantGraph::edgeConnectResult(){
         }
     }
 }
- 
+
 std::vector<ReadVariant> VairiantGraph::getBlockRead(std::pair<int,std::vector<int> > currentBlockVec, BlockRead &totalRead , int sampleNum){
 
     std::vector<ReadVariant> resultVector;
@@ -501,7 +511,7 @@ bool VairiantGraph::blockPhaseing(){
         if( edgeIter==edgeList.end() ){
             continue;
         }
-
+        
         BlockRead totalRead;
         std::vector<ReadVariant> frontRead = this->getBlockRead((*blockVecIter), totalRead, params->crossSNP);
         std::vector<ReadVariant> backRead  = this->getBlockRead((*nextBlockIter), totalRead, params->crossSNP);
@@ -509,6 +519,7 @@ bool VairiantGraph::blockPhaseing(){
         std::map<std::string,int> frontReadHP;
         std::map<std::string,int> backReadHP;
         
+
         // frontReadHP
         // iter all read, determine the haplotype of the read and mark abnormal SNPs
         for(std::vector<ReadVariant>::iterator readIter = frontRead.begin() ; readIter != frontRead.end() ; readIter++ ){
@@ -522,7 +533,7 @@ bool VairiantGraph::blockPhaseing(){
                 }
                 
                 PosAllele node = std::make_pair( variant.position , variant.allele+1);
-                
+
                 auto hpIter = subNodeHP.find(node);
                 
                 if( hpIter != subNodeHP.end() ){
@@ -561,15 +572,11 @@ bool VairiantGraph::blockPhaseing(){
                 PosAllele node = std::make_pair( variant.position , variant.allele+1);
                 std::map<PosAllele,int>::iterator nodePS = bkResult.find(node);
                 if( nodePS != bkResult.end() ){
-                        if(subNodeHP[node]==0){
-                            hp1Count++;
-                        }
-                        else{
-                            hp2Count++;
-                        }
+                        if(subNodeHP[node]==0)hp1Count++;
+                        else hp2Count++;
                 }
             }
-
+            
             // the result of tagging is determined by phased alleles
             if( std::max(hp1Count,hp2Count)/(hp1Count+hp2Count) >= 0.6 && hp1Count+hp2Count >= 1 ){
                 int belongHP = ( hp1Count > hp2Count ? 0 : 1 );
@@ -578,9 +585,8 @@ bool VairiantGraph::blockPhaseing(){
             else{
                 backReadHP[(*readIter).read_name] = -1;
             }
-
         }   
-
+        
         int rr=0;
         int ra=0;
         int ar=0;
@@ -606,6 +612,7 @@ bool VairiantGraph::blockPhaseing(){
                 else if( frontReadHP[(*readIter).first] == 1 && backReadHP[(*readIter).first] == 1 ){
                     aa++;
                 }
+                
             }
         }
         
@@ -968,7 +975,6 @@ void VairiantGraph::phasingProcess(){
     this->storeResultPath();
     /*
     while(true){
-        //bool connect = this->connectBlockByCommonRead();
         bool connect = this->blockPhaseing();
         this->storeResultPath();
 

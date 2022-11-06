@@ -9,7 +9,6 @@ struct PhasingParameters
     int numThreads;
     int distance;
     int crossSNP;
-    //int islandBlockLength;
     std::string snpFile;
     std::string svFile;
     std::string bamFile;
@@ -30,15 +29,9 @@ struct PhasingParameters
     double maxAlleleRatio;
     
     double readsThreshold;
-    //double qualityThreshold;
-    //double blockReadThreshold;
-    double svReadsThreshold;
     
     std::string version;
     std::string command;
-    
-    double test1;
-    double test2;
 };
 
 class PhasingProcess

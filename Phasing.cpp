@@ -30,7 +30,6 @@ static const char *CORRECT_USAGE_MESSAGE =
 "      -d, --distance=Num                phasing two variant if distance less than threshold. default:300000\n"
 "      -c, --crossSNP=Num                block phasing step. sample N SNPs in each block. default:15\n"
 "      -1, --readsThreshold=[0~1]        give up SNP-SNP phasing pair if the number of reads of the two combinations are similar. default:0.05\n"
-"      -2, --svReadsThreshold=[0~1]      give up SNP-SV phasing pair if the number of reads of the two combinations are similar. default:0.6\n"
 "      -v, --confidentHaplotype=[0~1]    the haplotype of the current SNP is judged by the haplotype of the previous N SNPs.\n"
 "                                        if the threshold is higher, the consistency of SNP needs to be higher. default:0.5\n"
 "      -j, --judgeInconsistent=[0~1]     the proportion of inconsistent haplotypes among the haplotypes of the previous N SNPs.\n"
@@ -38,17 +37,12 @@ static const char *CORRECT_USAGE_MESSAGE =
 "      -i, --inconsistentThreshold=Num   phased genotype correction is performed when a SNP is tagged multiple times. default:5\n\n"
 
 "haplotag read correction arguments:\n"
-"      -n, --alleleConsistentRatio=[0~1]         \n"
-"      -m, --maxAlleleRatio=[0~1]                \n"
-
+"      -n, --alleleConsistentRatio=[0~1] the ratio of an allele to all reads of a Haplotype should be consistent. default: 0.9\n"
+"      -m, --maxAlleleRatio=[0~1]        the ratio that any allele of a SNP should not exceed. default: 0.65\n"
     
 "\n";
 
-//"      -2, --qualityThreshold=[0~1]    give up phasing pair if the quality of the two combinations are similar. default:0.7\n"
-//"      -3, --blockReadThreshold=[0~1]  give up phasing pair if the number of block's reads of the two combinations are similar. default:1.0\n"
-//"      -i, --islandBlockLength=Num     phasing across smaller blocks if crossSNP is greater than threshold. default:10000\n"
-
-static const char* shortopts = "s:b:o:t:r:d:c:1:4:a:q:j:i:v:n:m:x:y:";
+static const char* shortopts = "s:b:o:t:r:d:c:1:a:q:j:i:v:n:m";
 
 enum { OPT_HELP = 1 , DOT_FILE, SV_FILE, IS_ONT, IS_PB, VERSION};
 
@@ -66,11 +60,7 @@ static const struct option longopts[] = {
     { "threads",              required_argument,  NULL, 't' },
     { "distance",             required_argument,  NULL, 'd' },
     { "crossSNP",             required_argument,  NULL, 'c' },
-//    { "islandBlockLength",    required_argument,  NULL, 'i' },
     { "readsThreshold",       required_argument,  NULL, '1' },
-//    { "qualityThreshold",     required_argument,  NULL, '2' },
-//    { "blockReadThreshold",   required_argument,  NULL, '3' },
-    { "svReadsThreshold",     required_argument,  NULL, '4' },
     { "connectAdjacent",      required_argument,  NULL, 'a' },
     { "mappingQuality",       required_argument,  NULL, 'q' },
     { "judgeInconsistent",    required_argument,  NULL, 'j' },
@@ -78,10 +68,6 @@ static const struct option longopts[] = {
     { "confidentHaplotype",   required_argument,  NULL, 'v' },
     { "alleleConsistentRatio",required_argument,  NULL, 'n' },
     { "maxAlleleRatio",       required_argument,  NULL, 'm' },
-    
-    { "test1",       required_argument,  NULL, 'x' },
-    { "test2",       required_argument,  NULL, 'y' },
-    
     { NULL, 0, NULL, 0 }
 };
 
@@ -90,7 +76,6 @@ namespace opt
     static int numThreads = 1;
     static int distance = 300000;
     static int crossSNP = 15;
-    //static int islandBlockLength = 10000;
     static std::string snpFile="";
     static std::string svFile="";
     static std::string bamFile="";
@@ -111,15 +96,8 @@ namespace opt
     static double maxAlleleRatio = 0.65;
     
     double readsThreshold = 0.05;
-    //double qualityThreshold = 0.7;
-    //double blockReadThreshold = 1;
-    
-    double svReadsThreshold = 0.6;
 
     std::string command;
-    
-    double test1;
-    double test2;
 }
 
 void PhasingOptions(int argc, char** argv)
@@ -139,26 +117,14 @@ void PhasingOptions(int argc, char** argv)
         case 'r': arg >> opt::fastaFile; break;  
         case 'd': arg >> opt::distance; break;  
         case 'c': arg >> opt::crossSNP; break;  
-        //case 'i': arg >> opt::islandBlockLength; break;  
-        
         case '1': arg >> opt::readsThreshold; break; 
-        //case '2': arg >> opt::qualityThreshold; break; 
-        //case '3': arg >> opt::blockReadThreshold; break; 
-        case '4': arg >> opt::svReadsThreshold; break; 
-        
         case 'a': arg >> opt::connectAdjacent; break;
         case 'q': arg >> opt::mappingQuality; break;
-        
         case 'j': arg >> opt::judgeInconsistent; break;
         case 'i': arg >> opt::inconsistentThreshold; break;
         case 'v': arg >> opt::confidentHaplotype; break;
-        
         case 'n': arg >> opt::alleleConsistentRatio; break;
         case 'm': arg >> opt::maxAlleleRatio; break;
-
-        case 'x': arg >> opt::test1; break;
-        case 'y': arg >> opt::test2; break;
-
         case DOT_FILE: opt::generateDot=true; break;
         case IS_ONT: opt::isONT=true; break;
         case IS_PB: opt::isPB=true; break;
@@ -238,14 +204,7 @@ void PhasingOptions(int argc, char** argv)
                   << "\n please check -c, --crossSNP=Num\n";
         die = true;
     }
-    /*
-    if ( opt::islandBlockLength < 0 ){
-        std::cerr << SUBPROGRAM " invalid islandBlockLength. value: " 
-                  << opt::islandBlockLength 
-                  << "\n please check -i, --islandBlockLength=Num\n";
-        die = true;
-    }
-    */
+
     if ( opt::connectAdjacent < 0 ){
         std::cerr << SUBPROGRAM " invalid connectAdjacent. value: " 
                   << opt::connectAdjacent 
@@ -264,27 +223,6 @@ void PhasingOptions(int argc, char** argv)
         std::cerr << SUBPROGRAM " invalid readsThreshold. value: " 
                   << opt::readsThreshold 
                   << "\n please check -1, --readsThreshold=[0~1]\n";
-        die = true;
-    }
-    /*
-    if ( opt::qualityThreshold < 0 || opt::qualityThreshold > 1 ){
-        std::cerr << SUBPROGRAM " invalid qualityThreshold. value: " 
-                  << opt::qualityThreshold 
-                  << "\n please check -2, --qualityThreshold=[0~1]\n";
-        die = true;
-    }
-    
-    if ( opt::blockReadThreshold < 0 || opt::blockReadThreshold > 1 ){
-        std::cerr << SUBPROGRAM " invalid blockReadThreshold. value: " 
-                  << opt::blockReadThreshold 
-                  << "\n please check -3, --blockReadThreshold=[0~1]\n";
-        die = true;
-    }
-    */
-    if ( opt::svReadsThreshold < 0 || opt::svReadsThreshold > 1 ){
-        std::cerr << SUBPROGRAM " invalid svReadsThreshold. value: " 
-                  << opt::svReadsThreshold 
-                  << "\n please check -4, --svReadsThreshold=[0~1]\n";
         die = true;
     }
 
@@ -306,7 +244,6 @@ int PhasingMain(int argc, char** argv, std::string in_version)
     ecParams.numThreads=opt::numThreads;
     ecParams.distance=opt::distance;
     ecParams.crossSNP=opt::crossSNP;
-    //ecParams.islandBlockLength=opt::islandBlockLength;
     ecParams.snpFile=opt::snpFile;
     ecParams.svFile=opt::svFile;
     ecParams.bamFile=opt::bamFile;
@@ -324,18 +261,12 @@ int PhasingMain(int argc, char** argv, std::string in_version)
     ecParams.inconsistentThreshold=opt::inconsistentThreshold;
     
     ecParams.readsThreshold=opt::readsThreshold;
-    //ecParams.qualityThreshold=opt::qualityThreshold;
-    //ecParams.blockReadThreshold=opt::blockReadThreshold;
-    ecParams.svReadsThreshold=opt::svReadsThreshold;
     
     ecParams.alleleConsistentRatio=opt::alleleConsistentRatio;
     ecParams.maxAlleleRatio=opt::maxAlleleRatio;
     
     ecParams.version=in_version;
     ecParams.command=opt::command;
-    
-    ecParams.test1=opt::test1;
-    ecParams.test2=opt::test2;
     
     PhasingProcess processor(ecParams);
 

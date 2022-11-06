@@ -38,7 +38,6 @@ class SubEdge{
         void addSubEdge(int currentQuality, Variant connectNode, std::string readName);
         std::vector<std::string> showEdge(std::string message);
         std::pair<int,int> BestPair(int targetPos);
-        std::vector<std::string> getSupportRead(int breakNodePosition);
         void getReadVariant(std::map< std::string,std::map<int,int> > &readVariantMap);
 };
 
@@ -50,7 +49,7 @@ struct VariantEdge{
 
     VariantEdge(int currPos);
     // node pair 
-    std::pair<PosAllele,PosAllele> findBestEdgePair(int targetPos, bool isONT, double diffRatioThreshold, double svReadSimilarRatio, bool conatinSV, bool repair);
+    std::pair<PosAllele,PosAllele> findBestEdgePair(int targetPos, bool isONT, double diffRatioThreshold, bool repair);
     // number of read of two node. AA and AB combination
     std::pair<int,int> findNumberOfRead(int targetPos);
 };
@@ -95,7 +94,6 @@ class VairiantGraph{
         
         // block phasing
         std::vector<ReadVariant> getBlockRead(std::pair<int,std::vector<int> > currentBlockVec, BlockRead &totalRead , int sampleNum);
-        bool connectBlockByCommonRead();
         bool blockPhaseing();
 
         // produce PS tag and determine phased GT tag
