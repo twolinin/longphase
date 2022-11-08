@@ -4,7 +4,7 @@
 #include "Haplotag.h"
 
 #define PROGRAM_BIN "main"
-#define VERSION "1.4dev"
+#define VERSION "1.4"
 
 static std::string version = VERSION;
 
