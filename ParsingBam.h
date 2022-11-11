@@ -33,40 +33,36 @@ class FastaParser{
     
 };
 
-class VariantParser{
+class SnpParser{
     
     private:
         PhasingParameters *params;
-        std::string variantFile;
+        //std::string variantFile;
         // chr, variant position (0-base), allele haplotype
         std::map<std::string, std::map<int, RefAlt> > chrVariant;
         // id and idx
         std::vector<std::string> chrName;
         // chr, variant position (0-base)
         std::map<std::string, std::map<int, bool> > chrVariantHomopolymer;
-        
-        int homopolymerEnd(int snp_pos, const std::string &ref_string);
-    
+        // output parser
         void compressInput(std::string resultPrefix, PhasingResult phasingResult);
         void unCompressInput(std::string resultPrefix, PhasingResult phasingResult);
         void writeLine(std::string &input, bool &ps_def, std::ofstream &resultVcf, PhasingResult &phasingResult);
     
     public:
     
-        VariantParser(PhasingParameters &in_params);
-        ~VariantParser();
+        SnpParser(PhasingParameters &in_params);
+        ~SnpParser();
             
         std::map<int, RefAlt> getVariants(std::string chrName);  
-        
-        std::map<int, bool> getHomopolymeVariants(std::string chrName);  
-        
+
         std::vector<std::string> getChrVec();
         
         bool findChromosome(std::string chrName);
         
         int getLastSNP(std::string chrName);
         
-        void writeResult(std::string resultPrefix, PhasingResult phasingResult);
+        void writeResult(PhasingResult phasingResult);
 
         bool findSNP(std::string chr, int posistion);
         
@@ -76,30 +72,30 @@ class VariantParser{
 class SVParser{
     
     private:
-        VariantParser *snpFile;
-        
-        std::string variantFile;
+        PhasingParameters *params;
+        SnpParser *snpFile;
+
         // chr , variant position (0-base), read
         std::map<std::string, std::map<int, std::map<std::string ,bool> > > chrVariant;
         // chr, variant position (0-base)
         std::map<std::string, std::map<int, bool> > posDuplicate;
-        
+        // input parser
         void compressParser(std::string &variantFile);
         void unCompressParser(std::string &variantFile);
         void parserProcess(std::string &input);
-
+        // output parser
         void compressInput(std::string resultPrefix, PhasingResult phasingResult);
         void unCompressInput(std::string resultPrefix, PhasingResult phasingResult);
         void writeLine(std::string &input, bool &ps_def, std::ofstream &resultVcf, PhasingResult &phasingResult);
         
     public:
     
-        SVParser(std::string variantFile, VariantParser &snpFile);
+        SVParser(PhasingParameters &params, SnpParser &snpFile);
         ~SVParser();
             
         std::map<int, std::map<std::string ,bool> > getVariants(std::string chrName);  
 
-        void writeResult(std::string resultPrefix, PhasingResult phasingResult);
+        void writeResult(PhasingResult phasingResult);
 };
 
 struct Alignment{
@@ -127,15 +123,13 @@ class BamParser{
         std::map<int, std::map<std::string ,bool> > currentSV;
         std::map<int, std::map<std::string ,bool> >::iterator firstSVIter;
         void get_snp(const Alignment &align, std::vector<ReadVariant> &readVariantVec, const std::string &ref_string, bool isONT);
-        //int homopolymerLength(int snp_pos, const std::string &ref_string);
-        bool continueHomopolimer(int snp_pos, const std::string &ref_string);
-        
+
         // SV occur 
         std::map<int, int> occurSV;
         std::map<int, int> noSV;
     
     public:
-        BamParser(std::string chrName, std::string inputBamFile, VariantParser snpMap, SVParser svFile);
+        BamParser(std::string chrName, std::string inputBamFile, SnpParser snpMap, SVParser svFile);
         ~BamParser();
         
         void direct_detect_alleles(int lastSNPPos, PhasingParameters params, std::vector<ReadVariant> &readVariantVec , const std::string &ref_string);

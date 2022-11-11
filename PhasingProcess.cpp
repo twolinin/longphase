@@ -7,13 +7,13 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
     // load SNP vcf file
     std::time_t begin = time(NULL);
     std::cerr<< "parsing VCF ... ";
-    VariantParser snpFile(params);
+    SnpParser snpFile(params);
     std::cerr<< difftime(time(NULL), begin) << "s\n";
     
     // load SV vcf file
     begin = time(NULL);
     std::cerr<< "parsing SV VCF ... ";
-    SVParser svFile(params.svFile, snpFile);
+    SVParser svFile(params, snpFile);
     std::cerr<< difftime(time(NULL), begin) << "s\n";
  
     // parsing ref fasta 
@@ -90,13 +90,13 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
     }
     std::cerr<< "writeResult ... ";
     begin = time(NULL);
-    snpFile.writeResult(params.resultPrefix, phasingResult);
+    snpFile.writeResult(phasingResult);
     std::cerr<< difftime(time(NULL), begin) << "s\n";
     
     if(params.svFile!=""){
         std::cerr<< "write SV Result ... ";
         begin = time(NULL);
-        svFile.writeResult(params.resultPrefix, phasingResult);
+        svFile.writeResult(phasingResult);
         std::cerr<< difftime(time(NULL), begin) << "s\n";
     }
 

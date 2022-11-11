@@ -42,11 +42,10 @@ FastaParser::~FastaParser(){
  
 }
 
-VariantParser::VariantParser(PhasingParameters &in_params){
+SnpParser::SnpParser(PhasingParameters &in_params){
     params = &in_params;
-    variantFile = params->snpFile;
     // open vcf file
-    htsFile * inf = bcf_open(variantFile.c_str(), "r");
+    htsFile * inf = bcf_open(params->snpFile.c_str(), "r");
     // read header
     bcf_hdr_t *hdr = bcf_hdr_read(inf);
     // counters
@@ -121,11 +120,12 @@ VariantParser::VariantParser(PhasingParameters &in_params){
         } 
     }
 }
-VariantParser::~VariantParser(){
+
+SnpParser::~SnpParser(){
     
 }
 
-std::map<int, RefAlt> VariantParser::getVariants(std::string chrName){
+std::map<int, RefAlt> SnpParser::getVariants(std::string chrName){
     std::map<int, RefAlt> targetVariants;
     std::map<std::string, std::map<int, RefAlt> >::iterator chrIter = chrVariant.find(chrName);
     
@@ -135,11 +135,11 @@ std::map<int, RefAlt> VariantParser::getVariants(std::string chrName){
     return targetVariants;
 }
 
-std::vector<std::string> VariantParser::getChrVec(){
+std::vector<std::string> SnpParser::getChrVec(){
     return chrName;
 }
 
-bool VariantParser::findChromosome(std::string chrName){
+bool SnpParser::findChromosome(std::string chrName){
     std::map<std::string, std::map< int, RefAlt > >::iterator chrVariantIter = chrVariant.find(chrName);
     // this chromosome not exist in this file. 
     if(chrVariantIter == chrVariant.end())
@@ -147,7 +147,7 @@ bool VariantParser::findChromosome(std::string chrName){
     return true;
 }
 
-int VariantParser::getLastSNP(std::string chrName){
+int SnpParser::getLastSNP(std::string chrName){
     std::map<std::string, std::map< int, RefAlt > >::iterator chrVariantIter = chrVariant.find(chrName);
     // this chromosome not exist in this file. 
     if(chrVariantIter == chrVariant.end())
@@ -160,29 +160,29 @@ int VariantParser::getLastSNP(std::string chrName){
     return (*lastVariantIter).first;
 }
 
-void VariantParser::writeResult(std::string resultPrefix, PhasingResult phasingResult){
+void SnpParser::writeResult(PhasingResult phasingResult){
 
-    if( variantFile.find("gz") != std::string::npos ){
+    if( params->resultPrefix.find("gz") != std::string::npos ){
         // .vcf.gz 
-        compressInput(resultPrefix,phasingResult);
+        compressInput(params->resultPrefix,phasingResult);
     }
-    else if( variantFile.find("vcf") != std::string::npos ){
+    else if( params->resultPrefix.find("vcf") != std::string::npos ){
         // .vcf
-        unCompressInput(resultPrefix,phasingResult);
+        unCompressInput(params->resultPrefix,phasingResult);
     }
     return;
 }
 
-void VariantParser::compressInput(std::string resultPrefix, PhasingResult phasingResult){
+void SnpParser::compressInput(std::string resultPrefix, PhasingResult phasingResult){
     
-    gzFile file = gzopen(variantFile.c_str(), "rb");
+    gzFile file = gzopen(params->snpFile.c_str(), "rb");
     std::ofstream resultVcf(resultPrefix+".vcf");
     
     if(!resultVcf.is_open()){
         std::cout<< "Fail to open write file: " << resultPrefix+".vcf" << "\n";
     }
     else if(!file){
-        std::cout<< "Fail to open vcf: " << variantFile << "\n";
+        std::cout<< "Fail to open vcf: " << params->snpFile << "\n";
     }
     else{
         bool ps_def = false;
@@ -221,15 +221,15 @@ void VariantParser::compressInput(std::string resultPrefix, PhasingResult phasin
     }
 }
 
-void VariantParser::unCompressInput(std::string resultPrefix, PhasingResult phasingResult){
-    std::ifstream originVcf(variantFile);
+void SnpParser::unCompressInput(std::string resultPrefix, PhasingResult phasingResult){
+    std::ifstream originVcf(params->snpFile);
     std::ofstream resultVcf(resultPrefix+".vcf");
     
     if(!resultVcf.is_open()){
         std::cout<< "Fail to open write file: " << resultPrefix+".vcf" << "\n";
     }
     else if(!originVcf.is_open()){
-        std::cout<< "Fail to open vcf: " << variantFile << "\n";
+        std::cout<< "Fail to open vcf: " << params->snpFile << "\n";
     }
     else{
         bool ps_def = false;
@@ -240,7 +240,8 @@ void VariantParser::unCompressInput(std::string resultPrefix, PhasingResult phas
         }
     }
 }
-void VariantParser::writeLine(std::string &input, bool &ps_def, std::ofstream &resultVcf, PhasingResult &phasingResult){
+
+void SnpParser::writeLine(std::string &input, bool &ps_def, std::ofstream &resultVcf, PhasingResult &phasingResult){
     // header
     if( input.find("#")!= std::string::npos){
         // avoid double definition
@@ -269,7 +270,6 @@ void VariantParser::writeLine(std::string &input, bool &ps_def, std::ofstream &r
         std::string key = fields[0] + "_" + std::to_string(posIdx);
 
         PhasingResult::iterator psElementIter =  phasingResult.find(key);
-        std::map<int, RefAlt>::iterator posIter = chrVariant[fields[0]].find(posIdx);
 
         // PS flag already exist, erase PS info
         if( fields[8].find("PS")!= std::string::npos ){
@@ -341,7 +341,7 @@ void VariantParser::writeLine(std::string &input, bool &ps_def, std::ofstream &r
         }
 
         // this pos is phase
-        if( psElementIter != phasingResult.end() && posIter != chrVariant[fields[0]].end()){
+        if( psElementIter != phasingResult.end() ){
             // add PS flag and value
             fields[8] = fields[8] + ":PS";
             fields[9] = fields[9] + ":" + std::to_string((*psElementIter).second.block);
@@ -384,8 +384,7 @@ void VariantParser::writeLine(std::string &input, bool &ps_def, std::ofstream &r
     }
 }
 
-
-bool VariantParser::findSNP(std::string chr, int position){
+bool SnpParser::findSNP(std::string chr, int position){
     std::map<std::string, std::map<int, RefAlt> >::iterator chrIter = chrVariant.find(chr);
     // empty chromosome
     if( chrIter == chrVariant.end() )
@@ -399,7 +398,7 @@ bool VariantParser::findSNP(std::string chr, int position){
     return true;
 }
 
-void VariantParser::filterSNP(std::string chr, std::vector<ReadVariant> &readVariantVec, std::string &chr_reference){
+void SnpParser::filterSNP(std::string chr, std::vector<ReadVariant> &readVariantVec, std::string &chr_reference){
     
     // pos, <allele, <strand, True>
     std::map<int, std::map<int, std::map<int, bool> > > posAlleleStrand;
@@ -474,41 +473,17 @@ void VariantParser::filterSNP(std::string chr, std::vector<ReadVariant> &readVar
     }
 }
 
-std::map<int, bool> VariantParser::getHomopolymeVariants(std::string chrName){
-    std::map<int, bool> targetVariants;
-    std::map<std::string, std::map<int, bool> >::iterator chrIter = chrVariantHomopolymer.find(chrName);
-    
-    if( chrIter != chrVariantHomopolymer.end() )
-        targetVariants =  (*chrIter).second;
-        
-    return targetVariants;
-}
-
-int VariantParser::homopolymerEnd(int snp_pos, const std::string &ref_string){
-    char element = ref_string.at(snp_pos);
-    int ref_len = ref_string.length();
-    int pos = snp_pos;
-    
-    while( ref_string.at(pos) == element ){
-        pos++;
-        if( pos + 1 >= ref_len )
-            return pos;
-    }
-    
-    return pos-1;
-}
-
-SVParser::SVParser(std::string variantFile, VariantParser &in_snpFile):variantFile(variantFile){
-    
+SVParser::SVParser(PhasingParameters &in_params, SnpParser &in_snpFile){
+    params = &in_params;
     snpFile = &in_snpFile;
     
-    if( variantFile.find("gz") != std::string::npos ){
+    if( params->svFile.find("gz") != std::string::npos ){
         // .vcf.gz 
-        compressParser(variantFile);
+        compressParser(params->svFile);
     }
-    else if( variantFile.find("vcf") != std::string::npos ){
+    else if( params->svFile.find("vcf") != std::string::npos ){
         // .vcf
-        unCompressParser(variantFile);
+        unCompressParser(params->svFile);
     }
 
     // erase SV pos if this pos appear two or more times
@@ -523,6 +498,7 @@ SVParser::SVParser(std::string variantFile, VariantParser &in_snpFile):variantFi
         }
     }
 }
+
 SVParser::~SVParser(){ 
 }
 
@@ -567,6 +543,7 @@ void SVParser::compressParser(std::string &variantFile){
         gzclose (file);
     }    
 }
+
 void SVParser::unCompressParser(std::string &variantFile){
     std::ifstream originVcf(variantFile);
     if(variantFile=="")
@@ -583,6 +560,7 @@ void SVParser::unCompressParser(std::string &variantFile){
         }
     }
 }
+
 void SVParser::parserProcess(std::string &input){
     if( input.find("#")!= std::string::npos){
 
@@ -655,7 +633,6 @@ void SVParser::parserProcess(std::string &input){
     }
 }
 
-
 std::map<int, std::map<std::string ,bool> > SVParser::getVariants(std::string chrName){
     std::map<int, std::map<std::string ,bool> > targetVariants;
     std::map<std::string, std::map<int, std::map<std::string ,bool> > >::iterator chrIter = chrVariant.find(chrName);
@@ -666,29 +643,29 @@ std::map<int, std::map<std::string ,bool> > SVParser::getVariants(std::string ch
     return targetVariants;
 }
 
-void SVParser::writeResult(std::string resultPrefix, PhasingResult phasingResult){
+void SVParser::writeResult(PhasingResult phasingResult){
     
-    if( variantFile.find("gz") != std::string::npos ){
+    if( params->resultPrefix.find("gz") != std::string::npos ){
         // .vcf.gz 
-        compressInput(resultPrefix,phasingResult);
+        compressInput(params->resultPrefix, phasingResult);
     }
-    else if( variantFile.find("vcf") != std::string::npos ){
+    else if( params->resultPrefix.find("vcf") != std::string::npos ){
         // .vcf
-        unCompressInput(resultPrefix,phasingResult);
+        unCompressInput(params->resultPrefix, phasingResult);
     }
     return;
 }
 
 void SVParser::compressInput(std::string resultPrefix, PhasingResult phasingResult){
     
-    gzFile file = gzopen(variantFile.c_str(), "rb");
+    gzFile file = gzopen(params->svFile.c_str(), "rb");
     std::ofstream resultVcf(resultPrefix+"_SV.vcf");
     
     if(!resultVcf.is_open()){
         std::cout<< "Fail to open write file: " << resultPrefix+"_SV.vcf" << "\n";
     }
     else if(!file){
-        std::cout<< "Fail to open vcf: " << variantFile << "\n";
+        std::cout<< "Fail to open vcf: " << params->svFile << "\n";
     }
     else{
         bool ps_def = false;
@@ -726,15 +703,16 @@ void SVParser::compressInput(std::string resultPrefix, PhasingResult phasingResu
         gzclose (file);
     }
 }
+
 void SVParser::unCompressInput(std::string resultPrefix, PhasingResult phasingResult){
-    std::ifstream originVcf(variantFile);
+    std::ifstream originVcf(params->svFile);
     std::ofstream resultVcf(resultPrefix+"_SV.vcf");
     
     if(!resultVcf.is_open()){
         std::cout<< "Fail to open write file: " << resultPrefix+"_SV.vcf" << "\n";
     }
     else if(!originVcf.is_open()){
-        std::cout<< "Fail to open vcf: " << variantFile << "\n";
+        std::cout<< "Fail to open vcf: " << params->svFile << "\n";
     }
     else{
         bool ps_def = false;
@@ -748,6 +726,7 @@ void SVParser::unCompressInput(std::string resultPrefix, PhasingResult phasingRe
         }
     }
 }
+
 void SVParser::writeLine(std::string &input, bool &ps_def, std::ofstream &resultVcf, PhasingResult &phasingResult){
     // header
     if( input.find("#")!= std::string::npos){
@@ -759,10 +738,10 @@ void SVParser::writeLine(std::string &input, bool &ps_def, std::ofstream &result
         if(input.find("##")== std::string::npos && ps_def == false){
             resultVcf <<  "##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase set identifier\">\n";
         }
-        /*if( input.find("##")== std::string::npos){
+        if( input.find("##")== std::string::npos){
             resultVcf << "##longphaseVersion=" << params->version << "\n";
             resultVcf << "##commandline=\"" << params->command << "\"\n";
-        }*/
+        }
         resultVcf << input << "\n";
     }
     else if( input.find("#")== std::string::npos ){
@@ -779,7 +758,6 @@ void SVParser::writeLine(std::string &input, bool &ps_def, std::ofstream &result
         std::string key = fields[0] + "_" + std::to_string(posIdx);
 
         PhasingResult::iterator psElementIter =  phasingResult.find(key);
-        std::map<int, std::map<std::string ,bool> >::iterator posIter = chrVariant[chr].find(posIdx);
                 
         // PS flag already exist, erase PS info
         if( fields[8].find("PS")!= std::string::npos ){
@@ -851,7 +829,7 @@ void SVParser::writeLine(std::string &input, bool &ps_def, std::ofstream &result
         }
                 
         // this pos is phase and exist in map
-        if( psElementIter != phasingResult.end() && posIter != chrVariant[chr].end() ){
+        if( psElementIter != phasingResult.end() ){
                     
             // add PS flag and value
             fields[8] = fields[8] + ":PS";
@@ -894,7 +872,7 @@ void SVParser::writeLine(std::string &input, bool &ps_def, std::ofstream &result
     }
 }
 
-BamParser::BamParser(std::string inputChrName, std::string inputBamFile, VariantParser snpMap, SVParser svFile):chrName(inputChrName),BamFile(inputBamFile){
+BamParser::BamParser(std::string inputChrName, std::string inputBamFile, SnpParser snpMap, SVParser svFile):chrName(inputChrName),BamFile(inputBamFile){
     // use chromosome to find recorded snp map
     currentVariants = snpMap.getVariants(chrName);
     // set skip variant start iterator
@@ -909,6 +887,7 @@ BamParser::BamParser(std::string inputChrName, std::string inputBamFile, Variant
     currentSV = svFile.getVariants(chrName);
     firstSVIter = currentSV.begin();
 }
+
 BamParser::~BamParser(){
 }
 
@@ -1012,35 +991,6 @@ void BamParser::direct_detect_alleles(int lastSNPPos, PhasingParameters params, 
     bam_destroy1(aln);
 	sam_close(fp_in);
     hts_tpool_destroy(threadPool.pool);
-}
-
-bool BamParser::continueHomopolimer(int snp_pos, const std::string &ref_string){
-    int homopolymer_length = 1;
-    char element = ref_string.at(snp_pos);
-    bool neighbor_is_homopolymer = false;
-    
-    int pos = snp_pos-1;
-    while( ref_string.at(pos) == element ){
-        pos--;
-        homopolymer_length++;
-    }
-    
-    if( homopolymerLength(pos,ref_string) >= 3 )
-        neighbor_is_homopolymer = true;
-        
-    pos = snp_pos+1;
-    while( ref_string.at(pos) == element ){
-        pos++;
-        homopolymer_length++;
-    }
-    
-    if( homopolymerLength(pos,ref_string) >= 3 )
-        neighbor_is_homopolymer = true;
-    
-    if( homopolymer_length >=3 && neighbor_is_homopolymer)
-        return true;
-    
-    return false;
 }
 
 void BamParser::get_snp(const Alignment &align, std::vector<ReadVariant> &readVariantVec,const std::string &ref_string, bool isONT){
@@ -1286,8 +1236,5 @@ void BamParser::svFilter(std::vector<ReadVariant> &readVariantVec){
         }
     }
 }
-
-
-
 
 
