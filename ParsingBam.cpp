@@ -162,11 +162,11 @@ int SnpParser::getLastSNP(std::string chrName){
 
 void SnpParser::writeResult(PhasingResult phasingResult){
 
-    if( params->resultPrefix.find("gz") != std::string::npos ){
+    if( params->snpFile.find("gz") != std::string::npos ){
         // .vcf.gz 
         compressInput(params->resultPrefix,phasingResult);
     }
-    else if( params->resultPrefix.find("vcf") != std::string::npos ){
+    else if( params->snpFile.find("vcf") != std::string::npos ){
         // .vcf
         unCompressInput(params->resultPrefix,phasingResult);
     }
@@ -645,11 +645,11 @@ std::map<int, std::map<std::string ,bool> > SVParser::getVariants(std::string ch
 
 void SVParser::writeResult(PhasingResult phasingResult){
     
-    if( params->resultPrefix.find("gz") != std::string::npos ){
+    if( params->svFile.find("gz") != std::string::npos ){
         // .vcf.gz 
         compressInput(params->resultPrefix, phasingResult);
     }
-    else if( params->resultPrefix.find("vcf") != std::string::npos ){
+    else if( params->svFile.find("vcf") != std::string::npos ){
         // .vcf
         unCompressInput(params->resultPrefix, phasingResult);
     }
