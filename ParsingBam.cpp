@@ -9,6 +9,8 @@
 // bam parser modify from 
 // https://github.com/whatshap/whatshap/blob/9882248c722b1020321fea6e9491c1cc5b75354b/whatshap/variants.py
 
+
+// FASTA
 FastaParser::FastaParser(std::string fastaFile ,  std::vector<std::string> chrName , std::vector<int> last_pos):
     fastaFile(fastaFile),
     chrName(chrName),
@@ -38,11 +40,148 @@ FastaParser::FastaParser(std::string fastaFile ,  std::vector<std::string> chrNa
 
     }
 }
+
 FastaParser::~FastaParser(){
  
 }
 
+
+// BASE PARSE
+void BaseVairantParser::compressParser(std::string &variantFile){
+    gzFile file = gzopen(variantFile.c_str(), "rb");
+    if(variantFile=="")
+        return;
+    if(!file){
+        std::cout<< "Fail to open vcf: " << variantFile << "\n";
+    }
+    else{  
+        char buffer[1048576]; // 1M
+        char* offset = buffer;
+            
+        while(true) {
+            int len = sizeof(buffer)-(offset-buffer);
+            if (len == 0){
+                std::cerr<<"Buffer to small for input line lengths\n";
+                exit(EXIT_FAILURE);
+            }
+
+            len = gzread(file, offset, len);
+
+            if (len == 0) break;    
+            if (len <  0){ 
+                int err;
+                fprintf (stderr, "Error: %s.\n", gzerror(file, &err));
+                exit(EXIT_FAILURE);
+            }
+
+            char* cur = buffer;
+            char* end = offset+len;
+
+            for (char* eol; (cur<end) && (eol = std::find(cur, end, '\n')) < end; cur = eol + 1)
+            {
+                std::string input = std::string(cur, eol);
+                parserProcess(input);
+            }
+            // any trailing data in [eol, end) now is a partial line
+            offset = std::copy(cur, end, buffer);
+        }
+        gzclose (file);
+    }    
+}
+
+void BaseVairantParser::unCompressParser(std::string &variantFile){
+    std::ifstream originVcf(variantFile);
+    if(variantFile=="")
+        return;
+    if(!originVcf.is_open()){
+        std::cout<< "Fail to open vcf: " << variantFile << "\n";
+        exit(1);
+    }
+    else{
+        std::string input;
+        while(! originVcf.eof() ){
+            std::getline(originVcf, input);
+            parserProcess(input);
+        }
+    }
+}
+
+void BaseVairantParser::compressInput(std::string variantFile, std::string resultFile, PhasingResult phasingResult){
+    
+    gzFile file = gzopen(variantFile.c_str(), "rb");
+    std::ofstream resultVcf(resultFile);
+    
+    if(!resultVcf.is_open()){
+        std::cout<< "Fail to open write file: " << resultFile << "\n";
+    }
+    else if(!file){
+        std::cout<< "Fail to open vcf: " << variantFile << "\n";
+    }
+    else{
+        bool ps_def = false;
+              
+        char buffer[1048576]; // 1M
+        char* offset = buffer;
+            
+        while(true) {
+            int len = sizeof(buffer)-(offset-buffer);
+            if (len == 0){
+                std::cerr<<"Buffer to small for input line lengths\n";
+                exit(EXIT_FAILURE);
+            }
+
+            len = gzread(file, offset, len);
+
+            if (len == 0) break;    
+            if (len <  0){ 
+                int err;
+                fprintf (stderr, "Error: %s.\n", gzerror(file, &err));
+                exit(EXIT_FAILURE);
+            }
+
+            char* cur = buffer;
+            char* end = offset+len;
+
+            for (char* eol; (cur<end) && (eol = std::find(cur, end, '\n')) < end; cur = eol + 1)
+            {
+                std::string input = std::string(cur, eol);
+                writeLine(input, ps_def, resultVcf, phasingResult);
+            }
+            // any trailing data in [eol, end) now is a partial line
+            offset = std::copy(cur, end, buffer);
+        }
+        gzclose (file);
+    }
+}
+
+void BaseVairantParser::unCompressInput(std::string variantFile, std::string resultFile, PhasingResult phasingResult){
+    std::ifstream originVcf(variantFile);
+    std::ofstream resultVcf(resultFile);
+    
+    if(!resultVcf.is_open()){
+        std::cout<< "Fail to open write file: " << resultFile << "\n";
+    }
+    else if(!originVcf.is_open()){
+        std::cout<< "Fail to open vcf: " << variantFile << "\n";
+    }
+    else{
+        bool ps_def = false;
+        std::string input;
+        while(! originVcf.eof() ){
+            std::getline(originVcf, input);
+            if( input != "" ){
+                writeLine(input, ps_def, resultVcf, phasingResult);
+            }
+        }
+    }
+}
+
+
+// SNP
 SnpParser::SnpParser(PhasingParameters &in_params){
+    
+    chrVariant = new std::map<std::string, std::map<int, RefAlt> >;
+    
     params = &in_params;
     // open vcf file
     htsFile * inf = bcf_open(params->snpFile.c_str(), "r");
@@ -115,21 +254,21 @@ SnpParser::SnpParser(PhasingParameters &in_params){
                 tmp.Ref = rec->d.allele[0]; 
                 tmp.Alt = rec->d.allele[1];
                 // record 
-                chrVariant[chr][variantPos] = tmp;
+                (*chrVariant)[chr][variantPos] = tmp;
             }
         } 
     }
 }
 
 SnpParser::~SnpParser(){
-    
+    delete chrVariant;
 }
 
 std::map<int, RefAlt> SnpParser::getVariants(std::string chrName){
     std::map<int, RefAlt> targetVariants;
-    std::map<std::string, std::map<int, RefAlt> >::iterator chrIter = chrVariant.find(chrName);
+    std::map<std::string, std::map<int, RefAlt> >::iterator chrIter = chrVariant->find(chrName);
     
-    if( chrIter != chrVariant.end() )
+    if( chrIter != chrVariant->end() )
         targetVariants = (*chrIter).second;
     
     return targetVariants;
@@ -140,17 +279,17 @@ std::vector<std::string> SnpParser::getChrVec(){
 }
 
 bool SnpParser::findChromosome(std::string chrName){
-    std::map<std::string, std::map< int, RefAlt > >::iterator chrVariantIter = chrVariant.find(chrName);
+    std::map<std::string, std::map< int, RefAlt > >::iterator chrVariantIter = chrVariant->find(chrName);
     // this chromosome not exist in this file. 
-    if(chrVariantIter == chrVariant.end())
+    if(chrVariantIter == chrVariant->end())
         return false;
     return true;
 }
 
 int SnpParser::getLastSNP(std::string chrName){
-    std::map<std::string, std::map< int, RefAlt > >::iterator chrVariantIter = chrVariant.find(chrName);
+    std::map<std::string, std::map< int, RefAlt > >::iterator chrVariantIter = chrVariant->find(chrName);
     // this chromosome not exist in this file. 
-    if(chrVariantIter == chrVariant.end())
+    if(chrVariantIter == chrVariant->end())
         return -1;
     // get last SNP
     std::map< int, RefAlt >::reverse_iterator lastVariantIter = (*chrVariantIter).second.rbegin();
@@ -164,81 +303,16 @@ void SnpParser::writeResult(PhasingResult phasingResult){
 
     if( params->snpFile.find("gz") != std::string::npos ){
         // .vcf.gz 
-        compressInput(params->resultPrefix,phasingResult);
+        compressInput(params->snpFile, params->resultPrefix+".vcf", phasingResult);
     }
     else if( params->snpFile.find("vcf") != std::string::npos ){
         // .vcf
-        unCompressInput(params->resultPrefix,phasingResult);
+        unCompressInput(params->snpFile, params->resultPrefix+".vcf", phasingResult);
     }
     return;
 }
 
-void SnpParser::compressInput(std::string resultPrefix, PhasingResult phasingResult){
-    
-    gzFile file = gzopen(params->snpFile.c_str(), "rb");
-    std::ofstream resultVcf(resultPrefix+".vcf");
-    
-    if(!resultVcf.is_open()){
-        std::cout<< "Fail to open write file: " << resultPrefix+".vcf" << "\n";
-    }
-    else if(!file){
-        std::cout<< "Fail to open vcf: " << params->snpFile << "\n";
-    }
-    else{
-        bool ps_def = false;
-              
-        char buffer[1048576]; // 1M
-        char* offset = buffer;
-            
-        while(true) {
-            int len = sizeof(buffer)-(offset-buffer);
-            if (len == 0){
-                std::cerr<<"Buffer to small for input line lengths\n";
-                exit(EXIT_FAILURE);
-            }
-
-            len = gzread(file, offset, len);
-
-            if (len == 0) break;    
-            if (len <  0){ 
-                int err;
-                fprintf (stderr, "Error: %s.\n", gzerror(file, &err));
-                exit(EXIT_FAILURE);
-            }
-
-            char* cur = buffer;
-            char* end = offset+len;
-
-            for (char* eol; (cur<end) && (eol = std::find(cur, end, '\n')) < end; cur = eol + 1)
-            {
-                std::string input = std::string(cur, eol);
-                writeLine(input, ps_def, resultVcf, phasingResult);
-            }
-            // any trailing data in [eol, end) now is a partial line
-            offset = std::copy(cur, end, buffer);
-        }
-        gzclose (file);
-    }
-}
-
-void SnpParser::unCompressInput(std::string resultPrefix, PhasingResult phasingResult){
-    std::ifstream originVcf(params->snpFile);
-    std::ofstream resultVcf(resultPrefix+".vcf");
-    
-    if(!resultVcf.is_open()){
-        std::cout<< "Fail to open write file: " << resultPrefix+".vcf" << "\n";
-    }
-    else if(!originVcf.is_open()){
-        std::cout<< "Fail to open vcf: " << params->snpFile << "\n";
-    }
-    else{
-        bool ps_def = false;
-        std::string input;
-        while(! originVcf.eof() ){
-            std::getline(originVcf, input);
-            writeLine(input, ps_def, resultVcf, phasingResult);
-        }
-    }
+void SnpParser::parserProcess(std::string &input){
 }
 
 void SnpParser::writeLine(std::string &input, bool &ps_def, std::ofstream &resultVcf, PhasingResult &phasingResult){
@@ -385,14 +459,14 @@ void SnpParser::writeLine(std::string &input, bool &ps_def, std::ofstream &resul
 }
 
 bool SnpParser::findSNP(std::string chr, int position){
-    std::map<std::string, std::map<int, RefAlt> >::iterator chrIter = chrVariant.find(chr);
+    std::map<std::string, std::map<int, RefAlt> >::iterator chrIter = chrVariant->find(chr);
     // empty chromosome
-    if( chrIter == chrVariant.end() )
+    if( chrIter == chrVariant->end() )
         return false;
     
-    std::map<int, RefAlt>::iterator posIter = chrVariant[chr].find(position);
+    std::map<int, RefAlt>::iterator posIter = (*chrVariant)[chr].find(position);
     // empty position
-    if( posIter == chrVariant[chr].end() )
+    if( posIter == (*chrVariant)[chr].end() )
         return false;
         
     return true;
@@ -424,10 +498,10 @@ void SnpParser::filterSNP(std::string chr, std::vector<ReadVariant> &readVariant
 
     // Filter SNPs that are not easy to phasing due to homopolymer
     // get variant list
-    std::map<std::string, std::map<int, RefAlt> >::iterator chrIter =  chrVariant.find(chr);
+    std::map<std::string, std::map<int, RefAlt> >::iterator chrIter =  chrVariant->find(chr);
     std::map< int, bool > errorProneSNP;
     
-    if( chrIter != chrVariant.end() ){
+    if( chrIter != chrVariant->end() ){
         std::map<int, int> consecutiveAllele;
         // iter all SNP and tag homopolymer
         for(std::map<int, RefAlt>::iterator posIter = (*chrIter).second.begin(); posIter != (*chrIter).second.end(); posIter++ ){
@@ -473,9 +547,12 @@ void SnpParser::filterSNP(std::string chr, std::vector<ReadVariant> &readVariant
     }
 }
 
+// SV
 SVParser::SVParser(PhasingParameters &in_params, SnpParser &in_snpFile){
     params = &in_params;
     snpFile = &in_snpFile;
+    
+    chrVariant = new std::map<std::string, std::map<int, std::map<std::string ,bool> > >;
     
     if( params->svFile.find("gz") != std::string::npos ){
         // .vcf.gz 
@@ -490,9 +567,9 @@ SVParser::SVParser(PhasingParameters &in_params, SnpParser &in_snpFile){
     for(std::map<std::string, std::map<int, bool> >::iterator chrIter = posDuplicate.begin(); chrIter != posDuplicate.end() ; chrIter++){
         for(std::map<int, bool>::iterator posIter = (*chrIter).second.begin() ; posIter != (*chrIter).second.end() ; posIter++ ){
             if( (*posIter).second == true){
-                std::map<int, std::map<std::string ,bool> >::iterator erasePosIter = chrVariant[(*chrIter).first].find((*posIter).first);
-                if(erasePosIter != chrVariant[(*chrIter).first].end()){
-                    chrVariant[(*chrIter).first].erase(erasePosIter);
+                std::map<int, std::map<std::string ,bool> >::iterator erasePosIter = (*chrVariant)[(*chrIter).first].find((*posIter).first);
+                if(erasePosIter != (*chrVariant)[(*chrIter).first].end()){
+                    (*chrVariant)[(*chrIter).first].erase(erasePosIter);
                 }
             }
         }
@@ -500,65 +577,7 @@ SVParser::SVParser(PhasingParameters &in_params, SnpParser &in_snpFile){
 }
 
 SVParser::~SVParser(){ 
-}
-
-void SVParser::compressParser(std::string &variantFile){
-    gzFile file = gzopen(variantFile.c_str(), "rb");
-    if(variantFile=="")
-        return;
-    if(!file){
-        std::cout<< "Fail to open vcf: " << variantFile << "\n";
-    }
-    else{  
-        char buffer[1048576]; // 1M
-        char* offset = buffer;
-            
-        while(true) {
-            int len = sizeof(buffer)-(offset-buffer);
-            if (len == 0){
-                std::cerr<<"Buffer to small for input line lengths\n";
-                exit(EXIT_FAILURE);
-            }
-
-            len = gzread(file, offset, len);
-
-            if (len == 0) break;    
-            if (len <  0){ 
-                int err;
-                fprintf (stderr, "Error: %s.\n", gzerror(file, &err));
-                exit(EXIT_FAILURE);
-            }
-
-            char* cur = buffer;
-            char* end = offset+len;
-
-            for (char* eol; (cur<end) && (eol = std::find(cur, end, '\n')) < end; cur = eol + 1)
-            {
-                std::string input = std::string(cur, eol);
-                parserProcess(input);
-            }
-            // any trailing data in [eol, end) now is a partial line
-            offset = std::copy(cur, end, buffer);
-        }
-        gzclose (file);
-    }    
-}
-
-void SVParser::unCompressParser(std::string &variantFile){
-    std::ifstream originVcf(variantFile);
-    if(variantFile=="")
-        return;
-    if(!originVcf.is_open()){
-        std::cout<< "Fail to open vcf: " << variantFile << "\n";
-        exit(1);
-    }
-    else{
-        std::string input;
-        while(! originVcf.eof() ){
-            std::getline(originVcf, input);
-            parserProcess(input);
-        }
-    }
+    delete chrVariant;
 }
 
 void SVParser::parserProcess(std::string &input){
@@ -628,17 +647,17 @@ void SVParser::parserProcess(std::string &input){
         std::string read;
         while(std::getline(totalReadStream, read, ','))
         {
-           chrVariant[chr][pos][read]= true;
+           (*chrVariant)[chr][pos][read]= true;
         }
     }
 }
 
 std::map<int, std::map<std::string ,bool> > SVParser::getVariants(std::string chrName){
     std::map<int, std::map<std::string ,bool> > targetVariants;
-    std::map<std::string, std::map<int, std::map<std::string ,bool> > >::iterator chrIter = chrVariant.find(chrName);
+    std::map<std::string, std::map<int, std::map<std::string ,bool> > >::iterator chrIter = chrVariant->find(chrName);
     
-    if( chrIter != chrVariant.end() )
-        targetVariants =  (*chrIter).second;
+    if( chrIter != chrVariant->end() )
+        targetVariants = (*chrIter).second;
         
     return targetVariants;
 }
@@ -647,84 +666,13 @@ void SVParser::writeResult(PhasingResult phasingResult){
     
     if( params->svFile.find("gz") != std::string::npos ){
         // .vcf.gz 
-        compressInput(params->resultPrefix, phasingResult);
+        compressInput(params->svFile, params->resultPrefix+"_SV.vcf", phasingResult);
     }
     else if( params->svFile.find("vcf") != std::string::npos ){
         // .vcf
-        unCompressInput(params->resultPrefix, phasingResult);
+        unCompressInput(params->svFile, params->resultPrefix+"_SV.vcf", phasingResult);
     }
     return;
-}
-
-void SVParser::compressInput(std::string resultPrefix, PhasingResult phasingResult){
-    
-    gzFile file = gzopen(params->svFile.c_str(), "rb");
-    std::ofstream resultVcf(resultPrefix+"_SV.vcf");
-    
-    if(!resultVcf.is_open()){
-        std::cout<< "Fail to open write file: " << resultPrefix+"_SV.vcf" << "\n";
-    }
-    else if(!file){
-        std::cout<< "Fail to open vcf: " << params->svFile << "\n";
-    }
-    else{
-        bool ps_def = false;
-              
-        char buffer[1048576]; // 1M
-        char* offset = buffer;
-            
-        while(true) {
-            int len = sizeof(buffer)-(offset-buffer);
-            if (len == 0){
-                std::cerr<<"Buffer to small for input line lengths\n";
-                exit(EXIT_FAILURE);
-            }
-
-            len = gzread(file, offset, len);
-
-            if (len == 0) break;    
-            if (len <  0){ 
-                int err;
-                fprintf (stderr, "Error: %s.\n", gzerror(file, &err));
-                exit(EXIT_FAILURE);
-            }
-
-            char* cur = buffer;
-            char* end = offset+len;
-
-            for (char* eol; (cur<end) && (eol = std::find(cur, end, '\n')) < end; cur = eol + 1)
-            {
-                std::string input = std::string(cur, eol);
-                writeLine(input, ps_def, resultVcf, phasingResult);
-            }
-            // any trailing data in [eol, end) now is a partial line
-            offset = std::copy(cur, end, buffer);
-        }
-        gzclose (file);
-    }
-}
-
-void SVParser::unCompressInput(std::string resultPrefix, PhasingResult phasingResult){
-    std::ifstream originVcf(params->svFile);
-    std::ofstream resultVcf(resultPrefix+"_SV.vcf");
-    
-    if(!resultVcf.is_open()){
-        std::cout<< "Fail to open write file: " << resultPrefix+"_SV.vcf" << "\n";
-    }
-    else if(!originVcf.is_open()){
-        std::cout<< "Fail to open vcf: " << params->svFile << "\n";
-    }
-    else{
-        bool ps_def = false;
-        std::string input;
-        while(! originVcf.eof() ){
-            std::getline(originVcf, input);
-            if(input.length() == 0)
-                continue;
-
-            writeLine(input, ps_def, resultVcf, phasingResult);
-        }
-    }
 }
 
 void SVParser::writeLine(std::string &input, bool &ps_def, std::ofstream &resultVcf, PhasingResult &phasingResult){
@@ -872,83 +820,105 @@ void SVParser::writeLine(std::string &input, bool &ps_def, std::ofstream &result
     }
 }
 
-BamParser::BamParser(std::string inputChrName, std::string inputBamFile, SnpParser snpMap, SVParser svFile):chrName(inputChrName),BamFile(inputBamFile){
+BamParser::BamParser(std::string inputChrName, std::string inputBamFile, SnpParser &snpMap, SVParser &svFile, METHParser &modFile):chrName(inputChrName),BamFile(inputBamFile){
+    
+    currentVariants = new std::map<int, RefAlt>;
+    currentSV = new std::map<int, std::map<std::string ,bool> >;
+    currentMod = new std::map<int, std::map<std::string ,RefAlt> >;
+    
     // use chromosome to find recorded snp map
-    currentVariants = snpMap.getVariants(chrName);
+    (*currentVariants) = snpMap.getVariants(chrName);
     // set skip variant start iterator
-    firstVariantIter = currentVariants.begin();
-    if( firstVariantIter == currentVariants.end() ){
+    firstVariantIter = currentVariants->begin();
+    if( firstVariantIter == currentVariants->end() ){
         std::cerr<< "error chromosome name or empty map.\n";
         exit(1);
     }
     else{
         
     }
-    currentSV = svFile.getVariants(chrName);
-    firstSVIter = currentSV.begin();
+    // set current chromosome SV map
+    (*currentSV) = svFile.getVariants(chrName);
+    firstSVIter = currentSV->begin();
+    // set current chromosome MOD map
+    (*currentMod) = modFile.getVariants(chrName);
+    firstModIter = currentMod->begin();
+    
 }
 
 BamParser::~BamParser(){
+    delete currentVariants;
+    delete currentSV;
+    delete currentMod;
 }
 
 void BamParser::direct_detect_alleles(int lastSNPPos, PhasingParameters params, std::vector<ReadVariant> &readVariantVec, const std::string &ref_string){
     int numThreads = params.numThreads;
-    char *bamList[numThreads];
+    /*char *bamList[numThreads];
     int chunkSize = lastSNPPos/numThreads + numThreads;
-    
+
     // create list. i.e. chr1:100-200
     for(int i=0;i<numThreads;i++){
         std::string tmp = chrName + ":" + std::to_string(i*chunkSize+1) + "-" + std::to_string((i+1)*chunkSize);
         bamList[i] = new char[tmp.length()+1];
         strcpy(bamList[i], tmp.c_str());
-    }
+    }*/
     // init data structure and get core n
     htsThreadPool threadPool = {NULL, 0};
     // open bam file
-    samFile *fp_in = hts_open(BamFile.c_str(),"r"); 
+    samFile *fp_in = hts_open(BamFile.c_str(),"r");
+    // load reference file
+    hts_set_fai_filename(fp_in, params.fastaFile.c_str() );
     // read header
-	bam_hdr_t *bamHdr = sam_hdr_read(fp_in); 
+        bam_hdr_t *bamHdr = sam_hdr_read(fp_in);
     // initialize an alignment
-	bam1_t *aln = bam_init1(); 
+        bam1_t *aln = bam_init1();
     hts_idx_t *idx = NULL;
-    
+
     if ((idx = sam_index_load(fp_in, BamFile.c_str())) == 0) {
         std::cout<<"ERROR: Cannot open index for bam file\n";
         exit(1);
     }
-    
+    /*
     hts_itr_multi_t *iter;
-
     if( (iter = sam_itr_regarray(idx, bamHdr, bamList, numThreads)) == 0){
         std::cout<<"ERROR: Cannot open iterator for region %s for bam file\n";
         exit(1);
     }
-    
+    */
+    std::string range = chrName + ":1-" + std::to_string(lastSNPPos);
+    hts_itr_t* iter = sam_itr_querys(idx, bamHdr, range.c_str());
+
+
     int result;
-    
+
     // creat thread pool
     if (!(threadPool.pool = hts_tpool_init(numThreads))) {
         fprintf(stderr, "Error creating thread pool\n");
     }
     hts_set_opt(fp_in, HTS_OPT_THREAD_POOL, &threadPool);
-    
-    while ((result = sam_itr_multi_next(fp_in, iter, aln)) >= 0) { 
+
+    while ((result = sam_itr_multi_next(fp_in, iter, aln)) >= 0) {
+        //std::cout << "parseBam\t" << bamHdr->target_name[aln->core.tid] << "\t"
+        //                          << bam_get_qname(aln) << "\t"
+        //                          << aln->core.pos << "\n";
+
         int flag = aln->core.flag;
 
         if (    aln->core.qual < params.mappingQuality  // mapping quality
              || (flag & 0x4)   != 0  // read unmapped
-             || (flag & 0x100) != 0  // secondary alignment. repeat. 
+             || (flag & 0x100) != 0  // secondary alignment. repeat.
                                      // A secondary alignment occurs when a given read could align reasonably well to more than one place.
-             || (flag & 0x400) != 0  // duplicate 
+             || (flag & 0x400) != 0  // duplicate
              // (flag & 0x800) != 0  // supplementary alignment
                                      // A chimeric alignment is represented as a set of linear alignments that do not have large overlaps.
-             ){ 
+             ){
             std::string str = bamHdr->target_name[aln->core.tid];
             continue;
         }
 
         Alignment tmp;
-        
+
         tmp.chr = bamHdr->target_name[aln->core.tid];
         tmp.refStart = aln->core.pos;
         tmp.qname = bam_get_qname(aln);
@@ -957,284 +927,391 @@ void BamParser::direct_detect_alleles(int lastSNPPos, PhasingParameters params, 
         tmp.op = (int*)malloc(tmp.cigar_len*sizeof(int));
         tmp.ol = (int*)malloc(tmp.cigar_len*sizeof(int));
         tmp.is_reverse = bam_is_rev(aln);
-        
-        //quality string
-        uint8_t *qstring = bam_get_seq(aln); 
+
+        memset(tmp.op, 0, tmp.cigar_len);
+        memset(tmp.ol, 0, tmp.cigar_len);
+
         // set string size
         tmp.qseq = (char *)malloc(tmp.qlen+1);
+        memset(tmp.qseq, 0, tmp.qlen+1);
         // set string size
         tmp.quality = (char *)malloc(tmp.qlen+1);
+        memset(tmp.quality, 0, tmp.qlen+1);
+
+        //quality string
+        uint8_t *qstring = bam_get_seq(aln);
         uint8_t *quality = bam_get_qual(aln);
-        
+
         for(int i=0; i< tmp.qlen ; i++){
             // gets nucleotide id and converts them into IUPAC id.
-            tmp.qseq[i] = seq_nt16_str[bam_seqi(qstring,i)]; 
+            tmp.qseq[i] = seq_nt16_str[bam_seqi(qstring,i)];
             // get base quality
-			tmp.quality[i] = quality[i];
-		}
- 
+                        tmp.quality[i] = quality[i];
+                }
+
         uint32_t *cigar = bam_get_cigar(aln);
         // store cigar
         for(unsigned int k =0 ; k < aln->core.n_cigar ; k++){
             tmp.op[k] = bam_cigar_op(cigar[k]);
             tmp.ol[k] = bam_cigar_oplen(cigar[k]);
         }
-        
+        std::string a= tmp.qseq;
+
         get_snp(tmp, readVariantVec, ref_string, params.isONT);
         free(tmp.quality);
         free(tmp.qseq);
         free(tmp.op);
         free(tmp.ol);
-	}
-	hts_idx_destroy(idx);
+        }
+        hts_idx_destroy(idx);
     bam_hdr_destroy(bamHdr);
     bam_destroy1(aln);
-	sam_close(fp_in);
+        sam_close(fp_in);
     hts_tpool_destroy(threadPool.pool);
 }
+
+
+
+
 
 void BamParser::get_snp(const Alignment &align, std::vector<ReadVariant> &readVariantVec,const std::string &ref_string, bool isONT){
 
     ReadVariant *tmpReadResult = new ReadVariant();
-        (*tmpReadResult).read_name = align.qname;
-        (*tmpReadResult).source_id = align.chr;
-        (*tmpReadResult).reference_start = align.refStart;
-        (*tmpReadResult).is_reverse = align.is_reverse;
+    (*tmpReadResult).read_name = align.qname;
+    (*tmpReadResult).source_id = align.chr;
+    (*tmpReadResult).reference_start = align.refStart;
+    (*tmpReadResult).is_reverse = align.is_reverse;
+
+    // Skip variants that are to the left of this read
+    while( firstVariantIter != currentVariants->end() && (*firstVariantIter).first < align.refStart )
+        firstVariantIter++;
     
-        // Skip variants that are to the left of this read
-        while( firstVariantIter != currentVariants.end() && (*firstVariantIter).first < align.refStart )
-            firstVariantIter++;
+    // Skip structure variants that are to the left of this read
+    while( firstSVIter != currentSV->end() && (*firstSVIter).first < align.refStart )
+        firstSVIter++;
+    
+    // Skip modify that are to the left of this read
+    while( firstModIter != currentMod->end() && (*firstModIter).first < align.refStart )
+        firstModIter++;
+    
+    // position relative to reference
+    int ref_pos = align.refStart;
+    // position relative to read
+    int query_pos = 0;
+    // translation char* to string;
+    std::string qseq = align.qseq;
+
+    // set variant start for current alignment
+    std::map<int, RefAlt>::iterator currentVariantIter = firstVariantIter;
+    
+    // set structure variant start for current alignment
+    std::map<int, std::map<std::string ,bool> >::iterator currentSVIter = firstSVIter;
+     
+    // set modify start for current alignment
+    std::map<int, std::map<std::string ,RefAlt> >::iterator currentModIter = firstModIter;
+    
+    // reading cigar to detect snp on this read
+    for(int i = 0; i < align.cigar_len ; i++ ){
+        int cigar_op = align.op[i];
+        int length   = align.ol[i];
         
-        // Skip structure variants that are to the left of this read
-        while( firstSVIter != currentSV.end() && (*firstSVIter).first < align.refStart )
-            firstSVIter++;
+        // iterator next modify
+        while( currentModIter != currentMod->end() && (*currentModIter).first < ref_pos ){
+			//currentModIter++;
+			// push mod into result vector
+			if( currentModIter != currentMod->end() ){
+				// check this read contain modify
+				std::map<std::string ,RefAlt>::iterator readIter = (*currentModIter).second.find(align.qname);	
+				if( readIter != (*currentModIter).second.end() && (*currentModIter).first < (*currentVariantIter).first){
+					// check varaint strand in vcf file is same as bam file
+					if( (*readIter).second.is_reverse == align.is_reverse ){
+						// -2 : forward strand
+						// -3 : reverse strand
+						int strand = ( align.is_reverse ? -3 : -2);
+						int allele = ((*readIter).second.is_modify ? 0 : 1) ;
+						Variant *tmpVariant = new Variant((*currentModIter).first, allele, strand );
+						(*tmpReadResult).variantVec.push_back( (*tmpVariant) );
+						delete tmpVariant;
+					}
+				}
+				currentModIter++;
+			}
+		}
+        // iterator next SV
+        while( currentSVIter != currentSV->end() && (*currentSVIter).first < ref_pos ){
+            currentSVIter++;
+        }
         
-        // position relative to reference
-        int ref_pos = align.refStart;
-        // position relative to read
-        int query_pos = 0;
-        // translation char* to string;
-        std::string qseq = align.qseq;
-        // translation char* to string;
+        // push SV into result vector
+        if( currentSVIter != currentSV->end() ){
+            if( (*currentSVIter).first < (*currentVariantIter).first ){
+                std::map<std::string ,bool>::iterator readIter = (*currentSV)[(*currentSVIter).first].find(align.qname);
+                // If this read not contain SV, it means this read is the same as reference genome.
+                // default this read the same as ref
+                int allele = 0; 
+                // this read contain SV.
+                if( readIter != (*currentSV)[(*currentSVIter).first].end() )
+                    allele = 1;
+                // use quality -1 to identify SVs
+                // push this SV to vector
+                Variant *tmpVariant = new Variant((*currentSVIter).first, allele, -1 );
+                (*tmpReadResult).variantVec.push_back( (*tmpVariant) );
+                delete tmpVariant;
+                // next SV iter     
+                currentSVIter++;
+            }
+        }
         
-        // set variant start for current alignment
-        std::map<int, RefAlt>::iterator currentVariantIter = firstVariantIter;
+        // iterator next variant
+        while( currentVariantIter != currentVariants->end() && (*currentVariantIter).first < ref_pos ){
+            currentVariantIter++;
+        }
         
-        // set structure variant start for current alignment
-         std::map<int, std::map<std::string ,bool> >::iterator currentSVIter = firstSVIter;
-        
-        std::map<int, RefAlt>::reverse_iterator last = currentVariants.rbegin();
-        
-        // reading cigar to detect snp on this read
-        for(int i = 0; i < align.cigar_len ; i++ ){
-            int cigar_op = align.op[i];
-            int length   = align.ol[i];
+        // CIGAR operators: MIDNSHP=X correspond 012345678
+        // 0: alignment match (can be a sequence match or mismatch)
+        // 7: sequence match
+        // 8: sequence mismatch
+        if( cigar_op == 0 || cigar_op == 7 || cigar_op == 8 ){
             
-            // iterator next variant
-            while( currentVariantIter != currentVariants.end() && (*currentVariantIter).first < ref_pos ){
+            while( currentVariantIter != currentVariants->end() && (*currentVariantIter).first < ref_pos + length){
+
+                int refAlleleLen = (*currentVariantIter).second.Ref.length();
+                int altAlleleLen = (*currentVariantIter).second.Alt.length();
+                int offset = (*currentVariantIter).first - ref_pos;
+                
+                if( query_pos + offset + 1 > int(qseq.length()) ){
+                    return;
+                }
+                
+                std::string base = qseq.substr(query_pos + offset, 1);
+                
+                int allele = -1;
+
+                if( refAlleleLen == 1 && altAlleleLen == 1){
+                    if( base == (*currentVariantIter).second.Ref )
+                        allele = 0;
+                    else if( base == (*currentVariantIter).second.Alt )
+                        allele = 1;
+                }          
+                
+                if( allele != -1 ){
+                    int base_q = align.quality[query_pos + offset];
+                    // record snp result
+                    Variant *tmpVariant = new Variant((*currentVariantIter).first, allele, base_q);
+                    (*tmpReadResult).variantVec.push_back( (*tmpVariant) );
+                    delete tmpVariant;
+                }
                 currentVariantIter++;
             }
-           
-            while( currentSVIter != currentSV.end() && (*currentSVIter).first < ref_pos )
-                currentSVIter++;
+            query_pos += length;
+            ref_pos += length;
+        }
+        // 1: insertion to the reference
+        else if( cigar_op == 1 ){
+            query_pos += length;
+        }
+        // 2: deletion from the reference
+        else if( cigar_op == 2 ){
             
-            if( currentSVIter != currentSV.end() ){
-                if( (*currentSVIter).first < (*currentVariantIter).first ){
-                    std::map<std::string ,bool>::iterator readIter = currentSV[(*currentSVIter).first].find(align.qname);
-                    // If this read not contain SV, it means this read is the same as reference genome.
-                    // default this read the same as ref
-                    int allele = 0; 
-                    // this read contain SV.
-                    if( readIter != currentSV[(*currentSVIter).first].end() )
-                        allele = 1;
-                    
-                    // generate SV read count
-                    if(allele==0){
-                        std::map<int, int>::iterator svCountIter = noSV.find((*currentSVIter).first);
-                        if( svCountIter == noSV.end() ){
-                            noSV[(*currentSVIter).first] = 0;
+            // If a reference is given
+            // it will determine whether the SNP falls in the homopolymer
+            // and start the processing of the SNP fall in the alignment GAP
+            
+            if(ref_string != "" && isONT){
+                int del_len = length;
+                if ( ref_pos + del_len + 1 == (*currentVariantIter).first ){
+                    //if( homopolymerLength((*currentVariantIter).first , ref_string) >=3 ){
+                        // special case
+                    //}
+                }
+                else if( (*currentVariantIter).first >= ref_pos  && (*currentVariantIter).first < ref_pos + del_len ){
+                    // check snp in homopolymer
+                    if( homopolymerLength((*currentVariantIter).first , ref_string) >=3 ){
+                        
+                        int refAlleleLen = (*currentVariantIter).second.Ref.length();
+                        int altAlleleLen = (*currentVariantIter).second.Alt.length();
+                        
+                        if( query_pos + 1 > int(qseq.length()) ){
+                            return;
                         }
-                        else{
-                            noSV[(*currentSVIter).first]++;
+                        // get the next match
+                        std::string base = qseq.substr(query_pos , 1);
+
+                        int allele = -1;
+
+                        if( refAlleleLen == 1 && altAlleleLen == 1){
+                            if( base == (*currentVariantIter).second.Ref )
+                                allele = 0;
+                            else if( base == (*currentVariantIter).second.Alt )
+                                allele = 1;
                         }
+                        if(allele != -1){
+                            int base_q = align.quality[query_pos];
+                            Variant *tmpVariant = new Variant((*currentVariantIter).first, allele, base_q/2);
+                            (*tmpReadResult).variantVec.push_back( (*tmpVariant) );
+                            currentVariantIter++;
+                            delete tmpVariant;
+                        }
+                        
                     }
-                    else{
-                        std::map<int, int>::iterator svCountIter = occurSV.find((*currentSVIter).first);
-                        if( svCountIter == occurSV.end() ){
-                            occurSV[(*currentSVIter).first] = 0;
-                        }
-                        else{
-                            occurSV[(*currentSVIter).first]++;
-                        }
-                    }
-                    
-                    // push this SV to vector
-                    Variant *tmpVariant = new Variant((*currentSVIter).first, allele, -1 );
-                    (*tmpReadResult).variantVec.push_back( (*tmpVariant) );
-                    // next SV iter     
-                    currentSVIter++;
                 }
             }
-            // CIGAR operators: MIDNSHP=X correspond 012345678
-            // 0: alignment match (can be a sequence match or mismatch)
-            // 7: sequence match
-            // 8: sequence mismatch
-            if( cigar_op == 0 || cigar_op == 7 || cigar_op == 8 ){
-                
-                while( currentVariantIter != currentVariants.end() && (*currentVariantIter).first < ref_pos + length){
-
-                    int refAlleleLen = (*currentVariantIter).second.Ref.length();
-                    int altAlleleLen = (*currentVariantIter).second.Alt.length();
-                    int offset = (*currentVariantIter).first - ref_pos;
-                    
-                    if( query_pos + offset + 1 > int(qseq.length()) ){
-                        return;
-                    }
-                    
-                    std::string base = qseq.substr(query_pos + offset, 1);
-                    
-                    int allele = -1;
-  
-                    if( refAlleleLen == 1 && altAlleleLen == 1){
-                        if( base == (*currentVariantIter).second.Ref )
-                            allele = 0;
-                        else if( base == (*currentVariantIter).second.Alt )
-                            allele = 1;
-                    }
-                    else{
-                        // skip this position
-                        //std::cout<< "not snp: " <<(*currentVariantIter).first + 1 << "\n";
-                        //exit(1);
-                    }            
-                    
-                    if( allele != -1 ){
-                        int base_q = align.quality[query_pos + offset];
-                        // record snp result
-                        Variant *tmpVariant = new Variant((*currentVariantIter).first, allele, base_q);
-                        (*tmpReadResult).variantVec.push_back( (*tmpVariant) );
-                    }
-                    currentVariantIter++;
-                }
-                query_pos += length;
-                ref_pos += length;
-            }
-            // 1: insertion to the reference
-            else if( cigar_op == 1 ){
-                query_pos += length;
-            }
-            // 2: deletion from the reference
-            else if( cigar_op == 2 ){
-                
-                // If a reference is given
-                // it will determine whether the SNP falls in the homopolymer
-                // and start the processing of the SNP fall in the alignment GAP
-                
-                if(ref_string != "" && isONT){
-                    int del_len = length;
-                    if ( ref_pos + del_len + 1 == (*currentVariantIter).first ){
-                        //if( homopolymerLength((*currentVariantIter).first , ref_string) >=3 ){
-                            // special case
-                        //}
-                    }
-                    else if( (*currentVariantIter).first >= ref_pos  && (*currentVariantIter).first < ref_pos + del_len ){
-                        // check snp in homopolymer
-                        if( homopolymerLength((*currentVariantIter).first , ref_string) >=3 ){
-                            
-                            int refAlleleLen = (*currentVariantIter).second.Ref.length();
-                            int altAlleleLen = (*currentVariantIter).second.Alt.length();
-                            
-                            if( query_pos + 1 > int(qseq.length()) ){
-                                return;
-                            }
-                            // get the next match
-                            std::string base = qseq.substr(query_pos , 1);
-
-                            int allele = -1;
-
-                            if( refAlleleLen == 1 && altAlleleLen == 1){
-                                if( base == (*currentVariantIter).second.Ref )
-                                    allele = 0;
-                                else if( base == (*currentVariantIter).second.Alt )
-                                    allele = 1;
-                            }
-                            if(allele != -1){
-                                int base_q = align.quality[query_pos];
-                                Variant *tmpVariant = new Variant((*currentVariantIter).first, allele, base_q/2);
-                                (*tmpReadResult).variantVec.push_back( (*tmpVariant) );
-                                currentVariantIter++;
-                            }
-                            
-                        }
-                        else{
-                        }
-                    }
-                }
-                
-                ref_pos += length;
-            }
-            // 3: skipped region from the reference
-            else if( cigar_op == 3 ){
-                ref_pos += length;
-            }
-            // 4: soft clipping (clipped sequences present in SEQ)
-            else if( cigar_op == 4 ){
-                query_pos += length;
-            }
-            // 5: hard clipping (clipped sequences NOT present in SEQ)
-            // 6: padding (silent deletion from padded reference)
-            else if( cigar_op == 5 || cigar_op == 6 ){
-                // do nothing
-            }
-            else{
-                std::cerr<< "alignment find unsupported CIGAR operation from read: " << align.qname << "\n";
-                exit(1);
-            }
-
+            
+            ref_pos += length;
         }
-        
-        if( (*tmpReadResult).variantVec.size() > 0 )
-            readVariantVec.push_back((*tmpReadResult));
-}
-
-void BamParser::svFilter(std::vector<ReadVariant> &readVariantVec){
-    
-    std::map< int, bool > lowConfidentSV;
-    
-    for(std::map<int, std::map<std::string ,bool> >::iterator svIter = currentSV.begin() ; svIter != currentSV.end() ; svIter++ ){
-        int currSVPos= (*svIter).first;
-        
-        std::map<int, int>::iterator occurSVIter = occurSV.find(currSVPos);
-        std::map<int, int>::iterator noSVIter = noSV.find(currSVPos);
-        
-        double occurSVNum = occurSVIter != occurSV.end() ? occurSV[currSVPos] : 0;
-        double noSVNum    = noSVIter    != noSV.end()    ? noSV[currSVPos] : 0;
-        
-        //std::cout<<"SV\t"<< currSVPos << "\t"<< occurSVNum << "\t" << noSVNum << "\t" << occurSVNum+noSVNum << "\t" << std::min(occurSVNum,noSVNum)/(occurSVNum+noSVNum) << "\n";
-        
-        if( std::min(occurSVNum,noSVNum)/(occurSVNum+noSVNum)<=0.1 ){
-        //if( occurSVNum + noSVNum < 10 || occurSVNum == 0 || noSVNum == 0 ){
-            lowConfidentSV[currSVPos]=true;
+        // 3: skipped region from the reference
+        else if( cigar_op == 3 ){
+            ref_pos += length;
+        }
+        // 4: soft clipping (clipped sequences present in SEQ)
+        else if( cigar_op == 4 ){
+            query_pos += length;
+        }
+        // 5: hard clipping (clipped sequences NOT present in SEQ)
+        // 6: padding (silent deletion from padded reference)
+        else if( cigar_op == 5 || cigar_op == 6 ){
+            // do nothing
+        }
+        else{
+            std::cerr<< "alignment find unsupported CIGAR operation from read: " << align.qname << "\n";
+            exit(1);
         }
     }
     
-    if( currentSV.size() > 0)
-    {
-        // iter all reads
-        for( std::vector<ReadVariant>::iterator readSNPVecIter = readVariantVec.begin() ; readSNPVecIter != readVariantVec.end() ; readSNPVecIter++ ){
-            // iter all SNPs in this read
-            for(std::vector<Variant>::iterator variantIter = (*readSNPVecIter).variantVec.begin() ; variantIter != (*readSNPVecIter).variantVec.end() ; ){
-                std::map< int, bool >::iterator svIter = lowConfidentSV.find((*variantIter).position);
+    if( (*tmpReadResult).variantVec.size() > 0 )
+        readVariantVec.push_back((*tmpReadResult));
+    
+    delete tmpReadResult;
+}
+
+
+
+
+
+
+METHParser::METHParser(PhasingParameters &in_params, SnpParser &in_snpFile){
+	params = &in_params;
+    snpFile = &in_snpFile;
+    
+    chrVariant = new std::map<std::string, std::map<int, std::map<std::string ,RefAlt> > >;
+    
+    if( params->modFile.find("gz") != std::string::npos ){
+        // .vcf.gz 
+        compressParser(params->modFile);
+    }
+    else if( params->modFile.find("vcf") != std::string::npos ){
+        // .vcf
+        unCompressParser(params->modFile);
+    }
+}
+
+METHParser::~METHParser(){
+	delete chrVariant;
+}
+
+void METHParser::parserProcess(std::string &input){
+    // header
+    if( input.find("#")== std::string::npos ){
+        std::istringstream iss(input);
+        std::vector<std::string> fields((std::istream_iterator<std::string>(iss)),std::istream_iterator<std::string>());
+
+        if( fields.size() == 0 ){
+            return;
+        }
+        
+        // trans to 0-base
+        int pos = std::stoi( fields[1] ) - 1;
+        std::string chr = fields[0];
                 
-                if( svIter != lowConfidentSV.end() ){
-                    variantIter = (*readSNPVecIter).variantVec.erase(variantIter);
-                    //std::cout<<"del\t" << (*svIter).first << "\n";
-                }
-                else{
-                    variantIter++;
-                }
-            }
+        // find GT flag
+        int colon_pos = 0;
+        int gt_pos = fields[8].find("GT");
+        for(int i =0 ; i< gt_pos ; i++){
+            if(fields[8][i]==':')
+                colon_pos++;
+        }
+        
+        // find GT value start
+        int current_colon = 0;
+        int modifu_start = 0;
+        for(unsigned int i =0; i < fields[9].length() ; i++){
+            if( current_colon >= colon_pos )
+                break;
+            if(fields[9][i]==':')
+                current_colon++;  
+            modifu_start++;
+        }
+       
+        // homo GT
+        if(fields[9][modifu_start]==fields[9][modifu_start+2]){
+            return;
+        }
+        
+        // conflict pos with SNP
+        if( (*snpFile).findSNP(chr,pos) ){
+            return;
+        }
+        
+        bool is_reverse;
+        // get strand
+        if(fields[7].find("RS=P") != std::string::npos){
+            is_reverse = false;
+        }
+        else if(fields[7].find("RS=N") != std::string::npos){
+            is_reverse = true;
+        }
+        else{
+            return;
+        }
+        
+        // get modification reads INFO
+        int read_pos = fields[7].find("MR=");
+        read_pos = fields[7].find("=",read_pos);
+        read_pos++;
+                
+        int next_field = fields[7].find(";",read_pos);
+        std::string totalRead = fields[7].substr(read_pos,next_field-read_pos);
+        std::stringstream totalMonReadStream(totalRead);
+                
+        std::string read;
+        while(std::getline(totalMonReadStream, read, ',')){
+           RefAlt tmp;
+           tmp.is_reverse = is_reverse;
+           tmp.is_modify = true;
+           (*chrVariant)[chr][pos][read]= tmp;
+		   //std::cout<<"modvcf_MR\t" << pos << "\t" << read <<"\n";
+        }
+        
+        // get nonmodification reads INFO
+        read_pos = fields[7].find("NR=");
+        read_pos = fields[7].find("=",read_pos);
+        read_pos++;
+        
+        next_field = fields[7].find(";",read_pos);
+        totalRead = fields[7].substr(read_pos,next_field-read_pos);
+        std::stringstream totalnonModReadStream(totalRead);
+        
+        while(std::getline(totalnonModReadStream, read, ',')){
+           RefAlt tmp;
+           tmp.is_reverse = is_reverse;
+           tmp.is_modify = false;
+           (*chrVariant)[chr][pos][read]= tmp;
+		   //std::cout<<"modvcf_NR\t" << pos << "\t" << read <<"\n";
         }
     }
 }
 
+void METHParser::writeLine(std::string &input, bool &ps_def, std::ofstream &resultVcf, PhasingResult &phasingResult){
+    
+}
+
+std::map<int, std::map<std::string ,RefAlt> > METHParser::getVariants(std::string chrName){
+    std::map<int, std::map<std::string ,RefAlt> > targetVariants;
+    std::map<std::string, std::map<int, std::map<std::string ,RefAlt> > >::iterator chrIter = chrVariant->find(chrName);
+    
+    if( chrIter != chrVariant->end() )
+        targetVariants =  (*chrIter).second;
+        
+    return targetVariants;
+}
 

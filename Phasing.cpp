@@ -18,6 +18,7 @@ static const char *CORRECT_USAGE_MESSAGE =
 "optional arguments:\n"
 "      -r, --reference=NAME              reference fasta.\n"
 "      --sv-file=NAME                    input SV vcf file.\n"
+"      --mod-file=NAME                   input modified vcf file.(produce by longphase modcall)\n"
 "      -t, --threads=Num                 number of thread. default:1\n"
 "      -o, --out-prefix=NAME             prefix of phasing result.\n"
 "      --dot                             each contig/chromosome will generate dot file. \n\n"
@@ -37,14 +38,16 @@ static const char *CORRECT_USAGE_MESSAGE =
 "      -i, --inconsistentThreshold=Num   phased genotype correction is performed when a SNP is tagged multiple times. default:5\n\n"
 
 "haplotag read correction arguments:\n"
+"      -h, --readHaplotypeRatio=[0~1]    the proportion of alleles on a read assigned to the same haplotype.\n"
+"                                        a higher threshold means that the consistency will be higher. default:0.6\n"
 "      -n, --alleleConsistentRatio=[0~1] the ratio of an allele to all reads of a Haplotype should be consistent. default: 0.9\n"
 "      -m, --maxAlleleRatio=[0~1]        the ratio that any allele of a SNP should not exceed. default: 0.65\n"
     
 "\n";
 
-static const char* shortopts = "s:b:o:t:r:d:c:1:a:q:j:i:v:n:m";
+static const char* shortopts = "s:b:o:t:r:d:c:1:a:q:j:i:v:n:m:h";
 
-enum { OPT_HELP = 1 , DOT_FILE, SV_FILE, IS_ONT, IS_PB, VERSION};
+enum { OPT_HELP = 1 , DOT_FILE, SV_FILE, MOD_FILE, IS_ONT, IS_PB, VERSION};
 
 static const struct option longopts[] = { 
     { "help",                 no_argument,        NULL, OPT_HELP },
@@ -52,7 +55,8 @@ static const struct option longopts[] = {
     { "ont",                  no_argument,        NULL, IS_ONT }, 
     { "pb",                   no_argument,        NULL, IS_PB }, 
     { "version",              no_argument,        NULL, VERSION }, 
-    { "sv-file",              required_argument,  NULL, SV_FILE },     
+    { "sv-file",              required_argument,  NULL, SV_FILE },  
+    { "mod-file",             required_argument,  NULL, MOD_FILE },     
     { "reference",            required_argument,  NULL, 'r' },
     { "snp-file",             required_argument,  NULL, 's' },
     { "bam-file",             required_argument,  NULL, 'b' },
@@ -68,6 +72,7 @@ static const struct option longopts[] = {
     { "confidentHaplotype",   required_argument,  NULL, 'v' },
     { "alleleConsistentRatio",required_argument,  NULL, 'n' },
     { "maxAlleleRatio",       required_argument,  NULL, 'm' },
+    { "readHaplotypeRatio",   required_argument,  NULL, 'h' },
     { NULL, 0, NULL, 0 }
 };
 
@@ -78,6 +83,7 @@ namespace opt
     static int crossSNP = 15;
     static std::string snpFile="";
     static std::string svFile="";
+    static std::string modFile="";
     static std::string bamFile="";
     static std::string fastaFile="";
     static std::string resultPrefix="result";
@@ -94,6 +100,7 @@ namespace opt
     
     static double alleleConsistentRatio = 0.9;
     static double maxAlleleRatio = 0.65;
+    static double readHaplotypeRatio = 0.6;
     
     double readsThreshold = 0.05;
 
@@ -125,10 +132,12 @@ void PhasingOptions(int argc, char** argv)
         case 'v': arg >> opt::confidentHaplotype; break;
         case 'n': arg >> opt::alleleConsistentRatio; break;
         case 'm': arg >> opt::maxAlleleRatio; break;
+        case 'h': arg >> opt::readHaplotypeRatio; break;
         case DOT_FILE: opt::generateDot=true; break;
         case IS_ONT: opt::isONT=true; break;
         case IS_PB: opt::isPB=true; break;
         case SV_FILE: arg >> opt::svFile; break; 
+        case MOD_FILE: arg >> opt::modFile; break; 
         case OPT_HELP:
             std::cout << CORRECT_USAGE_MESSAGE;
             exit(EXIT_SUCCESS);
@@ -246,6 +255,7 @@ int PhasingMain(int argc, char** argv, std::string in_version)
     ecParams.crossSNP=opt::crossSNP;
     ecParams.snpFile=opt::snpFile;
     ecParams.svFile=opt::svFile;
+    ecParams.modFile=opt::modFile;
     ecParams.bamFile=opt::bamFile;
     ecParams.fastaFile=opt::fastaFile;
     ecParams.resultPrefix=opt::resultPrefix;
@@ -264,6 +274,7 @@ int PhasingMain(int argc, char** argv, std::string in_version)
     
     ecParams.alleleConsistentRatio=opt::alleleConsistentRatio;
     ecParams.maxAlleleRatio=opt::maxAlleleRatio;
+    ecParams.readHaplotypeRatio=opt::readHaplotypeRatio;
     
     ecParams.version=in_version;
     ecParams.command=opt::command;

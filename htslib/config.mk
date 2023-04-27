@@ -43,7 +43,7 @@ RANLIB = ranlib
 CPPFLAGS = 
 CFLAGS   =  -Wall -g -O2 -fvisibility=hidden
 LDFLAGS  =  -fvisibility=hidden
-LIBS     = -llzma -lbz2 -lz -lm 
+LIBS     = -ldeflate -llzma -lbz2 -lz -lm 
 
 PLATFORM   = default
 PLUGIN_EXT = .so

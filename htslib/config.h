@@ -60,7 +60,7 @@
 #define HAVE_LIBCURL 1
 
 /* Define if libdeflate is available. */
-/* #undef HAVE_LIBDEFLATE */
+#define HAVE_LIBDEFLATE 1
 
 /* Define to 1 if you have the `lzma' library (-llzma). */
 #define HAVE_LIBLZMA 1

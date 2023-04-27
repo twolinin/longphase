@@ -67,7 +67,4 @@ std::string getTargetString(std::string line, std::string start_sign, std::strin
 
 int homopolymerLength(int snp_pos, const std::string &ref_string);
 
-
-
-
 #endif
