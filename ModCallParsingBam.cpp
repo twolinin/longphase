@@ -377,18 +377,30 @@ void MethBamParser::parse_CIGAR(AlignmentMethExtend &align, std::vector<ReadVari
                 if( (*qmethiter).position > (querypos+length) ){
                     break;
                 }
-                else if( qmethiter == (align.is_reverse ? align.queryMethVec.begin() : align.queryMethVec.end()) ){
+                else if( qmethiter == align.queryMethVec.end() ){
+				//else if( qmethiter == (align.is_reverse ? align.queryMethVec.begin() : align.queryMethVec.end()) ){
                     break;
                 }
                 //translate query (read) position to reference position
-                int methrpos = (*qmethiter).position - querypos + refpos;
+				int methrpos;
+				if(align.is_reverse){
+					methrpos = (*qmethiter).position - querypos + refpos - 1;
+					
+				}else{
+					methrpos = (*qmethiter).position - querypos + refpos;
+				}
+				//methrpos = (*qmethiter).position - querypos + refpos;
 				//std::cout<<(*refString).length()<<"\t"<<methrpos<<"\n";
 				if((*refString).length()<methrpos){
 					break;
 				}
-				std::string refChar = (*refString).substr(methrpos-1,1);
+				std::string refChar = (*refString).substr(methrpos,1);
+				/*if(align.is_reverse){
+					std::cout<<align.qname<<"\t"<<refChar<<"\t"<<methrpos<<"\t"<<length<<"\t"<<refstart<<"\t"<<refpos<<"\t"<<querypos<<"\t"<<(*qmethiter).position<<"\n";
+				}*/
 				//std::cout<<"parser_CIGA\t"<<align.qname<<"\t"<<methrpos<<"\t"<<(*qmethiter).prob<<"\t"<<(*qmethiter).position<<"\t"<<querypos<<"\t"<<refpos<<"\n";
-                if( (refChar == "C") ? !align.is_reverse : align.is_reverse ){
+                //if( (refChar == "C") ? !align.is_reverse : align.is_reverse ){
+				if( align.is_reverse ? (refChar == "G") : (refChar == "C")){
 					//methylation
 					if( (*qmethiter).prob >= params->modThreshold*255 ){
 						(*chrMethMap)[methrpos].methreadcnt++;
@@ -415,19 +427,24 @@ void MethBamParser::parse_CIGAR(AlignmentMethExtend &align, std::vector<ReadVari
 						(*chrMethMap)[methrpos].noisereadcnt++;
 					}	
 				}
-                if(align.is_reverse){
+                /*if(align.is_reverse){
                     qmethiter--;
                 }
                 else{
                     qmethiter++;
-                }
+                }*/
+				qmethiter++;
             }
             querypos += length;
             refpos += length;
         }
         // 1: insertion to the reference
         else if(cigar_op == 1){ 
-            if(align.is_reverse){
+			
+			while(qmethiter != align.queryMethVec.end() && (*qmethiter).position <= (querypos+length)){
+				qmethiter++;
+			}
+            /*if(align.is_reverse){
                 while(qmethiter != align.queryMethVec.begin() && (*qmethiter).position <= (querypos+length)){
                     qmethiter--;
                 }
@@ -436,7 +453,7 @@ void MethBamParser::parse_CIGAR(AlignmentMethExtend &align, std::vector<ReadVari
                 while(qmethiter != align.queryMethVec.end() && (*qmethiter).position <= (querypos+length)){
                     qmethiter++;
                 }
-            }
+            }*/
             querypos += length;
             
         }
@@ -450,7 +467,10 @@ void MethBamParser::parse_CIGAR(AlignmentMethExtend &align, std::vector<ReadVari
         }
         // 4: soft clipping (clipped sequences present in SEQ)
         else if(cigar_op == 4){
-            if(align.is_reverse){
+			while(qmethiter != align.queryMethVec.end() && (*qmethiter).position <= (querypos+length)){
+				qmethiter++;
+			}
+            /*if(align.is_reverse){
                 while(qmethiter != align.queryMethVec.begin() && (*qmethiter).position <= (querypos+length)){
                     qmethiter--;
                 }
@@ -459,7 +479,7 @@ void MethBamParser::parse_CIGAR(AlignmentMethExtend &align, std::vector<ReadVari
                 while(qmethiter != align.queryMethVec.end() && (*qmethiter).position <= (querypos+length)){
                     qmethiter++;
                 }
-            }
+            }*/
             querypos += length;
             
         }
@@ -467,6 +487,7 @@ void MethBamParser::parse_CIGAR(AlignmentMethExtend &align, std::vector<ReadVari
         // 6: padding (silent deletion from padded reference)
         else if(cigar_op == 5 || cigar_op == 6){
             //do nothing
+            refpos += length;
         }
     }
     
@@ -566,8 +587,8 @@ void MethBamParser::writeResultVCF( std::string chrName, std::map<std::string, s
 				if(chrString[chrName].length()<(*posinfoIter).first){
 					break;
 				}
-				std::string ref = chrString[chrName].substr((*posinfoIter).first-1,1);
-                eachpos = chrName + "\t" + std::to_string((*posinfoIter).first) + "\t" + "." + "\t" + ref + "\t" + "." + "\t" + "." + "\t" + "." + "\t" + strandinfo + infostr + "\t" + "GT:MD:UD:DP" + "\t" + samplestr + "\n";
+				std::string ref = chrString[chrName].substr((*posinfoIter).first,1);
+                eachpos = chrName + "\t" + std::to_string((*posinfoIter).first + 1) + "\t" + "." + "\t" + ref + "\t" + "." + "\t" + "." + "\t" + "." + "\t" + strandinfo + infostr + "\t" + "GT:MD:UD:DP" + "\t" + samplestr + "\n";
 				ModResultVcf<<eachpos;
 			}
 		}
