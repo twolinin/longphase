@@ -70,38 +70,41 @@ longphase phase \
 #### The complete list of phase parameters
 ```
 Usage:  phase [OPTION] ... READSFILE
-      --help                            display this help and exit.
+   --help                                 display this help and exit.
 
 require arguments:
-      -s, --snp-file=NAME               input SNP vcf file.
-      -b, --bam-file=NAME               input bam file.
-      --ont, --pb                       ont: Oxford Nanopore genomic reads.
-                                        pb: PacBio HiFi/CCS genomic reads.
+   -s, --snp-file=NAME                    input SNP vcf file.
+   -b, --bam-file=NAME                    input bam file.
+   -r, --reference=NAME                   reference fasta.
+   --ont, --pb                            ont: Oxford Nanopore genomic reads.
+                                          pb: PacBio HiFi/CCS genomic reads.
 
 optional arguments:
-      -r, --reference=NAME              reference fasta.
-      --sv-file=NAME                    input SV vcf file.
-      -t, --threads=Num                 number of thread. default:1
-      -o, --out-prefix=NAME             prefix of phasing result.
-      --dot                             each contig/chromosome will generate dot file.
+   --sv-file=NAME                         input SV vcf file.
+   --mod-file=NAME                        input modified vcf file.(produce by longphase modcall)
+   -t, --threads=Num                      number of thread. default:1
+   -o, --out-prefix=NAME                  prefix of phasing result.
+   --dot                                  each contig/chromosome will generate dot file.
 
 parse alignment arguments:
-      -q, --mappingQuality=Num          filter alignment if mapping quality is lower than threshold. default:1
+   -q, --mappingQuality=Num               filter alignment if mapping quality is lower than threshold. default:1
 
 phasing graph arguments:
-      -a, --connectAdjacent=Num         connect adjacent N SNPs. default:6
-      -d, --distance=Num                phasing two variant if distance less than threshold. default:300000
-      -c, --crossSNP=Num                block phasing step. sample N SNPs in each block. default:15
-      -1, --readsThreshold=[0~1]        give up SNP-SNP phasing pair if the number of reads of the two combinations are similar. default:0.05
-      -v, --confidentHaplotype=[0~1]    the haplotype of the current SNP is judged by the haplotype of the previous N SNPs.
-                                        if the threshold is higher, the consistency of SNP needs to be higher. default:0.5
-      -j, --judgeInconsistent=[0~1]     the proportion of inconsistent haplotypes among the haplotypes of the previous N SNPs.
-                                        inconsistent SNPs are tagged if the proportion is below the threshold. default:0.4
-      -i, --inconsistentThreshold=Num   phased genotype correction is performed when a SNP is tagged multiple times. default:5
+   -a, --connectAdjacent=Num              connect adjacent N SNPs. default:6
+   -d, --distance=Num                     phasing two variant if distance less than threshold. default:300000
+   -c, --crossSNP=Num                     block phasing step. sample N SNPs in each block. default:15
+   -1, --readsThreshold=[0~1]             give up SNP-SNP phasing pair if the number of reads of the
+                                          two combinations are similar. default:0.05
+   -v, --confidentHaplotype=[0~1]         the haplotype of the current SNP is judged by the haplotype of the previous N SNPs.
+                                          if the threshold is higher, the consistency of SNP needs to be higher. default:0.5
+   -j, --judgeInconsistent=[0~1]          the proportion of inconsistent haplotypes among the haplotypes of the previous N SNPs.
+                                          inconsistent SNPs are tagged if the proportion is below the threshold. default:0.4
+   -i, --inconsistentThreshold=Num        phased genotype correction is performed when a SNP is tagged multiple times. default:5
 
 haplotag read correction arguments:
-      -n, --alleleConsistentRatio=[0~1] the ratio of an allele to all reads of a Haplotype should be consistent. default: 0.9
-      -m, --maxAlleleRatio=[0~1]        the ratio that any allele of a SNP should not exceed. default: 0.65
+   -m, --readConfidence=[0.5~1]           The maximum proportion of alleles with the same haplotype in a read. default:0.6
+   -n, --snpConfidence=[0.5~1]            The required proportion of alleles from high confident reads
+                                          in any given haplotype. default:0.6
 ```
 ---
 ### Output files of SNP-only phasing
