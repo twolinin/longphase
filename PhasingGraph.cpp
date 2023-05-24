@@ -1381,57 +1381,59 @@ void VairiantGraph::readCorrection(){
         }
     }
 
-    int avgDepth = totalBase/coverBase->size();
-    double snpConfidenceThreshold = 0.6;
-    // when the read coverage is low, the higher threshold can reduce the impact of few incorrect reads.
-    if( avgDepth < 20 ){
-        snpConfidenceThreshold = 0.8;
-    }
-    else if( avgDepth < 30 ){
-        snpConfidenceThreshold = 0.7;
-    }
-    
-
-    std::cerr<< "AvgDepth " << avgDepth << " ... ";
-
-    subNodeHP->clear();
-    
-    std::map<int,std::map<int,int>> hpAllele;
-    // reassign allele result
-    for(auto nodeIter = nodeInfo->begin() ; nodeIter != nodeInfo->end() ; nodeIter++ ){
-        int position = nodeIter->first;
-        PosAllele A = std::make_pair(position, 1);
-        PosAllele aOtherSide = std::make_pair(position, 2);
-        
-        double hp1Ref = (*hpAlleleCountMap)[0][position][0];
-        double hp1Alt = (*hpAlleleCountMap)[0][position][1];
-        double hp2Ref = (*hpAlleleCountMap)[1][position][0];
-        double hp2Alt = (*hpAlleleCountMap)[1][position][1];
-        double result1reads = hp1Ref + hp2Alt;
-        double result2reads = hp2Ref + hp1Alt;
-        double resultConfidence = std::max(result1reads, result2reads) / (result1reads + result2reads);
-        
-        int hp1Result = -1;
-        int hp2Result = -1;
-        
-        if( resultConfidence > snpConfidenceThreshold ){
-            if( result1reads > result2reads ){
-                hp1Result = 0;
-                hp2Result = 1;
-            }
-            else if( result1reads < result2reads ){
-                hp1Result = 1;
-                hp2Result = 0;
-            }
+    if( avgDepth != 0 && totalBase/coverBase->size() != 0 ){
+        int avgDepth = totalBase/coverBase->size();
+        double snpConfidenceThreshold = 0.6;
+        // when the read coverage is low, the higher threshold can reduce the impact of few incorrect reads.
+        if( avgDepth < 20 ){
+            snpConfidenceThreshold = 0.8;
         }
-
-        if( hp1Result != -1 && hp2Result != -1 ){
-            (*subNodeHP)[A] = hp1Result;
-            (*subNodeHP)[aOtherSide] = hp2Result;
+        else if( avgDepth < 30 ){
+            snpConfidenceThreshold = 0.7;
         }
-        else{
-            bkResult->erase(A);
-            bkResult->erase(aOtherSide);
+        
+
+        std::cerr<< "AvgDepth " << avgDepth << " ... ";
+
+        subNodeHP->clear();
+        
+        std::map<int,std::map<int,int>> hpAllele;
+        // reassign allele result
+        for(auto nodeIter = nodeInfo->begin() ; nodeIter != nodeInfo->end() ; nodeIter++ ){
+            int position = nodeIter->first;
+            PosAllele A = std::make_pair(position, 1);
+            PosAllele aOtherSide = std::make_pair(position, 2);
+            
+            double hp1Ref = (*hpAlleleCountMap)[0][position][0];
+            double hp1Alt = (*hpAlleleCountMap)[0][position][1];
+            double hp2Ref = (*hpAlleleCountMap)[1][position][0];
+            double hp2Alt = (*hpAlleleCountMap)[1][position][1];
+            double result1reads = hp1Ref + hp2Alt;
+            double result2reads = hp2Ref + hp1Alt;
+            double resultConfidence = std::max(result1reads, result2reads) / (result1reads + result2reads);
+            
+            int hp1Result = -1;
+            int hp2Result = -1;
+            
+            if( resultConfidence > snpConfidenceThreshold ){
+                if( result1reads > result2reads ){
+                    hp1Result = 0;
+                    hp2Result = 1;
+                }
+                else if( result1reads < result2reads ){
+                    hp1Result = 1;
+                    hp2Result = 0;
+                }
+            }
+
+            if( hp1Result != -1 && hp2Result != -1 ){
+                (*subNodeHP)[A] = hp1Result;
+                (*subNodeHP)[aOtherSide] = hp2Result;
+            }
+            else{
+                bkResult->erase(A);
+                bkResult->erase(aOtherSide);
+            }
         }
     }
 
