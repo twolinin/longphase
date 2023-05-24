@@ -16,11 +16,11 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
     SVParser svFile(params, snpFile);
     std::cerr<< difftime(time(NULL), begin) << "s\n";
  
-    //Parse mod vcf file
-	begin = time(NULL);
-	std::cerr<< "parsing Meth VCF ... ";
-	METHParser modFile(params, snpFile);
-	std::cerr<< difftime(time(NULL), begin) << "s\n";
+    /*//Parse mod vcf file
+    begin = time(NULL);
+    std::cerr<< "parsing Meth VCF ... ";
+    METHParser modFile(params, snpFile);
+    std::cerr<< difftime(time(NULL), begin) << "s\n";*/
  
     // parsing ref fasta 
     begin = time(NULL);
