@@ -81,7 +81,6 @@ require arguments:
 
 optional arguments:
    --sv-file=NAME                         input SV vcf file.
-   --mod-file=NAME                        input modified vcf file.(produce by longphase modcall)
    -t, --threads=Num                      number of thread. default:1
    -o, --out-prefix=NAME                  prefix of phasing result.
    --dot                                  each contig/chromosome will generate dot file.
