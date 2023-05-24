@@ -1381,7 +1381,7 @@ void VairiantGraph::readCorrection(){
         }
     }
 
-    if( avgDepth != 0 && totalBase/coverBase->size() != 0 ){
+    if( totalBase != 0 && coverBase->size() != 0 ){
         int avgDepth = totalBase/coverBase->size();
         double snpConfidenceThreshold = 0.6;
         // when the read coverage is low, the higher threshold can reduce the impact of few incorrect reads.
