@@ -17,7 +17,7 @@ static const char *CORRECT_USAGE_MESSAGE =
 "                                          pb: PacBio HiFi/CCS genomic reads.\n\n"
 "optional arguments:\n"
 "   --sv-file=NAME                         input SV vcf file.\n"
-"   --mod-file=NAME                        input modified vcf file.(produce by longphase modcall)\n"
+//"   --mod-file=NAME                        input modified vcf file.(produce by longphase modcall)\n"
 "   -t, --threads=Num                      number of thread. default:1\n"
 "   -o, --out-prefix=NAME                  prefix of phasing result.\n"
 "   --dot                                  each contig/chromosome will generate dot file. \n\n"
