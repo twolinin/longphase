@@ -1,5 +1,5 @@
 # LongPhase
-LongPhase is an ultra-fast program for simultaneously co-phasing SNPs and SVs by using Nanopore and PacBio long reads. It is capable of producing nearly chromosome-scale haplotype blocks by using Nanpore ultra-long reads without the need for additional trios, chromosome conformation, and strand-seq data. On an 8-core machine, LongPhase can finish phasing a human genome in 10-20 minutes.
+LongPhase is an ultra-fast program for simultaneously co-phasing SNPs (include small indel) and SVs by using Nanopore and PacBio long reads. It is capable of producing nearly chromosome-scale haplotype blocks by using Nanpore ultra-long reads without the need for additional trios, chromosome conformation, and strand-seq data. On an 8-core machine, LongPhase can finish phasing a human genome in 10-20 minutes.
 
 ---
 - [Installation](#installation)
