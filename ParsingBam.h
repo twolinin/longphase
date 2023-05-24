@@ -16,6 +16,8 @@
 struct RefAlt{
     std::string Ref;
     std::string Alt;
+    bool is_reverse;
+    bool is_modify;
 };
 
 class FastaParser{
@@ -33,20 +35,33 @@ class FastaParser{
     
 };
 
-class SnpParser{
+class BaseVairantParser{
+    public:
+        // input parser
+        void compressParser(std::string &variantFile);
+        void unCompressParser(std::string &variantFile);
+        virtual void parserProcess(std::string &input)=0;
+        // output parser
+        void compressInput(std::string variantFile, std::string resultFile, PhasingResult phasingResult);
+        void unCompressInput(std::string variantFile, std::string resultFile, PhasingResult phasingResult);
+        virtual void writeLine(std::string &input, bool &ps_def, std::ofstream &resultVcf, PhasingResult &phasingResult)=0;
+};
+
+class SnpParser : public BaseVairantParser{
     
     private:
         PhasingParameters *params;
         //std::string variantFile;
         // chr, variant position (0-base), allele haplotype
-        std::map<std::string, std::map<int, RefAlt> > chrVariant;
+        std::map<std::string, std::map<int, RefAlt> > *chrVariant;
         // id and idx
         std::vector<std::string> chrName;
         // chr, variant position (0-base)
         std::map<std::string, std::map<int, bool> > chrVariantHomopolymer;
-        // output parser
-        void compressInput(std::string resultPrefix, PhasingResult phasingResult);
-        void unCompressInput(std::string resultPrefix, PhasingResult phasingResult);
+        
+        // override input parser
+        void parserProcess(std::string &input);
+        // override output parser
         void writeLine(std::string &input, bool &ps_def, std::ofstream &resultVcf, PhasingResult &phasingResult);
     
     public:
@@ -69,23 +84,20 @@ class SnpParser{
         void filterSNP(std::string chr, std::vector<ReadVariant> &readVariantVec, std::string &chr_reference);
 };
 
-class SVParser{
+class SVParser : public BaseVairantParser{
     
     private:
         PhasingParameters *params;
         SnpParser *snpFile;
 
         // chr , variant position (0-base), read
-        std::map<std::string, std::map<int, std::map<std::string ,bool> > > chrVariant;
+        std::map<std::string, std::map<int, std::map<std::string ,bool> > > *chrVariant;
         // chr, variant position (0-base)
         std::map<std::string, std::map<int, bool> > posDuplicate;
-        // input parser
-        void compressParser(std::string &variantFile);
-        void unCompressParser(std::string &variantFile);
+        
+        // override input parser
         void parserProcess(std::string &input);
-        // output parser
-        void compressInput(std::string resultPrefix, PhasingResult phasingResult);
-        void unCompressInput(std::string resultPrefix, PhasingResult phasingResult);
+        // override output parser
         void writeLine(std::string &input, bool &ps_def, std::ofstream &resultVcf, PhasingResult &phasingResult);
         
     public:
@@ -96,6 +108,30 @@ class SVParser{
         std::map<int, std::map<std::string ,bool> > getVariants(std::string chrName);  
 
         void writeResult(PhasingResult phasingResult);
+};
+
+class METHParser : public BaseVairantParser{
+    
+    private:
+        PhasingParameters *params;
+        SnpParser *snpFile;
+        
+        // chr , variant position (0-base), read, (is reverse strand)
+        std::map<std::string, std::map<int, std::map<std::string ,RefAlt> > > *chrVariant;
+
+        // override input parser
+        void parserProcess(std::string &input);
+        // override output parser
+        void writeLine(std::string &input, bool &ps_def, std::ofstream &resultVcf, PhasingResult &phasingResult);
+      
+    public:
+        
+        std::map<int, std::map<std::string ,RefAlt> > getVariants(std::string chrName);  
+        
+        METHParser(PhasingParameters &params, SnpParser &snpFile);
+        ~METHParser();
+		
+		//void writeResult(PhasingResult phasingResult);
 };
 
 struct Alignment{
@@ -117,24 +153,22 @@ class BamParser{
         std::string chrName;
         std::string BamFile;
         // SNP map and iter
-        std::map<int, RefAlt> currentVariants;
+        std::map<int, RefAlt> *currentVariants;
         std::map<int, RefAlt>::iterator firstVariantIter;
         // SV map and iter
-        std::map<int, std::map<std::string ,bool> > currentSV;
+        std::map<int, std::map<std::string ,bool> > *currentSV;
         std::map<int, std::map<std::string ,bool> >::iterator firstSVIter;
+        // mod map and iter
+        std::map<int, std::map<std::string ,RefAlt> > *currentMod;
+        std::map<int, std::map<std::string ,RefAlt> >::iterator firstModIter;
         void get_snp(const Alignment &align, std::vector<ReadVariant> &readVariantVec, const std::string &ref_string, bool isONT);
-
-        // SV occur 
-        std::map<int, int> occurSV;
-        std::map<int, int> noSV;
-    
+   
     public:
-        BamParser(std::string chrName, std::string inputBamFile, SnpParser snpMap, SVParser svFile);
+        BamParser(std::string chrName, std::string inputBamFile, SnpParser &snpMap, SVParser &svFile, METHParser &modFile);
         ~BamParser();
         
         void direct_detect_alleles(int lastSNPPos, PhasingParameters params, std::vector<ReadVariant> &readVariantVec , const std::string &ref_string);
 
-        void svFilter(std::vector<ReadVariant> &readVariantVec);
 };
 
 

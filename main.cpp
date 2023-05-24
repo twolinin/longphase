@@ -2,9 +2,11 @@
 #include <iostream>
 #include "Phasing.h"
 #include "Haplotag.h"
+//#include "ModCall.h"
+
 
 #define PROGRAM_BIN "main"
-#define VERSION "1.4"
+#define VERSION "1.5"
 
 static std::string version = VERSION;
 
@@ -13,6 +15,8 @@ static const char *STRIDE_USAGE_MESSAGE =
 "Usage: " PROGRAM_BIN " <command> [options]\n"  
 "               phase      run phasing algorithm.\n"
 "               haplotag   tag reads by haplotype.\n"
+//"               modcall    convert bam file to methylation vcf file.\n"
+
 "\n";
 
 int main(int argc, char** argv)
@@ -33,6 +37,10 @@ int main(int argc, char** argv)
     {
         HaplotagMain(argc - 1, argv + 1);
     }
+    /*else if(command=="modcall")
+    {
+         ModCallMain(argc - 1, argv + 1);
+    }*/
     else{
         std::cout << STRIDE_USAGE_MESSAGE;
         return 0;

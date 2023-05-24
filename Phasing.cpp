@@ -8,43 +8,45 @@
 
 static const char *CORRECT_USAGE_MESSAGE =
 "Usage: "  " " SUBPROGRAM " [OPTION] ... READSFILE\n"
-"      --help                            display this help and exit.\n\n"
+"   --help                                 display this help and exit.\n\n"
 "require arguments:\n"
-"      -s, --snp-file=NAME               input SNP vcf file.\n"
-"      -b, --bam-file=NAME               input bam file.\n"
-"      --ont, --pb                       ont: Oxford Nanopore genomic reads.\n"
-"                                        pb: PacBio HiFi/CCS genomic reads.\n\n"
-
+"   -s, --snp-file=NAME                    input SNP vcf file.\n"
+"   -b, --bam-file=NAME                    input bam file.\n"
+"   -r, --reference=NAME                   reference fasta.\n"
+"   --ont, --pb                            ont: Oxford Nanopore genomic reads.\n"
+"                                          pb: PacBio HiFi/CCS genomic reads.\n\n"
 "optional arguments:\n"
-"      -r, --reference=NAME              reference fasta.\n"
-"      --sv-file=NAME                    input SV vcf file.\n"
-"      -t, --threads=Num                 number of thread. default:1\n"
-"      -o, --out-prefix=NAME             prefix of phasing result.\n"
-"      --dot                             each contig/chromosome will generate dot file. \n\n"
+"   --sv-file=NAME                         input SV vcf file.\n"
+"   --mod-file=NAME                        input modified vcf file.(produce by longphase modcall)\n"
+"   -t, --threads=Num                      number of thread. default:1\n"
+"   -o, --out-prefix=NAME                  prefix of phasing result.\n"
+"   --dot                                  each contig/chromosome will generate dot file. \n\n"
 
 "parse alignment arguments:\n"
-"      -q, --mappingQuality=Num          filter alignment if mapping quality is lower than threshold. default:1\n\n"
+"   -q, --mappingQuality=Num               filter alignment if mapping quality is lower than threshold. default:1\n\n"
 
 "phasing graph arguments:\n"
-"      -a, --connectAdjacent=Num         connect adjacent N SNPs. default:6\n"
-"      -d, --distance=Num                phasing two variant if distance less than threshold. default:300000\n"
-"      -c, --crossSNP=Num                block phasing step. sample N SNPs in each block. default:15\n"
-"      -1, --readsThreshold=[0~1]        give up SNP-SNP phasing pair if the number of reads of the two combinations are similar. default:0.05\n"
-"      -v, --confidentHaplotype=[0~1]    the haplotype of the current SNP is judged by the haplotype of the previous N SNPs.\n"
-"                                        if the threshold is higher, the consistency of SNP needs to be higher. default:0.5\n"
-"      -j, --judgeInconsistent=[0~1]     the proportion of inconsistent haplotypes among the haplotypes of the previous N SNPs.\n"
-"                                        inconsistent SNPs are tagged if the proportion is below the threshold. default:0.4\n"
-"      -i, --inconsistentThreshold=Num   phased genotype correction is performed when a SNP is tagged multiple times. default:5\n\n"
+"   -a, --connectAdjacent=Num              connect adjacent N SNPs. default:6\n"
+"   -d, --distance=Num                     phasing two variant if distance less than threshold. default:300000\n"
+"   -c, --crossSNP=Num                     block phasing step. sample N SNPs in each block. default:15\n"
+"   -1, --readsThreshold=[0~1]             give up SNP-SNP phasing pair if the number of reads of the \n"
+"                                          two combinations are similar. default:0.05\n"
+"   -v, --confidentHaplotype=[0~1]         the haplotype of the current SNP is judged by the haplotype of the previous N SNPs.\n"
+"                                          if the threshold is higher, the consistency of SNP needs to be higher. default:0.5\n"
+"   -j, --judgeInconsistent=[0~1]          the proportion of inconsistent haplotypes among the haplotypes of the previous N SNPs.\n"
+"                                          inconsistent SNPs are tagged if the proportion is below the threshold. default:0.4\n"
+"   -i, --inconsistentThreshold=Num        phased genotype correction is performed when a SNP is tagged multiple times. default:5\n\n"
 
 "haplotag read correction arguments:\n"
-"      -n, --alleleConsistentRatio=[0~1] the ratio of an allele to all reads of a Haplotype should be consistent. default: 0.9\n"
-"      -m, --maxAlleleRatio=[0~1]        the ratio that any allele of a SNP should not exceed. default: 0.65\n"
-    
+"   -m, --readConfidence=[0.5~1]           The maximum proportion of alleles with the same haplotype in a read. default:0.6\n"
+"   -n, --snpConfidence=[0.5~1]            The required proportion of alleles from high confident reads \n"
+"                                          in any given haplotype. default:0.6\n"
+
 "\n";
 
-static const char* shortopts = "s:b:o:t:r:d:c:1:a:q:j:i:v:n:m";
+static const char* shortopts = "s:b:o:t:r:d:c:1:a:q:j:i:v:n:m:";
 
-enum { OPT_HELP = 1 , DOT_FILE, SV_FILE, IS_ONT, IS_PB, VERSION};
+enum { OPT_HELP = 1 , DOT_FILE, SV_FILE, MOD_FILE, IS_ONT, IS_PB, VERSION};
 
 static const struct option longopts[] = { 
     { "help",                 no_argument,        NULL, OPT_HELP },
@@ -52,7 +54,8 @@ static const struct option longopts[] = {
     { "ont",                  no_argument,        NULL, IS_ONT }, 
     { "pb",                   no_argument,        NULL, IS_PB }, 
     { "version",              no_argument,        NULL, VERSION }, 
-    { "sv-file",              required_argument,  NULL, SV_FILE },     
+    { "sv-file",              required_argument,  NULL, SV_FILE },  
+    { "mod-file",             required_argument,  NULL, MOD_FILE },     
     { "reference",            required_argument,  NULL, 'r' },
     { "snp-file",             required_argument,  NULL, 's' },
     { "bam-file",             required_argument,  NULL, 'b' },
@@ -66,8 +69,8 @@ static const struct option longopts[] = {
     { "judgeInconsistent",    required_argument,  NULL, 'j' },
     { "inconsistentThreshold",required_argument,  NULL, 'i' },
     { "confidentHaplotype",   required_argument,  NULL, 'v' },
-    { "alleleConsistentRatio",required_argument,  NULL, 'n' },
-    { "maxAlleleRatio",       required_argument,  NULL, 'm' },
+    { "snpConfidence",      required_argument,  NULL, 'n' },
+    { "readConfidence",       required_argument,  NULL, 'm' },
     { NULL, 0, NULL, 0 }
 };
 
@@ -78,6 +81,7 @@ namespace opt
     static int crossSNP = 15;
     static std::string snpFile="";
     static std::string svFile="";
+    static std::string modFile="";
     static std::string bamFile="";
     static std::string fastaFile="";
     static std::string resultPrefix="result";
@@ -92,8 +96,8 @@ namespace opt
     static double judgeInconsistent = 0.4 ;
     static int inconsistentThreshold = 5 ;
     
-    static double alleleConsistentRatio = 0.9;
-    static double maxAlleleRatio = 0.65;
+    static double snpConfidence = 0.6;
+    static double readConfidence = 0.6;
     
     double readsThreshold = 0.05;
 
@@ -123,12 +127,13 @@ void PhasingOptions(int argc, char** argv)
         case 'j': arg >> opt::judgeInconsistent; break;
         case 'i': arg >> opt::inconsistentThreshold; break;
         case 'v': arg >> opt::confidentHaplotype; break;
-        case 'n': arg >> opt::alleleConsistentRatio; break;
-        case 'm': arg >> opt::maxAlleleRatio; break;
+        case 'n': arg >> opt::snpConfidence; break;
+        case 'm': arg >> opt::readConfidence; break;
         case DOT_FILE: opt::generateDot=true; break;
         case IS_ONT: opt::isONT=true; break;
         case IS_PB: opt::isPB=true; break;
         case SV_FILE: arg >> opt::svFile; break; 
+        case MOD_FILE: arg >> opt::modFile; break; 
         case OPT_HELP:
             std::cout << CORRECT_USAGE_MESSAGE;
             exit(EXIT_SUCCESS);
@@ -170,6 +175,8 @@ void PhasingOptions(int argc, char** argv)
         die = true;
     }
     
+
+    
     if( opt::bamFile != "")
     {
         std::ifstream openFile( opt::bamFile.c_str() );
@@ -183,6 +190,20 @@ void PhasingOptions(int argc, char** argv)
         std::cerr << SUBPROGRAM ": missing bam file.\n";
         die = true;
     }
+    
+    if( opt::fastaFile != "")
+    {
+        std::ifstream openFile( opt::snpFile.c_str() );
+        if( !openFile.is_open() )
+        {
+            std::cerr<< "File " << opt::fastaFile << " not exist.\n\n";
+            die = true;
+        }
+    }
+    else{
+        std::cerr << SUBPROGRAM ": missing reference.\n";
+        die = true;
+    }  
     
     if ( opt::numThreads < 1 ){
         std::cerr << SUBPROGRAM " invalid threads. value: " 
@@ -246,6 +267,7 @@ int PhasingMain(int argc, char** argv, std::string in_version)
     ecParams.crossSNP=opt::crossSNP;
     ecParams.snpFile=opt::snpFile;
     ecParams.svFile=opt::svFile;
+    ecParams.modFile=opt::modFile;
     ecParams.bamFile=opt::bamFile;
     ecParams.fastaFile=opt::fastaFile;
     ecParams.resultPrefix=opt::resultPrefix;
@@ -262,8 +284,8 @@ int PhasingMain(int argc, char** argv, std::string in_version)
     
     ecParams.readsThreshold=opt::readsThreshold;
     
-    ecParams.alleleConsistentRatio=opt::alleleConsistentRatio;
-    ecParams.maxAlleleRatio=opt::maxAlleleRatio;
+    ecParams.snpConfidence=opt::snpConfidence;
+    ecParams.readConfidence=opt::readConfidence;
     
     ecParams.version=in_version;
     ecParams.command=opt::command;

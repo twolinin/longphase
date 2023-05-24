@@ -12,6 +12,7 @@ struct PhasingParameters
     std::string snpFile;
     std::string svFile;
     std::string bamFile;
+    std::string modFile="";
     std::string fastaFile;
     std::string resultPrefix;
     bool generateDot;
@@ -25,8 +26,8 @@ struct PhasingParameters
     double judgeInconsistent;
     int inconsistentThreshold;
     
-    double alleleConsistentRatio;
-    double maxAlleleRatio;
+    double snpConfidence;
+    double readConfidence;
     
     double readsThreshold;
     

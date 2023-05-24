@@ -26,7 +26,7 @@ void HaplotagProcess::compressParser(std::string &variantFile){
         std::cerr<< "Fail to open vcf: " << variantFile << "\n";
     }
     else{  
-        char buffer[1048576]; // 1M
+        /*char buffer[1048576]; // 1M
         char* offset = buffer;
             
         while(true) {
@@ -56,7 +56,51 @@ void HaplotagProcess::compressParser(std::string &variantFile){
             // any trailing data in [eol, end) now is a partial line
             offset = std::copy(cur, end, buffer);
         }
+        gzclose (file);*/
+        
+        int buffer_size = 1048576; // 1M
+        char* buffer = (char*) malloc(buffer_size);
+        if(!buffer){
+            std::cerr<<"Failed to allocate buffer\n";
+            exit(EXIT_FAILURE);
+        }
+        char* offset = buffer;
+            
+        while(true) {
+            int len = buffer_size - (offset - buffer);
+            if (len == 0){
+                buffer_size *= 2; // Double the buffer size
+                char* new_buffer = (char*) realloc(buffer, buffer_size);
+                if(!new_buffer){
+                    std::cerr<<"Failed to allocate buffer\n";
+                    free(buffer);
+                    exit(EXIT_FAILURE);
+                }
+                buffer = new_buffer;
+                offset = buffer + buffer_size / 2; // Update the offset pointer to the end of the old buffer
+                len = buffer_size - (offset - buffer);
+            }
+
+            len = gzread(file, offset, len);
+            if (len == 0) break;    
+            if (len <  0){ 
+                int err;
+                fprintf (stderr, "Error: %s.\n", gzerror(file, &err));
+                exit(EXIT_FAILURE);
+            }
+
+            char* cur = buffer;
+            char* end = offset+len;
+            for (char* eol; (cur<end) && (eol = std::find(cur, end, '\n')) < end; cur = eol + 1)
+            {
+                std::string input = std::string(cur, eol);
+                parserProcess(input);
+            }
+            // any trailing data in [eol, end) now is a partial line
+            offset = std::copy(cur, end, buffer);
+        }
         gzclose (file);
+        free(buffer);
     }    
 }
 
@@ -237,6 +281,8 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
     std::string openBamFile = params.bamFile;
     // open bam file
     samFile *in = hts_open(openBamFile.c_str(), "r");
+    // load reference file
+    hts_set_fai_filename(in, params.fastaFile.c_str() );
     // input reader
     bam_hdr_t *bamHdr = sam_hdr_read(in);
     // bam file index
@@ -308,26 +354,27 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
     for(auto chr : chrVec ){
         std::time_t begin = time(NULL);
         std::cerr<<"chr: " << chr << " ... " ;   
-
-        int chunkSize = chrLength[chr]/params.numThreads + params.numThreads;
-        char *bamList[params.numThreads];
-
+        
         currentVariants = chrVariant[chr];
         firstVariantIter = currentVariants.begin();
 
         std::map<int, RefAlt>::reverse_iterator last = currentVariants.rbegin();
-
-        for(int i=0;i<params.numThreads;i++){
-            std::string tmp = chr + ":" + std::to_string(i*chunkSize+1) + "-" + std::to_string((i+1)*chunkSize);
-            bamList[i] = new char[tmp.length()+1];
-            strcpy(bamList[i], tmp.c_str());
-        }
         
-        hts_itr_multi_t *iter;
-        if( (iter = sam_itr_regarray(idx, bamHdr, bamList, params.numThreads)) == 0){
-            std::cerr<<"Warning: Cannot open iterator for " << chr << " for bam file\n";
-            continue;
-        }  
+        //int chunkSize = chrLength[chr]/params.numThreads + params.numThreads;
+        //char *bamList[params.numThreads];
+        //for(int i=0;i<params.numThreads;i++){
+        //    std::string tmp = chr + ":" + std::to_string(i*chunkSize+1) + "-" + std::to_string((i+1)*chunkSize);
+        //    bamList[i] = new char[tmp.length()+1];
+        //    strcpy(bamList[i], tmp.c_str());
+        //}
+        //hts_itr_multi_t *iter;
+        //if( (iter = sam_itr_regarray(idx, bamHdr, bamList, params.numThreads)) == 0){
+        //    std::cerr<<"Warning: Cannot open iterator for " << chr << " for bam file\n";
+        //    continue;
+        //}  
+        
+        std::string range = chr + ":1-" + std::to_string(chrLength[chr]);
+        hts_itr_t* iter = sam_itr_querys(idx, bamHdr, range.c_str());
 
         while ((result = sam_itr_multi_next(in, iter, aln)) >= 0) {
             totalAlignment++;
@@ -371,22 +418,24 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
             tmp.ol = (int*)malloc(tmp.cigar_len*sizeof(int));
             tmp.is_reverse = bam_is_rev(aln);
             
+            memset(tmp.op, 0, tmp.cigar_len);
+            memset(tmp.ol, 0, tmp.cigar_len);
+            
             //quality string
             uint8_t *q = bam_get_seq(aln); 
-            //length of the read
-            uint32_t len = aln->core.l_qseq; 
-            // set string size
-            tmp.qseq = (char *)malloc(len+1);
-            // gets nucleotide id and converts them into IUPAC id.
-            for(unsigned int i=0; i< len ; i++){
-                tmp.qseq[i] = seq_nt16_str[bam_seqi(q,i)]; 
-            }
-
-            // set string size
-            tmp.quality = (char *)malloc(len+1);
             uint8_t *quality = bam_get_qual(aln);
-            // get base quality
-            for(unsigned int i=0; i< len ; i++){
+            
+            // set string size
+            tmp.quality = (char *)malloc(tmp.qlen+1);
+            memset(tmp.quality, 0, tmp.qlen+1);
+            // set string size
+            tmp.qseq = (char *)malloc(tmp.qlen+1);
+            memset(tmp.qseq, 0, tmp.qlen+1);
+
+            for(int i=0; i< tmp.qlen ; i++){
+                // gets nucleotide id and converts them into IUPAC id.
+                tmp.qseq[i] = seq_nt16_str[bam_seqi(q,i)]; 
+                // get base quality
                 tmp.quality[i] = quality[i];
             }
      
@@ -625,6 +674,7 @@ totalAlignment(0),totalSupplementary(0),totalSecondary(0),totalUnmapped(0),total
     std::cerr<< "phased SNP file:   " << params.snpFile             << "\n";
     std::cerr<< "phased SV file:    " << params.svFile              << "\n";
     std::cerr<< "input bam file:    " << params.bamFile             << "\n";
+    std::cerr<< "input ref file:    " << params.fastaFile           << "\n";
     std::cerr<< "output bam file:   " << params.resultPrefix+".bam" << "\n";
     std::cerr<< "number of threads: " << params.numThreads          << "\n";
     std::cerr<< "write log file:    " << (params.writeReadLog ? "true" : "false") << "\n";

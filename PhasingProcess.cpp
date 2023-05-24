@@ -16,6 +16,12 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
     SVParser svFile(params, snpFile);
     std::cerr<< difftime(time(NULL), begin) << "s\n";
  
+    //Parse mod vcf file
+	begin = time(NULL);
+	std::cerr<< "parsing Meth VCF ... ";
+	METHParser modFile(params, snpFile);
+	std::cerr<< difftime(time(NULL), begin) << "s\n";
+ 
     // parsing ref fasta 
     begin = time(NULL);
     std::cerr<< "reading reference ... ";
@@ -49,7 +55,7 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
 
         std::cerr<< "fetch SNP ... ";
         // this method does not store the read information to be used
-        BamParser *bamParser = new BamParser((*chrIter), params.bamFile, snpFile, svFile);
+        BamParser *bamParser = new BamParser((*chrIter), params.bamFile, snpFile, svFile, modFile);
         std::string chr_reference = fastaParser.chrString.at(*chrIter);
         bamParser->direct_detect_alleles(lastSNPpos, params, readVariantVec ,chr_reference);
         
@@ -65,7 +71,7 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
             std::cerr<< "skip\n";
             continue;
         }
-    
+
         std::cerr<< "run algorithm ... ";
         
         VairiantGraph *vGraph = new VairiantGraph(chr_reference, params);
@@ -80,6 +86,8 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
         //  generate dot file
         if(params.generateDot)
             vGraph->writingDotFile((*chrIter));
+        
+        vGraph->destroy();
         
         // free memory
         readVariantVec.clear();

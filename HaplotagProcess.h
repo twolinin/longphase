@@ -15,6 +15,7 @@ struct HaplotagParameters
     std::string snpFile;
     std::string svFile;
     std::string bamFile;
+    std::string fastaFile;
     std::string resultPrefix;
     
     bool tagSupplementary;
