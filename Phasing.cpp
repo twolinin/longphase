@@ -20,6 +20,7 @@ static const char *CORRECT_USAGE_MESSAGE =
 //"   --mod-file=NAME                        input modified vcf file.(produce by longphase modcall)\n"
 "   -t, --threads=Num                      number of thread. default:1\n"
 "   -o, --out-prefix=NAME                  prefix of phasing result.\n"
+"   --indels                               phase small indel. default: False\n"
 "   --dot                                  each contig/chromosome will generate dot file. \n\n"
 
 "parse alignment arguments:\n"
@@ -46,7 +47,7 @@ static const char *CORRECT_USAGE_MESSAGE =
 
 static const char* shortopts = "s:b:o:t:r:d:c:1:a:q:j:i:v:n:m:";
 
-enum { OPT_HELP = 1 , DOT_FILE, SV_FILE, MOD_FILE, IS_ONT, IS_PB, VERSION};
+enum { OPT_HELP = 1 , DOT_FILE, SV_FILE, MOD_FILE, IS_ONT, IS_PB, PHASE_INDEL, VERSION};
 
 static const struct option longopts[] = { 
     { "help",                 no_argument,        NULL, OPT_HELP },
@@ -54,8 +55,9 @@ static const struct option longopts[] = {
     { "ont",                  no_argument,        NULL, IS_ONT }, 
     { "pb",                   no_argument,        NULL, IS_PB }, 
     { "version",              no_argument,        NULL, VERSION }, 
+    { "indels",               no_argument,        NULL, PHASE_INDEL },   
     { "sv-file",              required_argument,  NULL, SV_FILE },  
-    { "mod-file",             required_argument,  NULL, MOD_FILE },     
+    { "mod-file",             required_argument,  NULL, MOD_FILE },
     { "reference",            required_argument,  NULL, 'r' },
     { "snp-file",             required_argument,  NULL, 's' },
     { "bam-file",             required_argument,  NULL, 'b' },
@@ -88,6 +90,7 @@ namespace opt
     static bool generateDot=false;
     static bool isONT=false;
     static bool isPB=false;
+    static bool phaseIndel=false;
     
     static int connectAdjacent = 6;
     static int mappingQuality =1;
@@ -129,11 +132,12 @@ void PhasingOptions(int argc, char** argv)
         case 'v': arg >> opt::confidentHaplotype; break;
         case 'n': arg >> opt::snpConfidence; break;
         case 'm': arg >> opt::readConfidence; break;
+        case SV_FILE:  arg >> opt::svFile; break; 
+        case MOD_FILE: arg >> opt::modFile; break; 
+        case PHASE_INDEL: opt::phaseIndel=true; break; 
         case DOT_FILE: opt::generateDot=true; break;
         case IS_ONT: opt::isONT=true; break;
         case IS_PB: opt::isPB=true; break;
-        case SV_FILE: arg >> opt::svFile; break; 
-        case MOD_FILE: arg >> opt::modFile; break; 
         case OPT_HELP:
             std::cout << CORRECT_USAGE_MESSAGE;
             exit(EXIT_SUCCESS);
@@ -274,6 +278,7 @@ int PhasingMain(int argc, char** argv, std::string in_version)
     ecParams.generateDot=opt::generateDot;
     ecParams.isONT=opt::isONT;
     ecParams.isPB=opt::isPB;
+    ecParams.phaseIndel=opt::phaseIndel;
     
     ecParams.connectAdjacent=opt::connectAdjacent;
     ecParams.mappingQuality=opt::mappingQuality;

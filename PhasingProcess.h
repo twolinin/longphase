@@ -18,6 +18,7 @@ struct PhasingParameters
     bool generateDot;
     bool isONT;
     bool isPB;
+    bool phaseIndel;
     
     int connectAdjacent;
     int mappingQuality;

@@ -363,7 +363,7 @@ SnpParser::SnpParser(PhasingParameters &in_params){
             }
         } 
         // indel 
-        else{
+        else if ( params->phaseIndel ){
             ngt = bcf_get_format_int32(hdr, rec, "GT", &gt, &ngt_arr);
             
             if(ngt<0){
