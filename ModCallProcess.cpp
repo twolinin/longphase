@@ -14,8 +14,6 @@ ModCallProcess::ModCallProcess(ModCallParameters params){
 	//loop all chromosomes
     for(auto chrIter = chrString.begin(); chrIter != chrString.end(); chrIter++){
 		
-		
-		
         // store variant
         std::vector<ReadVariant> fReadVariantVec;
         std::vector<ReadVariant> rReadVariantVec;

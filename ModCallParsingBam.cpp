@@ -541,6 +541,12 @@ void MethBamParser::writeResultVCF( std::string chrName, std::map<std::string, s
             int confidentnonModCount = 0;
             
             auto passPosIter =  passPosition.find((*posinfoIter).first);
+            auto prepassPosIter =  passPosition.find((*posinfoIter).first - 1);
+            auto nextpassPosIter =  passPosition.find((*posinfoIter).first + 1);
+            
+            if( prepassPosIter == passPosition.end() && nextpassPosIter == passPosition.end() ){
+                continue;
+            }
             
             if( passPosIter ==  passPosition.end() ){
                 continue;

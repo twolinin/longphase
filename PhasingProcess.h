@@ -26,9 +26,8 @@ struct PhasingParameters
     double judgeInconsistent;
     int inconsistentThreshold;
     
-    double alleleConsistentRatio;
-    double maxAlleleRatio;
-    double readHaplotypeRatio;
+    double snpConfidence;
+    double readConfidence;
     
     double readsThreshold;
     
