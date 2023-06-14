@@ -107,6 +107,7 @@ void SubEdge::getReadVariant(std::map< std::string,std::map<int,int> > &readVari
         }
     }
 }
+
 void SubEdge::deletEdge(int pos){
 	for(std::map<int, std::vector<std::string> >::iterator edgeIter = refRead->begin() ; edgeIter != refRead->end() ; edgeIter++ ){
         //result.push_back(message +" -> ref_" + std::to_string((*edgeIter).first) + "[label=" + std::to_string((*edgeIter).second.size()) + "];");
@@ -125,6 +126,7 @@ void SubEdge::deletEdge(int pos){
 		}
 	}
 }
+
 int SubEdge::getQuality(PosAllele targetPos){
     // target is Ref allele
     if( targetPos.second == 1 ){
@@ -1152,7 +1154,7 @@ void VairiantGraph::storeResultPath(){
             minBlockStart = std::min(minBlockStart, (*aStartIter).second );
         if( bStartIter != blockStart->end() )
             minBlockStart = std::min(minBlockStart, (*bStartIter).second );
-
+        
         // two node doesn't appear, block start
         if( aBlockIter == bkResult->end() && bBlockIter == bkResult->end() ){
             (*bkResult)[A] = minBlockStart;
@@ -1388,7 +1390,7 @@ void VairiantGraph::readCorrection(){
         
         int readHP = (*readHpMap)[(*readIter).read_name];
         for(auto variantIter = (*readIter).variantVec.begin() ; variantIter != (*readIter).variantVec.end() ; variantIter++ ){
-            if( (*variantIter).allele == 0 || (*variantIter).allele == 1){
+            if( ( (*variantIter).allele == 0 || (*variantIter).allele == 1 ) && (*variantIter).quality >= 0 ){
                 int allele = (*variantIter).allele;
                 (*hpAlleleCountMap)[readHP][(*variantIter).position][allele]++;
                 
@@ -1398,57 +1400,61 @@ void VairiantGraph::readCorrection(){
         }
     }
 
-    int avgDepth = totalBase/coverBase->size();
-    double snpConfidenceThreshold = 0.6;
-    // when the read coverage is low, the higher threshold can reduce the impact of few incorrect reads.
-    if( avgDepth < 20 ){
-        snpConfidenceThreshold = 0.8;
-    }
-    else if( avgDepth < 30 ){
-        snpConfidenceThreshold = 0.7;
-    }
-    
-
-    std::cerr<< "AvgDepth " << avgDepth << " ... ";
-
-    subNodeHP->clear();
-    
-    std::map<int,std::map<int,int>> hpAllele;
-    // reassign allele result
-    for(auto nodeIter = nodeInfo->begin() ; nodeIter != nodeInfo->end() ; nodeIter++ ){
-        int position = nodeIter->first;
-        PosAllele A = std::make_pair(position, 1);
-        PosAllele aOtherSide = std::make_pair(position, 2);
-        
-        double hp1Ref = (*hpAlleleCountMap)[0][position][0];
-        double hp1Alt = (*hpAlleleCountMap)[0][position][1];
-        double hp2Ref = (*hpAlleleCountMap)[1][position][0];
-        double hp2Alt = (*hpAlleleCountMap)[1][position][1];
-        double result1reads = hp1Ref + hp2Alt;
-        double result2reads = hp2Ref + hp1Alt;
-        double resultConfidence = std::max(result1reads, result2reads) / (result1reads + result2reads);
-        
-        int hp1Result = -1;
-        int hp2Result = -1;
-        
-        if( resultConfidence > snpConfidenceThreshold ){
-            if( result1reads > result2reads ){
-                hp1Result = 0;
-                hp2Result = 1;
-            }
-            else if( result1reads < result2reads ){
-                hp1Result = 1;
-                hp2Result = 0;
-            }
+    if( totalBase != 0 && coverBase->size() != 0 ){
+        int avgDepth = totalBase/coverBase->size();
+        double snpConfidenceThreshold = 0.6;
+        // when the read coverage is low, the higher threshold can reduce the impact of few incorrect reads.
+        if( avgDepth < 20 ){
+            snpConfidenceThreshold = 0.8;
         }
-
-        if( hp1Result != -1 && hp2Result != -1 ){
-            (*subNodeHP)[A] = hp1Result;
-            (*subNodeHP)[aOtherSide] = hp2Result;
+        else if( avgDepth < 30 ){
+            snpConfidenceThreshold = 0.7;
         }
-        else{
-            bkResult->erase(A);
-            bkResult->erase(aOtherSide);
+        
+
+        std::cerr<< "AvgDepth " << avgDepth << " ... ";
+
+        subNodeHP->clear();
+        
+        std::map<int,std::map<int,int>> hpAllele;
+        // reassign allele result
+        for(auto nodeIter = nodeInfo->begin() ; nodeIter != nodeInfo->end() ; nodeIter++ ){
+            int position = nodeIter->first;
+            PosAllele A = std::make_pair(position, 1);
+            PosAllele aOtherSide = std::make_pair(position, 2);
+            
+            double hp1Ref = (*hpAlleleCountMap)[0][position][0];
+            double hp1Alt = (*hpAlleleCountMap)[0][position][1];
+            double hp2Ref = (*hpAlleleCountMap)[1][position][0];
+            double hp2Alt = (*hpAlleleCountMap)[1][position][1];
+            double result1reads = hp1Ref + hp2Alt;
+            double result2reads = hp2Ref + hp1Alt;
+            double resultConfidence = std::max(result1reads, result2reads) / (result1reads + result2reads);
+            
+            int hp1Result = -1;
+            int hp2Result = -1;
+            
+            std::cout<<position<<"\t"<<resultConfidence<<"\t"<<snpConfidenceThreshold<<"\t"<<hp1Ref<<"\t"<<hp1Alt<<"\t"<<hp2Ref<<"\t"<<hp2Alt<<"\t"<<result1reads<<"\t"<<result2reads<<"\n";
+            
+            if( resultConfidence > snpConfidenceThreshold ){
+                if( result1reads > result2reads ){
+                    hp1Result = 0;
+                    hp2Result = 1;
+                }
+                else if( result1reads < result2reads ){
+                    hp1Result = 1;
+                    hp2Result = 0;
+                }
+            }
+
+            if( hp1Result != -1 && hp2Result != -1 ){
+                (*subNodeHP)[A] = hp1Result;
+                (*subNodeHP)[aOtherSide] = hp2Result;
+            }
+            else{
+                bkResult->erase(A);
+                bkResult->erase(aOtherSide);
+            }
         }
     }
 
@@ -1558,7 +1564,7 @@ void VairiantGraph::connectTest(std::string chrName, std::map<int,int> &passPosi
 
 
             //if( majorRatio >= 0.95 && tmp.first + tmp.second > (((*(*nodeIter).second).size() + (*(*nextNodeIter).second).size())/4)){
-            if( majorRatio > 0.95 &&  tmp.first + tmp.second > (((*(*nodeIter).second).size() + (*(*nextNodeIter).second).size())/4)){
+            if( majorRatio >= 0.9 &&  tmp.first + tmp.second > (((*(*nodeIter).second).size() + (*(*nextNodeIter).second).size())/4)){
                     passPosition[currPos] = 1;
                     passPosition[nextPos] = 1;
             }

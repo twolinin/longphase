@@ -19,9 +19,9 @@ static const char *CORRECT_USAGE_MESSAGE =
 "      -u, --unModThreshold=[0~1]    value extracted from MM tag and ML tag. \n"
 "                                    above the threshold means no modification occurred. default: 0.2\n"
 "      -e, --heterRatio=[0~1]        modified and unmodified scales. \n"
-"                                    a higher threshold means that the two quantities need to be closer. default: 0.5\n"
+"                                    a higher threshold means that the two quantities need to be closer. default: 0.7\n"
 "      -i, --noiseRatio=[0~1]        not being judged as modified and unmodified is noise.\n"
-"                                    higher threshold means lower noise needs. default: 0.3\n"
+"                                    higher threshold means lower noise needs. default: 0.2\n"
 "\n";
 
 static const char* shortopts = "o:t:r:b:m:u:e:i:";
@@ -49,8 +49,8 @@ namespace opt
 	static std::string methylBamFile = "";
     static float modThreshold = 0.8;
     static float unModThreshold = 0.2;
-    static float heterRatio = 0.5;
-    static float noiseRatio = 0.3;
+    static float heterRatio = 0.7;
+    static float noiseRatio = 0.2;
 }
 
 void ModCallOptions(int argc, char** argv)

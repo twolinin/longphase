@@ -623,19 +623,35 @@ void MethBamParser::judgeMethGenotype(std::string chrName, std::vector<ReadVaria
 
 		if(heterRatio >= params->heterRatio && noiseRatio <= params->noiseRatio ){
             (*chrmethmapIter).second.heterstatus = "0/1";
-			 std::cout<< "heterstatus0/1\t" << chrName << "\t" <<(*chrmethmapIter).first << "\t" << heterRatio << "\t" << noiseRatio <<"\n";
+			//std::cout<< "heterstatus0/1\t" << chrName << "\t" <<(*chrmethmapIter).first << "\t" << heterRatio << "\t" << noiseRatio <<"\n";
         }
 		else if(methcnt >= nonmethcnt){
 			(*chrmethmapIter).second.heterstatus = "1/1";
-			std::cout<< "heterstatus1/1\t" << chrName << "\t" <<(*chrmethmapIter).first << "\t" << heterRatio << "\t" << noiseRatio <<"\n";
+			//std::cout<< "heterstatus1/1\t" << chrName << "\t" <<(*chrmethmapIter).first << "\t" << heterRatio << "\t" << noiseRatio <<"\n";
 		}
 		else{
 			(*chrmethmapIter).second.heterstatus = "0/0";
-			std::cout<< "heterstatus0/0\t" << chrName << "\t" <<(*chrmethmapIter).first << "\t" << heterRatio << "\t" << noiseRatio <<"\n";
+			//std::cout<< "heterstatus0/0\t" << chrName << "\t" <<(*chrmethmapIter).first << "\t" << heterRatio << "\t" << noiseRatio <<"\n";
 		}
 
 	}
-    
+    /*
+    for(std::map<int, MethPosInfo>::iterator chrmethmapIter = chrMethMap->begin(); chrmethmapIter != chrMethMap->end(); chrmethmapIter++){
+        
+        if( (*chrmethmapIter).second.heterstatus == "0/1" ){
+            
+            auto prepassPosIter =  chrMethMap->find((*chrmethmapIter).first - 1);
+            auto nextpassPosIter =  chrMethMap->find((*chrmethmapIter).first + 1);
+            
+            if( ( prepassPosIter == chrMethMap->end() ? false : (*prepassPosIter).second.heterstatus == "0/1" ) ||
+                ( nextpassPosIter == chrMethMap->end() ? false : (*nextpassPosIter).second.heterstatus == "0/1" ) ){
+                continue;    
+            }else{
+                (*chrmethmapIter).second.heterstatus = "0/0";
+            }
+        }
+    }
+    */
     for(std::vector<ReadVariant>::iterator rIter = readVariantVec.begin() ; rIter != readVariantVec.end() ; rIter++ ){
 
         ReadVariant fVec;

@@ -4,11 +4,6 @@
 
 PhasingProcess::PhasingProcess(PhasingParameters params)
 {
-    std::cout<<"test mod20230304\n";
-    std::cout<<"params->readConfidence\t" << params.readConfidence << "\n";
-    std::cout<<"params->snpConfidence\t" << params.snpConfidence << "\n";
-    std::cout<<params.version<< "\n";
-    
     // load SNP vcf file
     std::time_t begin = time(NULL);
     std::cerr<< "parsing VCF ... ";
@@ -119,3 +114,4 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
 PhasingProcess::~PhasingProcess(){
     
 };
+
