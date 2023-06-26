@@ -253,8 +253,7 @@ cuteSV alignment.bam reference.fasta SV.vcf work_dir --report_readid --genotype
 ---
 ## Comparison with other SNP-phasing programs
 LongPhase is 10x faster than WhatsHap and Margin and produces much larger blocks when tested on HG002, HG003,and HG004.
-
-<img src="http://bioinfo.cs.ccu.edu.tw/bioinfo/HG002_60x/compare2.png" width="600">
+![btac058f3](https://github.com/twolinin/longphase/assets/6086073/af3a75a1-6268-4700-9dcc-4a6f34e86f7a)
 
 ---
 ## Citation
