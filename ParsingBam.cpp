@@ -1351,29 +1351,29 @@ void BamParser::get_snp(const Alignment &align, std::vector<ReadVariant> &readVa
                             else if( base == (*currentVariantIter).second.Alt )
                                 allele = 1;
                         }
-                        else{
-                            // the read deletion contain VCF's deletion
-                            if( refAlleleLen != 1 && altAlleleLen == 1){
-                                std::string delSeq = ref_string.substr(ref_pos - 1, align.ol[i] + 1);
-                                std::string refSeq = (*currentVariantIter).second.Ref;
-                                std::string altSeq = (*currentVariantIter).second.Alt;
+                        
+                        // the read deletion contain VCF's deletion
+                        if( refAlleleLen != 1 && altAlleleLen == 1){
+                            std::string delSeq = ref_string.substr(ref_pos - 1, align.ol[i] + 1);
+                            std::string refSeq = (*currentVariantIter).second.Ref;
+                            std::string altSeq = (*currentVariantIter).second.Alt;
                                 
-                                //std::cout<< align.chr << "\t" << align.qname << "\t" << align.refStart << "\t" << align.qlen << "\t2_deletion "  << "\t" << (*currentVariantIter).first << "\t" << (*currentVariantIter).second.Ref << "\t" << (*currentVariantIter).second.Alt << "\n";
-                                //std::cout<< "prev\t" << prev_ref_pos << "\t" << prev_query_pos << "\t" << i << "\t" << align.op[i-1] << "\t" << align.ol[i-1] << "\n";
-                                //std::cout<< "curr\t" << ref_pos << "\t" << query_pos << align.op[i] << "\t" << align.ol[i] << "\t" << delSeq << "\n";
+                            //std::cout<< align.chr << "\t" << align.qname << "\t" << align.refStart << "\t" << align.qlen << "\t2_deletion "  << "\t" << (*currentVariantIter).first << "\t" << (*currentVariantIter).second.Ref << "\t" << (*currentVariantIter).second.Alt << "\n";
+                            //std::cout<< "prev\t" << prev_ref_pos << "\t" << prev_query_pos << "\t" << i << "\t" << align.op[i-1] << "\t" << align.ol[i-1] << "\n";
+                            //std::cout<< "curr\t" << ref_pos << "\t" << query_pos << align.op[i] << "\t" << align.ol[i] << "\t" << delSeq << "\n";
 
-                                // 7698650 homopolymer
+                            // 7698650 homopolymer
                                 
-                                if( delSeq.find(refSeq) != std::string::npos ){
-                                    allele = 0;
-                                }
-                                else{
-                                    allele = 1;
-                                }
+                            /*if( delSeq.find(refSeq) != std::string::npos ){
+                                allele = 0;
                             }
                             else{
                                 allele = 1;
-                            }
+                            }*/
+                            allele = 1;
+                        }
+                        else if ( allele == -1 ) {
+                            allele = 0;
                         }
                         
                         if(allele != -1){

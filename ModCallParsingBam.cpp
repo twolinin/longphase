@@ -400,33 +400,35 @@ void MethBamParser::parse_CIGAR(AlignmentMethExtend &align, std::vector<ReadVari
 				}*/
 				//std::cout<<"parser_CIGA\t"<<align.qname<<"\t"<<methrpos<<"\t"<<(*qmethiter).prob<<"\t"<<(*qmethiter).position<<"\t"<<querypos<<"\t"<<refpos<<"\n";
                 //if( (refChar == "C") ? !align.is_reverse : align.is_reverse ){
-				if( align.is_reverse ? (refChar == "G") : (refChar == "C")){
-					//methylation
-					if( (*qmethiter).prob >= params->modThreshold*255 ){
-						(*chrMethMap)[methrpos].methreadcnt++;
-						//strand - is 1, strand + is 0
-						(*chrMethMap)[methrpos].strand = (align.is_reverse ? 1 : 0); 
-						(*chrMethMap)[methrpos].modReadVec.push_back(align.qname);
-						//---------------------------------------------------------------------
-						Variant *tmpVariant = new Variant(methrpos, 0, 60 );
-						(*tmpReadResult).variantVec.push_back( (*tmpVariant) );
-						delete tmpVariant;
-						//---------------------------------------------------------------------
-					}
-					//non-methylation (not include no detected)
-					else if( (*qmethiter).prob <= params->unModThreshold*255 ){ 
-						(*chrMethMap)[methrpos].canonreadcnt++;
-						(*chrMethMap)[methrpos].nonModReadVec.push_back(align.qname);
-						//---------------------------------------------------------------------
-						Variant *tmpVariant = new Variant(methrpos, 1, 60 );
-						(*tmpReadResult).variantVec.push_back( (*tmpVariant) );
-						delete tmpVariant;
-						//---------------------------------------------------------------------
-					}
-					else{
-						(*chrMethMap)[methrpos].noisereadcnt++;
-					}	
-				}
+				//if( align.is_reverse ? (refChar == "G") : (refChar == "C")){
+                
+                //methylation
+                if( (*qmethiter).prob >= params->modThreshold*255 ){
+                    (*chrMethMap)[methrpos].methreadcnt++;
+                    //strand - is 1, strand + is 0
+                    (*chrMethMap)[methrpos].strand = (align.is_reverse ? 1 : 0); 
+                    (*chrMethMap)[methrpos].modReadVec.push_back(align.qname);
+                    //---------------------------------------------------------------------
+                    Variant *tmpVariant = new Variant(methrpos, 0, 60 );
+                    (*tmpReadResult).variantVec.push_back( (*tmpVariant) );
+                    delete tmpVariant;
+                    //---------------------------------------------------------------------
+                }
+                //non-methylation (not include no detected)
+                else if( (*qmethiter).prob <= params->unModThreshold*255 ){ 
+                    (*chrMethMap)[methrpos].canonreadcnt++;
+                    (*chrMethMap)[methrpos].nonModReadVec.push_back(align.qname);
+                    //---------------------------------------------------------------------
+                    Variant *tmpVariant = new Variant(methrpos, 1, 60 );
+                    (*tmpReadResult).variantVec.push_back( (*tmpVariant) );
+                    delete tmpVariant;
+                    //---------------------------------------------------------------------
+                }
+                else{
+                    (*chrMethMap)[methrpos].noisereadcnt++;
+                }	
+				
+                //}
                 /*if(align.is_reverse){
                     qmethiter--;
                 }
@@ -531,6 +533,8 @@ void MethBamParser::writeResultVCF( std::string chrName, std::map<std::string, s
 			ModResultVcf<<"#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSAMPLE\n";
 		}
 
+        std::vector<std::pair<int , MethPosInfo>> MethPosVec;
+        int lastCpGPos = 0;
 		for(std::map<int , MethPosInfo>::iterator posinfoIter = chrMethMap->begin(); posinfoIter != chrMethMap->end(); posinfoIter++){
 			std::string infostr= "";
             std::string eachpos;
@@ -544,10 +548,6 @@ void MethBamParser::writeResultVCF( std::string chrName, std::map<std::string, s
             auto prepassPosIter =  passPosition.find((*posinfoIter).first - 1);
             auto nextpassPosIter =  passPosition.find((*posinfoIter).first + 1);
             
-            if( prepassPosIter == passPosition.end() && nextpassPosIter == passPosition.end() ){
-                continue;
-            }
-            
             if( passPosIter ==  passPosition.end() ){
                 continue;
             }
@@ -555,6 +555,12 @@ void MethBamParser::writeResultVCF( std::string chrName, std::map<std::string, s
 			if((*posinfoIter).second.strand == -1){
 				continue;
 			}
+            
+            //Output contains only consecutive methylation position (CpG)
+            if( prepassPosIter == passPosition.end() && nextpassPosIter == passPosition.end() ){
+                //MethPosVec.push_back(std::make_pair((*posinfoIter).first,(*posinfoIter).second));
+                continue;
+            }
             
             // append modification reads
             if((*posinfoIter).second.modReadVec.size() > 0 ){
@@ -620,7 +626,8 @@ void MethBamParser::judgeMethGenotype(std::string chrName, std::vector<ReadVaria
 
 		float heterRatio = std::min(methcnt, nonmethcnt) / std::max(methcnt, nonmethcnt);
 		float noiseRatio = noisereadcnt / depth;
-
+        
+        std::cout<<(*chrmethmapIter).first<<"\t"<<heterRatio<<"\t"<<noiseRatio<<"\n";
 		if(heterRatio >= params->heterRatio && noiseRatio <= params->noiseRatio ){
             (*chrmethmapIter).second.heterstatus = "0/1";
 			//std::cout<< "heterstatus0/1\t" << chrName << "\t" <<(*chrmethmapIter).first << "\t" << heterRatio << "\t" << noiseRatio <<"\n";
@@ -635,6 +642,8 @@ void MethBamParser::judgeMethGenotype(std::string chrName, std::vector<ReadVaria
 		}
 
 	}
+    
+    //Consecutive methylation position (CpG)
     /*
     for(std::map<int, MethPosInfo>::iterator chrmethmapIter = chrMethMap->begin(); chrmethmapIter != chrMethMap->end(); chrmethmapIter++){
         

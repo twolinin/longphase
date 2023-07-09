@@ -362,7 +362,25 @@ void VairiantGraph::edgeConnectResult(){
                     // Although the h1 and h2 votes of the previous N points are tied, 
                     // but this position is not tied with the previous SNP, 
                     // push this SNP but not assign haplotype, this SNP may classified by readCorrection()
-                    (*hpResult)[currPos] = 0;
+                    //(*hpResult)[currPos] = 0;	
+                    //(*phasedBlocks)[blockStart].push_back(currPos);	
+                    //change:ConnetTieByPrev	
+                    if( (*hpResult)[(*phasedBlocks)[blockStart].back()] == 1 ){	
+                        if( preResult.first.second == 1 ){	
+                            (*hpResult)[currPos] = 1 ;	
+                        }	
+                        if( preResult.first.second == 2 ){	
+                            (*hpResult)[currPos] = 2 ;	
+                        }	
+                    }	
+                    else if( (*hpResult)[(*phasedBlocks)[blockStart].back()] == 2 ) {	
+                        if( preResult.first.second == 1 ){	
+                            (*hpResult)[currPos] = 2 ;	
+                        }	
+                        if( preResult.first.second == 2 ){	
+                            (*hpResult)[currPos] = 1 ;	
+                        }	
+                    }
                     (*phasedBlocks)[blockStart].push_back(currPos);
                 }
             }
@@ -1564,7 +1582,7 @@ void VairiantGraph::connectTest(std::string chrName, std::map<int,int> &passPosi
 
 
             //if( majorRatio >= 0.95 && tmp.first + tmp.second > (((*(*nodeIter).second).size() + (*(*nextNodeIter).second).size())/4)){
-            if( majorRatio >= 0.9 &&  tmp.first + tmp.second > (((*(*nodeIter).second).size() + (*(*nextNodeIter).second).size())/4)){
+            if( majorRatio >= 0.9 &&  tmp.first + tmp.second > (((*(*nodeIter).second).size() + (*(*nextNodeIter).second).size())/4) && tmp.first + tmp.second > 6 ){
                     passPosition[currPos] = 1;
                     passPosition[nextPos] = 1;
             }
