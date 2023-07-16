@@ -89,4 +89,32 @@ class MethBamParser{
         
 };
 
+class MethylationGraph{
+    private:
+        ModCallParameters *params;
+        std::vector<ReadVariant> *readVariant;
+        
+        // modifications
+        // position, quality
+        std::map<int,ReadBaseMap*> *forwardModNode;
+        std::map<int,ReadBaseMap*> *reverseModNode;
+        
+        // By default, a Map in C++ is sorted in increasing order based on its key.
+        // position, edge
+        std::map<int,VariantEdge*> *edgeList;
+        // record all variant position, include SNP and SV 
+        // position, quality
+        std::map<int,ReadBaseMap*> *nodeInfo;
+        
+    public:
+    
+        MethylationGraph(ModCallParameters &params);
+        ~MethylationGraph();
+        
+        void addEdge(std::vector<ReadVariant> &readVariant);
+        void connectResults(std::string chrName, std::map<int,int> &passPosition);
+        
+        void destroy();
+};
+
 #endif

@@ -362,26 +362,28 @@ void VairiantGraph::edgeConnectResult(){
                     // Although the h1 and h2 votes of the previous N points are tied, 
                     // but this position is not tied with the previous SNP, 
                     // push this SNP but not assign haplotype, this SNP may classified by readCorrection()
-                    //(*hpResult)[currPos] = 0;	
-                    //(*phasedBlocks)[blockStart].push_back(currPos);	
-                    //change:ConnetTieByPrev	
-                    if( (*hpResult)[(*phasedBlocks)[blockStart].back()] == 1 ){	
-                        if( preResult.first.second == 1 ){	
-                            (*hpResult)[currPos] = 1 ;	
-                        }	
-                        if( preResult.first.second == 2 ){	
-                            (*hpResult)[currPos] = 2 ;	
-                        }	
-                    }	
-                    else if( (*hpResult)[(*phasedBlocks)[blockStart].back()] == 2 ) {	
-                        if( preResult.first.second == 1 ){	
-                            (*hpResult)[currPos] = 2 ;	
-                        }	
-                        if( preResult.first.second == 2 ){	
-                            (*hpResult)[currPos] = 1 ;	
-                        }	
+                    //(*hpResult)[currPos] = 0;
+                    //(*phasedBlocks)[blockStart].push_back(currPos);
+                    //change:ConnetTieByPrev
+                    if( (*hpResult)[(*phasedBlocks)[blockStart].back()] == 1 ){
+                        if( preResult.first.second == 1 ){
+                            (*hpResult)[currPos] = 1 ;
+                        }
+                        if( preResult.first.second == 2 ){
+                            (*hpResult)[currPos] = 2 ;
+                        }
                     }
+                    else if( (*hpResult)[(*phasedBlocks)[blockStart].back()] == 2 ) {
+                        if( preResult.first.second == 1 ){
+                            (*hpResult)[currPos] = 2 ;
+                        }
+                        if( preResult.first.second == 2 ){
+                            (*hpResult)[currPos] = 1 ;
+                        }
+                    }
+                    
                     (*phasedBlocks)[blockStart].push_back(currPos);
+                    
                 }
             }
         }
@@ -1363,11 +1365,15 @@ void VairiantGraph::addEdge(std::vector<ReadVariant> &in_readVariant){
 void VairiantGraph::readCorrection(){
     // haplotype, <position <allele, base count>>
     std::map<int,std::map<int,std::map<int,int>>> *hpAlleleCountMap = new std::map<int,std::map<int,std::map<int,int>>>;
+    // record cover SNP and total depth
+    int totalBase = 0;
+    std::map<int,int> *coverBase = new std::map<int,int>;
 
     // iter all read, determine the haplotype of the read
     for(std::vector<ReadVariant>::iterator readIter = (*readVariant).begin() ; readIter != (*readVariant).end() ; readIter++ ){
         double refCount = 0;
         double altCount = 0;
+        
         // loop all variant 
         for( auto variant : (*readIter).variantVec ){
             PosAllele node = std::make_pair( variant.position , variant.allele+1);
@@ -1380,24 +1386,27 @@ void VairiantGraph::readCorrection(){
                 }
             }
         }
-
+        
         // tag high confident reads
-        if( refCount == altCount ){
-            (*readHpMap)[(*readIter).read_name] = -1;
-        }
-        else if( std::max(refCount,altCount)/(refCount+altCount) >= params->readConfidence ){
+        if( std::max(refCount,altCount)/(refCount+altCount) >= params->readConfidence ){
             // tag read with the corresponding haplotype
             int belongHP = ( refCount > altCount ? 0 : 1 );
             (*readHpMap)[(*readIter).read_name] = belongHP;
+            
+            for(auto variantIter = (*readIter).variantVec.begin() ; variantIter != (*readIter).variantVec.end() ; variantIter++ ){
+                if( (*variantIter).allele == 0 || (*variantIter).allele == 1){
+                    (*hpAlleleCountMap)[belongHP][(*variantIter).position][(*variantIter).allele]++;
+                    
+                    totalBase++;
+                    (*coverBase)[(*variantIter).position] = 1;
+                }
+            }
         }
         else{
             (*readHpMap)[(*readIter).read_name] = -1;
         }
     }
-
-    int totalBase = 0;
-    std::map<int,int> *coverBase = new std::map<int,int>;
-    
+    /*
     // count each haplotype's allele on SNP locus
     for(auto readIter = (*readVariant).begin() ; readIter != (*readVariant).end() ; readIter++ ){
         // Skip reads with insufficient confidence
@@ -1408,7 +1417,7 @@ void VairiantGraph::readCorrection(){
         
         int readHP = (*readHpMap)[(*readIter).read_name];
         for(auto variantIter = (*readIter).variantVec.begin() ; variantIter != (*readIter).variantVec.end() ; variantIter++ ){
-            if( ( (*variantIter).allele == 0 || (*variantIter).allele == 1 ) && (*variantIter).quality >= 0 ){
+            if( (*variantIter).allele == 0 || (*variantIter).allele == 1){
                 int allele = (*variantIter).allele;
                 (*hpAlleleCountMap)[readHP][(*variantIter).position][allele]++;
                 
@@ -1417,7 +1426,8 @@ void VairiantGraph::readCorrection(){
             }
         }
     }
-
+    */
+    //std::cout<< totalBase << "\t" << coverBase->size() << "\n";
     if( totalBase != 0 && coverBase->size() != 0 ){
         int avgDepth = totalBase/coverBase->size();
         double snpConfidenceThreshold = 0.6;
@@ -1451,8 +1461,6 @@ void VairiantGraph::readCorrection(){
             
             int hp1Result = -1;
             int hp2Result = -1;
-            
-            std::cout<<position<<"\t"<<resultConfidence<<"\t"<<snpConfidenceThreshold<<"\t"<<hp1Ref<<"\t"<<hp1Alt<<"\t"<<hp2Ref<<"\t"<<hp2Alt<<"\t"<<result1reads<<"\t"<<result2reads<<"\n";
             
             if( resultConfidence > snpConfidenceThreshold ){
                 if( result1reads > result2reads ){
@@ -1534,85 +1542,6 @@ std::map<std::string,int>* VairiantGraph::getReadHP(){
 
 int VairiantGraph::totalNode(){
     return nodeInfo->size();
-}
-
-void VairiantGraph::connectTest(std::string chrName, std::map<int,int> &passPosition){
-
-
-    // position, number of clear edge, number of dirty (unclear) edge
-    std::map<int, std::pair<int, int> > *innerEdge = new std::map<int, std::pair<int, int> >;
-    std::map<int, std::pair<int, int> > *outerEdge = new std::map<int, std::pair<int, int> >;
-
-    // check clear connect variant
-    for(std::map<int,ReadBaseMap*>::iterator nodeIter = nodeInfo->begin() ; nodeIter != nodeInfo->end() ; nodeIter++ ){
-
-        // check next position
-        std::map<int,ReadBaseMap*>::iterator nextNodeIter = std::next(nodeIter, 1);
-        if( nextNodeIter == nodeInfo->end() ){
-             break;
-        }
-
-        int currPos = nodeIter->first;
-
-        // Check if there is no edge from current node
-        std::map<int,VariantEdge*>::iterator edgeIter = edgeList->find( currPos );
-        if( edgeIter==edgeList->end() )
-            continue;
-
-        // check connect between surrent SNP and next n SNPs
-        for(int i = 0 ; i < params->connectAdjacent ; i++ ){
-            int nextPos = nextNodeIter->first;
-
-            // get number of RR read and RA read
-            std::pair<int,int> tmp = edgeIter->second->findNumberOfRead(nextPos);
-
-            double majorRatio = (double)std::max(tmp.first,tmp.second)/(double)(tmp.first+tmp.second);
-
-            //if( majorRatio >= 0.8 && tmp.first + tmp.second >= 4){
-                        /*if( majorRatio >= 0.8 && tmp.first + tmp.second >= (((*(*nodeIter).second).size() + (*(*nextNodeIter).second).size())/4)){
-                (*outerEdge)[currPos].first++;
-                (*innerEdge)[nextPos].first++;
-            }
-            else{
-                (*outerEdge)[currPos].second++;
-                (*innerEdge)[nextPos].second++;
-            }*/
-
-            std::cout<< chrName << "\t" <<"RRxRA\t" << currPos << "\t->\t" << nextPos << "\t | RR\t"<< tmp.first << "\tRA\t"<< tmp.second << "\t|\t" << majorRatio << "\t" << (((*(*nodeIter).second).size() + (*(*nextNodeIter).second).size())/3) << "\n";
-
-
-            //if( majorRatio >= 0.95 && tmp.first + tmp.second > (((*(*nodeIter).second).size() + (*(*nextNodeIter).second).size())/4)){
-            if( majorRatio >= 0.9 &&  tmp.first + tmp.second > (((*(*nodeIter).second).size() + (*(*nextNodeIter).second).size())/4) && tmp.first + tmp.second > 6 ){
-                    passPosition[currPos] = 1;
-                    passPosition[nextPos] = 1;
-            }
-            nextNodeIter++;
-            if( nextNodeIter == nodeInfo->end() )
-                break;
-        }
-    }
-
-    // check all variant inner and outer edge
-
-    /*for(std::map<int,ReadBaseMap*>::iterator nodeIter = nodeInfo->begin() ; nodeIter != nodeInfo->end() ; nodeIter++ ){
-    int currPos = nodeIter->first;
-
-    double clearEdge = (*innerEdge)[currPos].first  + (*outerEdge)[currPos].first;
-    double dirtyEdge = (*innerEdge)[currPos].second + (*outerEdge)[currPos].second;
-    double clearRatio = clearEdge/(double)(clearEdge+dirtyEdge);
-
-    std::cout<< "edge\t" << currPos << "\t| innerEdge\t" << (*innerEdge)[currPos].first << "\t" << (*innerEdge)[currPos].second
-                        << "\t| outerEdge\t" << (*outerEdge)[currPos].first << "\t" << (*outerEdge)[currPos].second
-                        << "\t" << clearRatio << "\n";
-
-            if( clearRatio > 0.25){
-                    passPosition[currPos] = 1;
-            }
-    }*/
-
-    delete innerEdge;
-    delete outerEdge;
-
 }
 
 void VairiantGraph::phasingProcess(){

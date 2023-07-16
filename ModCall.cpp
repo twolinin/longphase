@@ -22,6 +22,10 @@ static const char *CORRECT_USAGE_MESSAGE =
 "                                    a higher threshold means that the two quantities need to be closer. default: 0.7\n"
 "      -i, --noiseRatio=[0~1]        not being judged as modified and unmodified is noise.\n"
 "                                    higher threshold means lower noise needs. default: 0.2\n"
+"      -a, --connectAdjacent=Num     connect adjacent N METHs. default:6"
+"      -c, --connectConfidence=[0~1] determine the confidence of phasing two ASMs.\n"
+"                                    higher threshold requires greater consistency in the reads. default: 0.9\n"
+
 "\n";
 
 static const char* shortopts = "o:t:r:b:m:u:e:i:";
@@ -38,6 +42,8 @@ static const struct option longopts[] = {
     { "unModThreshold",    required_argument,  NULL, 'u' },
     { "heterRatio",        required_argument,  NULL, 'e' },
     { "noiseRatio",        required_argument,  NULL, 'i' },
+    { "connectAdjacent",   required_argument,  NULL, 'a' },
+    { "connectConfidence", required_argument,  NULL, 'c' },
     { NULL, 0, NULL, 0 }
 };
 
@@ -49,8 +55,10 @@ namespace opt
 	static std::string methylBamFile = "";
     static float modThreshold = 0.8;
     static float unModThreshold = 0.2;
-    static float heterRatio = 0.7;
+    static float heterRatio = 0.6;
     static float noiseRatio = 0.2;
+    static int connectAdjacent = 6;
+    static float connectConfidence = 0.9;
 }
 
 void ModCallOptions(int argc, char** argv)
@@ -71,6 +79,8 @@ void ModCallOptions(int argc, char** argv)
         case 'u': arg >> opt::unModThreshold; break;
         case 'e': arg >> opt::heterRatio; break;
         case 'i': arg >> opt::noiseRatio; break;
+        case 'a': arg >> opt::connectAdjacent; break;
+        case 'c': arg >> opt::connectConfidence; break;
         case OPT_HELP:
             std::cout << CORRECT_USAGE_MESSAGE;
             exit(EXIT_SUCCESS);
@@ -126,6 +136,8 @@ int ModCallMain(int argc, char** argv)
     ecParams.unModThreshold=opt::unModThreshold;
     ecParams.heterRatio=opt::heterRatio;
     ecParams.noiseRatio=opt::noiseRatio;
+    ecParams.connectAdjacent=opt::connectAdjacent;
+    ecParams.connectConfidence=opt::connectConfidence;
     
     ModCallProcess processor(ecParams);
 

@@ -13,6 +13,8 @@ struct ModCallParameters
     float unModThreshold;
     float heterRatio;
     float noiseRatio;
+    int connectAdjacent;
+    float connectConfidence;
 };
 
 class ModCallProcess

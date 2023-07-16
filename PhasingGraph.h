@@ -137,8 +137,6 @@ class VairiantGraph{
         void exportResult(std::string chrName, PhasingResult &result);
         int totalNode();
         
-        // test
-        void connectTest(std::string chrName, std::map<int,int> &passPosition);
 		void deletPosition(std::vector<ReadVariant> &readVariant, std::map<int,int> &passPosition);
 		
         void destroy();

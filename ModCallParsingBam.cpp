@@ -1,4 +1,5 @@
 #include "ModCallParsingBam.h"
+#include "PhasingGraph.h"
 #include "Util.h"
 
 #include <cmath>
@@ -730,4 +731,196 @@ void MethBamParser::calculateDepth(){
 	}
 	
 	readStartEndMap->clear();
+}
+
+MethylationGraph::MethylationGraph(ModCallParameters &in_params){
+    params=&in_params;
+    
+    nodeInfo = new std::map<int,ReadBaseMap*>;
+    edgeList = new std::map<int,VariantEdge*>;
+    forwardModNode = new std::map<int,ReadBaseMap*>;
+    reverseModNode = new std::map<int,ReadBaseMap*>;
+}
+
+MethylationGraph::~MethylationGraph(){
+}
+
+void MethylationGraph::addEdge(std::vector<ReadVariant> &in_readVariant){
+    readVariant = &in_readVariant;
+    // iter all read
+    for(std::vector<ReadVariant>::iterator readIter = in_readVariant.begin() ; readIter != in_readVariant.end() ; readIter++ ){
+        ReadVariant tmpRead;
+        //std::cout<< "read\t" << (*readIter).source_id << "\t" << (*readIter).read_name << "\t" << (*readIter).reference_start << "\n";
+        for( auto variant : (*readIter).variantVec ){
+            // modification in the forward strand
+            if( variant.quality == -2 ){
+                auto nodeIter = forwardModNode->find(variant.position);
+                if( nodeIter == forwardModNode->end() ){
+                    (*forwardModNode)[variant.position] = new ReadBaseMap();
+                }
+                
+                (*(*forwardModNode)[variant.position])[(*readIter).read_name] = 60;
+
+                continue;
+            }
+            // modification in the reverse strand
+            if( variant.quality == -3 ){
+                auto nodeIter = reverseModNode->find(variant.position);
+                if( nodeIter == reverseModNode->end() ){
+                    (*reverseModNode)[variant.position] = new ReadBaseMap();
+                }
+                
+                (*(*reverseModNode)[variant.position])[(*readIter).read_name] = 60;
+                
+                continue;
+            }
+            
+            
+            tmpRead.variantVec.push_back(variant);
+            
+            auto nodeIter = nodeInfo->find(variant.position);
+            
+            if( nodeIter == nodeInfo->end() ){
+                (*nodeInfo)[variant.position] = new ReadBaseMap();
+            }
+            
+            (*(*nodeInfo)[variant.position])[(*readIter).read_name] = variant.quality;
+        }
+        // iter all pair of snp and construct initial graph
+        std::vector<Variant>::iterator variant1Iter = tmpRead.variantVec.begin();
+        std::vector<Variant>::iterator variant2Iter = std::next(variant1Iter,1);
+        while(variant1Iter != tmpRead.variantVec.end() && variant2Iter != tmpRead.variantVec.end() ){
+
+            // create new edge if not exist
+            std::map<int,VariantEdge*>::iterator posIter = edgeList->find((*variant1Iter).position);
+            if( posIter == edgeList->end() )
+                (*edgeList)[(*variant1Iter).position] = new VariantEdge((*variant1Iter).position);
+
+            // add edge process
+            for(int nextNode = 0 ; nextNode < params->connectAdjacent; nextNode++){
+
+                // this allele support ref
+                if( (*variant1Iter).allele == 0 )
+                    (*edgeList)[(*variant1Iter).position]->ref->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).read_name);
+                // this allele support alt
+                if( (*variant1Iter).allele == 1 )
+                    (*edgeList)[(*variant1Iter).position]->alt->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).read_name);
+                
+                // next snp
+                variant2Iter++;
+                if( variant2Iter == tmpRead.variantVec.end() ){
+                    break;
+                }
+            }
+
+            variant1Iter++;
+            variant2Iter = std::next(variant1Iter,1);
+        }
+    }
+}
+
+void MethylationGraph::connectResults(std::string chrName, std::map<int,int> &passPosition){
+
+
+    // position, number of clear edge, number of dirty (unclear) edge
+    //std::map<int, std::pair<int, int> > *innerEdge = new std::map<int, std::pair<int, int> >;
+    //std::map<int, std::pair<int, int> > *outerEdge = new std::map<int, std::pair<int, int> >;
+
+    // check clear connect variant
+    for(std::map<int,ReadBaseMap*>::iterator nodeIter = nodeInfo->begin() ; nodeIter != nodeInfo->end() ; nodeIter++ ){
+
+        // check next position
+        std::map<int,ReadBaseMap*>::iterator nextNodeIter = std::next(nodeIter, 1);
+        if( nextNodeIter == nodeInfo->end() ){
+             break;
+        }
+
+        int currPos = nodeIter->first;
+
+        // Check if there is no edge from current node
+        std::map<int,VariantEdge*>::iterator edgeIter = edgeList->find( currPos );
+        if( edgeIter==edgeList->end() )
+            continue;
+
+        // check connect between surrent SNP and next n SNPs
+        for(int i = 0 ; i < params->connectAdjacent ; i++ ){
+            int nextPos = nextNodeIter->first;
+
+            // get number of RR read and RA read
+            std::pair<int,int> tmp = edgeIter->second->findNumberOfRead(nextPos);
+
+            double majorRatio = (double)std::max(tmp.first,tmp.second)/(double)(tmp.first+tmp.second);
+
+            //if( majorRatio >= 0.8 && tmp.first + tmp.second >= 4){
+                        /*if( majorRatio >= 0.8 && tmp.first + tmp.second >= (((*(*nodeIter).second).size() + (*(*nextNodeIter).second).size())/4)){
+                (*outerEdge)[currPos].first++;
+                (*innerEdge)[nextPos].first++;
+            }
+            else{
+                (*outerEdge)[currPos].second++;
+                (*innerEdge)[nextPos].second++;
+            }*/
+
+            std::cout<< chrName << "\t" <<"RRxRA\t" << currPos << "\t->\t" << nextPos << "\t | RR\t"<< tmp.first << "\tRA\t"<< tmp.second << "\t|\t" << majorRatio << "\t" << (((*(*nodeIter).second).size() + (*(*nextNodeIter).second).size())/3) << "\n";
+
+
+            //if( majorRatio >= 0.95 && tmp.first + tmp.second > (((*(*nodeIter).second).size() + (*(*nextNodeIter).second).size())/4)){
+            if( majorRatio >= params->connectConfidence &&  tmp.first + tmp.second > (((*(*nodeIter).second).size() + (*(*nextNodeIter).second).size())/4) && tmp.first + tmp.second > 6 ){
+                    passPosition[currPos] = 1;
+                    passPosition[nextPos] = 1;
+            }
+            nextNodeIter++;
+            if( nextNodeIter == nodeInfo->end() )
+                break;
+        }
+    }
+
+    // check all variant inner and outer edge
+
+    /*for(std::map<int,ReadBaseMap*>::iterator nodeIter = nodeInfo->begin() ; nodeIter != nodeInfo->end() ; nodeIter++ ){
+    int currPos = nodeIter->first;
+
+    double clearEdge = (*innerEdge)[currPos].first  + (*outerEdge)[currPos].first;
+    double dirtyEdge = (*innerEdge)[currPos].second + (*outerEdge)[currPos].second;
+    double clearRatio = clearEdge/(double)(clearEdge+dirtyEdge);
+
+    std::cout<< "edge\t" << currPos << "\t| innerEdge\t" << (*innerEdge)[currPos].first << "\t" << (*innerEdge)[currPos].second
+                        << "\t| outerEdge\t" << (*outerEdge)[currPos].first << "\t" << (*outerEdge)[currPos].second
+                        << "\t" << clearRatio << "\n";
+
+            if( clearRatio > 0.25){
+                    passPosition[currPos] = 1;
+            }
+    }*/
+
+    //delete innerEdge;
+    //delete outerEdge;
+
+}
+
+void MethylationGraph::destroy(){
+
+    for( auto edgeIter = edgeList->begin() ; edgeIter != edgeList->end() ; edgeIter++ ){
+        edgeIter->second->ref->destroy();
+        edgeIter->second->alt->destroy();
+        delete edgeIter->second->ref;
+        delete edgeIter->second->alt;
+    }
+    
+    for( auto nodeIter = nodeInfo->begin() ; nodeIter != nodeInfo->end() ; nodeIter++ ){
+        delete nodeIter->second;
+    }
+    
+    for( auto nodeIter = forwardModNode->begin() ; nodeIter != forwardModNode->end() ; nodeIter++ ){
+        delete nodeIter->second;
+    }
+    
+    for( auto nodeIter = reverseModNode->begin() ; nodeIter != reverseModNode->end() ; nodeIter++ ){
+        delete nodeIter->second;
+    }
+    
+    delete nodeInfo;
+    delete edgeList;
+    delete forwardModNode;
+    delete reverseModNode;
 }

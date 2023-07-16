@@ -43,31 +43,20 @@ ModCallProcess::ModCallProcess(ModCallParameters params){
 
         
         std::cerr<< "run algorithm ... ";
-        std::string chr_reference = "";
         
-        PhasingParameters phasingParams;
-        phasingParams.connectAdjacent = 6;
-
-		
-		VairiantGraph *fGraph = new VairiantGraph(chr_reference, phasingParams);
-		VairiantGraph *rGraph = new VairiantGraph(chr_reference, phasingParams);
-		
+		MethylationGraph *fGraph = new MethylationGraph(params);
+		MethylationGraph *rGraph = new MethylationGraph(params);
 		fGraph->addEdge(fReadVariantVec);
-		fGraph->connectTest(chrName, (*passPosition));
-		
+		fGraph->connectResults(chrName, (*passPosition));
 		
 		rGraph->addEdge(rReadVariantVec);
-		rGraph->connectTest(chrName, (*passPosition));
-		
+		rGraph->connectResults(chrName, (*passPosition));
 		
 		fGraph->destroy();
 		rGraph->destroy();
 		delete fGraph;
 		delete rGraph;
-			
 
-		
-		
 		
 		//write to vcf file
         std::cerr<<"write vcf " << " ... ";
