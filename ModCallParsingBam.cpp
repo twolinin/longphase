@@ -52,129 +52,132 @@ void MethBamParser::detectMeth(std::string chrName, int chr_len, std::vector<Rea
     // init data structure and get core n
     htsThreadPool threadPool = {NULL, 0};
 
-    // open cram file
-    samFile *fp_in = hts_open(params->methylBamFile.c_str(),"r");
-    // set reference
-    hts_set_fai_filename(fp_in, params->fastaFile.c_str());        
-    // read header
-    bam_hdr_t *bamHdr = sam_hdr_read(fp_in); 
-    // initialize an alignment
-    bam1_t *aln = bam_init1(); 
-    hts_idx_t *idx = NULL;
-    
-    if ((idx = sam_index_load(fp_in, params->methylBamFile.c_str())) == 0) {
-        std::cout<<"ERROR: Cannot open index for bam file\n";
-        exit(1);
-    }
-    
-    std::string range = chrName + ":1-" + std::to_string(chr_len);
-    hts_itr_t* iter = sam_itr_querys(idx, bamHdr, range.c_str());
+    for( auto bamFile: params->bamFileVec ){
 
-    
-    int result;
-    
-    // creat thread pool
-    if (!(threadPool.pool = hts_tpool_init(numThreads))) {
-        fprintf(stderr, "Error creating thread pool\n");
-    }
-    hts_set_opt(fp_in, HTS_OPT_THREAD_POOL, &threadPool);
-
-    while ((result = sam_itr_multi_next(fp_in, iter, aln)) >= 0) { 
-        int flag = aln->core.flag;
-
-        if (  aln->core.qual < 1  // mapping quality
-             || (flag & 0x4)   != 0  // read unmapped
-             || (flag & 0x100) != 0  // secondary alignment. repeat. 
-                                     // A secondary alignment occurs when a given read could align reasonably well to more than one place.
-             || (flag & 0x400) != 0  // duplicate 
-             || (flag & 0x800) != 0  // supplementary alignment
-                                     // A chimeric alignment is represented as a set of linear alignments that do not have large overlaps.
-             ){ 
-            std::string str = bamHdr->target_name[aln->core.tid];
-            continue;
-        }
-
-        AlignmentMethExtend *tmp = new AlignmentMethExtend;
-
-        tmp->chr = bamHdr->target_name[aln->core.tid];
-        tmp->refStart = aln->core.pos;
-        tmp->qname = bam_get_qname(aln);
-        tmp->qlen = aln->core.l_qseq;
-        tmp->cigar_len = aln->core.n_cigar;
-        tmp->op = (int*)malloc(tmp->cigar_len*sizeof(int));
-        tmp->ol = (int*)malloc(tmp->cigar_len*sizeof(int));
-        tmp->is_reverse = bam_is_rev(aln);
+        // open cram file
+        samFile *fp_in = hts_open(bamFile.c_str(),"r");
+        // set reference
+        hts_set_fai_filename(fp_in, params->fastaFile.c_str());        
+        // read header
+        bam_hdr_t *bamHdr = sam_hdr_read(fp_in); 
+        // initialize an alignment
+        bam1_t *aln = bam_init1(); 
+        hts_idx_t *idx = NULL;
         
-        memset(tmp->op, 0, tmp->cigar_len);
-        memset(tmp->ol, 0, tmp->cigar_len);
-        
-        // set string size
-        tmp->qseq = (char *)malloc( aln->core.l_qseq + 1 );
-        memset(tmp->qseq, 0, tmp->qlen+1);
-        // set string size
-        tmp->quality = (char *)malloc( aln->core.l_qseq + 1 );
-        memset(tmp->quality, 0, tmp->qlen+1);
-        
-        //quality string
-        uint8_t *q = bam_get_seq(aln); 
-        uint8_t *quality = bam_get_qual(aln);
-        
-        for(int i=0; i< aln->core.l_qseq ; i++){
-            // gets nucleotide id and converts them into IUPAC id.
-            tmp->qseq[i] = seq_nt16_str[bam_seqi(q,i)]; 
-            // get base quality
-            tmp->quality[i] = quality[i];
+        if ((idx = sam_index_load(fp_in, bamFile.c_str())) == 0) {
+            std::cout<<"ERROR: Cannot open index for bam file\n";
+            exit(1);
         }
         
-        uint32_t *cigar = bam_get_cigar(aln);
-        // store cigar
-        for(unsigned int k =0 ; k < aln->core.n_cigar ; k++){
-            tmp->op[k] = bam_cigar_op(cigar[k]);
-            tmp->ol[k] = bam_cigar_oplen(cigar[k]);
-        }
+        std::string range = chrName + ":1-" + std::to_string(chr_len);
+        hts_itr_t* iter = sam_itr_querys(idx, bamHdr, range.c_str());
+
         
+        int result;
         
-        hts_base_mod_state *m = hts_base_mod_state_alloc();
-        if(bam_parse_basemod(aln, m)<0){
-            std::cout<<tmp->qname<<"\tFail pase MM\\ML\n";
+        // creat thread pool
+        if (!(threadPool.pool = hts_tpool_init(numThreads))) {
+            fprintf(stderr, "Error creating thread pool\n");
         }
-       
-       
-        //5mC  code:m ascii:109
-        //5hmC code:h ascii:104
-        //see sam tags pdf
-        int j,n,pos;
-        hts_base_mod mods[5];
-        while ((n=bam_next_basemod(aln, m, mods, 5, &pos)) > 0) {
+        hts_set_opt(fp_in, HTS_OPT_THREAD_POOL, &threadPool);
+
+        while ((result = sam_itr_multi_next(fp_in, iter, aln)) >= 0) { 
+            int flag = aln->core.flag;
+
+            if (  aln->core.qual < 1  // mapping quality
+                 || (flag & 0x4)   != 0  // read unmapped
+                 || (flag & 0x100) != 0  // secondary alignment. repeat. 
+                                         // A secondary alignment occurs when a given read could align reasonably well to more than one place.
+                 || (flag & 0x400) != 0  // duplicate 
+                 || (flag & 0x800) != 0  // supplementary alignment
+                                         // A chimeric alignment is represented as a set of linear alignments that do not have large overlaps.
+                 ){ 
+                std::string str = bamHdr->target_name[aln->core.tid];
+                continue;
+            }
+
+            AlignmentMethExtend *tmp = new AlignmentMethExtend;
+
+            tmp->chr = bamHdr->target_name[aln->core.tid];
+            tmp->refStart = aln->core.pos;
+            tmp->qname = bam_get_qname(aln);
+            tmp->qlen = aln->core.l_qseq;
+            tmp->cigar_len = aln->core.n_cigar;
+            tmp->op = (int*)malloc(tmp->cigar_len*sizeof(int));
+            tmp->ol = (int*)malloc(tmp->cigar_len*sizeof(int));
+            tmp->is_reverse = bam_is_rev(aln);
             
-            for (j = 0; j < n && j < 5; j++) {
-    
-                if( mods[j].modified_base==109 ){
-                    MethPosProb *mpp = new MethPosProb(pos, mods[j].qual);
-                    tmp->queryMethVec.push_back((*mpp)); 
-                    delete mpp;
+            memset(tmp->op, 0, tmp->cigar_len);
+            memset(tmp->ol, 0, tmp->cigar_len);
+            
+            // set string size
+            tmp->qseq = (char *)malloc( aln->core.l_qseq + 1 );
+            memset(tmp->qseq, 0, tmp->qlen+1);
+            // set string size
+            tmp->quality = (char *)malloc( aln->core.l_qseq + 1 );
+            memset(tmp->quality, 0, tmp->qlen+1);
+            
+            //quality string
+            uint8_t *q = bam_get_seq(aln); 
+            uint8_t *quality = bam_get_qual(aln);
+            
+            for(int i=0; i< aln->core.l_qseq ; i++){
+                // gets nucleotide id and converts them into IUPAC id.
+                tmp->qseq[i] = seq_nt16_str[bam_seqi(q,i)]; 
+                // get base quality
+                tmp->quality[i] = quality[i];
+            }
+            
+            uint32_t *cigar = bam_get_cigar(aln);
+            // store cigar
+            for(unsigned int k =0 ; k < aln->core.n_cigar ; k++){
+                tmp->op[k] = bam_cigar_op(cigar[k]);
+                tmp->ol[k] = bam_cigar_oplen(cigar[k]);
+            }
+            
+            
+            hts_base_mod_state *m = hts_base_mod_state_alloc();
+            if(bam_parse_basemod(aln, m)<0){
+                std::cout<<tmp->qname<<"\tFail pase MM\\ML\n";
+            }
+           
+           
+            //5mC  code:m ascii:109
+            //5hmC code:h ascii:104
+            //see sam tags pdf
+            int j,n,pos;
+            hts_base_mod mods[5];
+            while ((n=bam_next_basemod(aln, m, mods, 5, &pos)) > 0) {
+                
+                for (j = 0; j < n && j < 5; j++) {
+        
+                    if( mods[j].modified_base==109 ){
+                        MethPosProb *mpp = new MethPosProb(pos, mods[j].qual);
+                        tmp->queryMethVec.push_back((*mpp)); 
+                        delete mpp;
+                    }
                 }
             }
+            
+            hts_base_mod_state_free(m);
+            
+            
+            parse_CIGAR((*tmp), readVariantVec);
+            //release memory
+            tmp->queryMethVec.clear();
+            tmp->queryMethVec.shrink_to_fit();
+            free(tmp->quality);
+            free(tmp->qseq);
+            free(tmp->op);
+            free(tmp->ol);
+            delete tmp;
         }
-        
-        hts_base_mod_state_free(m);
-        
-        
-        parse_CIGAR((*tmp), readVariantVec);
-        //release memory
-        tmp->queryMethVec.clear();
-        tmp->queryMethVec.shrink_to_fit();
-        free(tmp->quality);
-        free(tmp->qseq);
-        free(tmp->op);
-        free(tmp->ol);
-        delete tmp;
+        hts_idx_destroy(idx);
+        bam_hdr_destroy(bamHdr);
+        bam_destroy1(aln);
+        sam_close(fp_in);
+        hts_tpool_destroy(threadPool.pool);
     }
-    hts_idx_destroy(idx);
-    bam_hdr_destroy(bamHdr);
-    bam_destroy1(aln);
-    sam_close(fp_in);
-    hts_tpool_destroy(threadPool.pool);
 }
 
 void MethBamParser::parse_CIGAR(AlignmentMethExtend &align, std::vector<ReadVariant> &readVariantVec){
@@ -332,6 +335,10 @@ void MethBamParser::writeResultVCF( std::string chrName, std::map<std::string, s
             for(std::map<std::string, std::string>::iterator chrStringIter = chrString.begin(); chrStringIter != chrString.end(); chrStringIter++){
                 ModResultVcf<<"##contig=<ID="<<(*chrStringIter).first<<",length="<<(*chrStringIter).second.length()<<">\n";
             }
+            
+            ModResultVcf << "##longphaseVersion=" << params->version << "\n";
+            ModResultVcf << "##commandline=\""    << params->command << "\"\n";
+
             ModResultVcf<<"#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSAMPLE\n";
         }
 

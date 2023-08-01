@@ -62,7 +62,6 @@ class MethBamParser{
         ModCallParameters *params;
         std::string *refString;
         std::string chrName;
-        std::string methBamFile;
         int refstartpos;
         
         std::map<int , MethPosInfo> *chrMethMap;

@@ -39,7 +39,7 @@ int main(int argc, char** argv)
     }
     else if(command=="modcall")
     {
-         ModCallMain(argc - 1, argv + 1);
+         ModCallMain(argc - 1, argv + 1, version);
     }
     else{
         std::cout << STRIDE_USAGE_MESSAGE;

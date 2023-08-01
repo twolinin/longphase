@@ -8,13 +8,16 @@ struct ModCallParameters
     int numThreads;
     std::string fastaFile;
     std::string resultPrefix;
-    std::string methylBamFile;
+    std::vector<std::string> bamFileVec;
     float modThreshold;
     float unModThreshold;
     float heterRatio;
     float noiseRatio;
     int connectAdjacent;
     float connectConfidence;
+    
+    std::string version;
+    std::string command;
 };
 
 class ModCallProcess

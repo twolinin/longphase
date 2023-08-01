@@ -896,18 +896,17 @@ void BamParser::direct_detect_alleles(int lastSNPPos, PhasingParameters params, 
     // record MOD start iter
     std::map<int, std::map<std::string ,RefAlt> >::iterator tmpFirstModIter = firstModIter;
     
-    for( auto BamFile: BamFileVec ){
+    for( auto bamFile: BamFileVec ){
         
         firstVariantIter = tmpFirstVariantIter;
         firstSVIter = tmpFirstSVIter;
         firstModIter = tmpFirstModIter;
-        
-        //std::cout<< BamFile << " | 1 |\t" << readVariantVec.size() << "\n";        
+              
         int numThreads = params.numThreads;
         // init data structure and get core n
         htsThreadPool threadPool = {NULL, 0};
         // open bam file
-        samFile *fp_in = hts_open(BamFile.c_str(),"r"); 
+        samFile *fp_in = hts_open(bamFile.c_str(),"r"); 
         // load reference file
         hts_set_fai_filename(fp_in, params.fastaFile.c_str() );
         // read header
@@ -916,7 +915,7 @@ void BamParser::direct_detect_alleles(int lastSNPPos, PhasingParameters params, 
         bam1_t *aln = bam_init1(); 
         hts_idx_t *idx = NULL;
         
-        if ((idx = sam_index_load(fp_in, BamFile.c_str())) == 0) {
+        if ((idx = sam_index_load(fp_in, bamFile.c_str())) == 0) {
             std::cout<<"ERROR: Cannot open index for bam file\n";
             exit(1);
         }
