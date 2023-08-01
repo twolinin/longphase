@@ -17,10 +17,10 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
     std::cerr<< difftime(time(NULL), begin) << "s\n";
  
     //Parse mod vcf file
-    begin = time(NULL);
-    //std::cerr<< "parsing Meth VCF ... ";
-    METHParser modFile(params, snpFile);
-    //std::cerr<< difftime(time(NULL), begin) << "s\n";
+	begin = time(NULL);
+	std::cerr<< "parsing Meth VCF ... ";
+	METHParser modFile(params, snpFile);
+	std::cerr<< difftime(time(NULL), begin) << "s\n";
  
     // parsing ref fasta 
     begin = time(NULL);
@@ -71,7 +71,7 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
             std::cerr<< "skip\n";
             continue;
         }
-
+        
         std::cerr<< "run algorithm ... ";
         
         VairiantGraph *vGraph = new VairiantGraph(chr_reference, params);
@@ -100,11 +100,17 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
     begin = time(NULL);
     snpFile.writeResult(phasingResult);
     std::cerr<< difftime(time(NULL), begin) << "s\n";
-    
     if(params.svFile!=""){
         std::cerr<< "write SV Result ... ";
         begin = time(NULL);
         svFile.writeResult(phasingResult);
+        std::cerr<< difftime(time(NULL), begin) << "s\n";
+    }
+    
+    if(params.modFile!=""){
+        std::cerr<< "write mod Result ... ";
+        begin = time(NULL);
+        modFile.writeResult(phasingResult);
         std::cerr<< difftime(time(NULL), begin) << "s\n";
     }
 

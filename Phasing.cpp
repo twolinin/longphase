@@ -17,9 +17,9 @@ static const char *CORRECT_USAGE_MESSAGE =
 "                                          pb: PacBio HiFi/CCS genomic reads.\n\n"
 "optional arguments:\n"
 "   --sv-file=NAME                         input SV vcf file.\n"
-//"   --mod-file=NAME                        input modified vcf file.(produce by longphase modcall)\n"
+"   --mod-file=NAME                        input modified vcf file.(produce by longphase modcall)\n"
 "   -t, --threads=Num                      number of thread. default:1\n"
-"   -o, --out-prefix=NAME                  prefix of phasing result.\n"
+"   -o, --out-prefix=NAME                  prefix of phasing result. default: result\n"
 "   --indels                               phase small indel. default: False\n"
 "   --dot                                  each contig/chromosome will generate dot file. \n\n"
 
@@ -29,7 +29,7 @@ static const char *CORRECT_USAGE_MESSAGE =
 "phasing graph arguments:\n"
 "   -a, --connectAdjacent=Num              connect adjacent N SNPs. default:6\n"
 "   -d, --distance=Num                     phasing two variant if distance less than threshold. default:300000\n"
-"   -c, --crossSNP=Num                     block phasing step. sample N SNPs in each block. default:15\n"
+//"   -c, --crossSNP=Num                     block phasing step. sample N SNPs in each block. default:15\n"
 "   -1, --readsThreshold=[0~1]             give up SNP-SNP phasing pair if the number of reads of the \n"
 "                                          two combinations are similar. default:0.05\n"
 "   -v, --confidentHaplotype=[0~1]         the haplotype of the current SNP is judged by the haplotype of the previous N SNPs.\n"
@@ -39,9 +39,8 @@ static const char *CORRECT_USAGE_MESSAGE =
 "   -i, --inconsistentThreshold=Num        phased genotype correction is performed when a SNP is tagged multiple times. default:5\n\n"
 
 "haplotag read correction arguments:\n"
-"   -m, --readConfidence=[0.5~1]           The maximum proportion of alleles with the same haplotype in a read. default:0.6\n"
-"   -n, --snpConfidence=[0.5~1]            The required proportion of alleles from high confident reads \n"
-"                                          in any given haplotype. default:0.6\n"
+"   -m, --readConfidence=[0.5~1]           The confidence of a read being assigned to any haplotype. default:0.65\n"
+"   -n, --snpConfidence=[0.5~1]            The confidence of assigning two alleles of a SNP to different haplotypes. default:0.75\n"
 
 "\n";
 
@@ -64,14 +63,14 @@ static const struct option longopts[] = {
     { "out-prefix",           required_argument,  NULL, 'o' },
     { "threads",              required_argument,  NULL, 't' },
     { "distance",             required_argument,  NULL, 'd' },
-    { "crossSNP",             required_argument,  NULL, 'c' },
+    //{ "crossSNP",             required_argument,  NULL, 'c' },
     { "readsThreshold",       required_argument,  NULL, '1' },
     { "connectAdjacent",      required_argument,  NULL, 'a' },
     { "mappingQuality",       required_argument,  NULL, 'q' },
     { "judgeInconsistent",    required_argument,  NULL, 'j' },
     { "inconsistentThreshold",required_argument,  NULL, 'i' },
     { "confidentHaplotype",   required_argument,  NULL, 'v' },
-    { "snpConfidence",      required_argument,  NULL, 'n' },
+    { "snpConfidence",        required_argument,  NULL, 'n' },
     { "readConfidence",       required_argument,  NULL, 'm' },
     { NULL, 0, NULL, 0 }
 };
@@ -80,11 +79,11 @@ namespace opt
 {
     static int numThreads = 1;
     static int distance = 300000;
-    static int crossSNP = 15;
+    //static int crossSNP = 15;
     static std::string snpFile="";
     static std::string svFile="";
     static std::string modFile="";
-    static std::string bamFile="";
+    static std::vector<std::string> bamFile;
     static std::string fastaFile="";
     static std::string resultPrefix="result";
     static bool generateDot=false;
@@ -96,11 +95,11 @@ namespace opt
     static int mappingQuality =1;
     
     static double confidentHaplotype = 0.5;
-    static double judgeInconsistent = 0.4 ;
+    static double judgeInconsistent  = 0.4 ;
     static int inconsistentThreshold = 5 ;
     
-    static double snpConfidence = 0.6;
-    static double readConfidence = 0.6;
+    static double snpConfidence  = 0.75;
+    static double readConfidence = 0.65;
     
     double readsThreshold = 0.05;
 
@@ -119,11 +118,10 @@ void PhasingOptions(int argc, char** argv)
         {
         case 's': arg >> opt::snpFile; break;
         case 't': arg >> opt::numThreads; break;
-        case 'b': arg >> opt::bamFile; break;
         case 'o': arg >> opt::resultPrefix; break;
         case 'r': arg >> opt::fastaFile; break;  
         case 'd': arg >> opt::distance; break;  
-        case 'c': arg >> opt::crossSNP; break;  
+        //case 'c': arg >> opt::crossSNP; break;  
         case '1': arg >> opt::readsThreshold; break; 
         case 'a': arg >> opt::connectAdjacent; break;
         case 'q': arg >> opt::mappingQuality; break;
@@ -132,12 +130,18 @@ void PhasingOptions(int argc, char** argv)
         case 'v': arg >> opt::confidentHaplotype; break;
         case 'n': arg >> opt::snpConfidence; break;
         case 'm': arg >> opt::readConfidence; break;
+        case 'b': {
+            std::string bamFile;
+            arg >> bamFile;
+            opt::bamFile.push_back(bamFile); break;
+        }
         case SV_FILE:  arg >> opt::svFile; break; 
         case MOD_FILE: arg >> opt::modFile; break; 
         case PHASE_INDEL: opt::phaseIndel=true; break; 
         case DOT_FILE: opt::generateDot=true; break;
         case IS_ONT: opt::isONT=true; break;
         case IS_PB: opt::isPB=true; break;
+        
         case OPT_HELP:
             std::cout << CORRECT_USAGE_MESSAGE;
             exit(EXIT_SUCCESS);
@@ -180,7 +184,7 @@ void PhasingOptions(int argc, char** argv)
     }
     
 
-    
+    /*
     if( opt::bamFile != "")
     {
         std::ifstream openFile( opt::bamFile.c_str() );
@@ -193,7 +197,7 @@ void PhasingOptions(int argc, char** argv)
     else{
         std::cerr << SUBPROGRAM ": missing bam file.\n";
         die = true;
-    }
+    }*/
     
     if( opt::fastaFile != "")
     {
@@ -223,12 +227,12 @@ void PhasingOptions(int argc, char** argv)
         die = true;
     }
 
-    if ( opt::crossSNP < 0 ){
+    /*if ( opt::crossSNP < 0 ){
         std::cerr << SUBPROGRAM " invalid crossSNP. value: " 
                   << opt::crossSNP 
                   << "\n please check -c, --crossSNP=Num\n";
         die = true;
-    }
+    }*/
 
     if ( opt::connectAdjacent < 0 ){
         std::cerr << SUBPROGRAM " invalid connectAdjacent. value: " 
@@ -268,7 +272,7 @@ int PhasingMain(int argc, char** argv, std::string in_version)
 
     ecParams.numThreads=opt::numThreads;
     ecParams.distance=opt::distance;
-    ecParams.crossSNP=opt::crossSNP;
+    //ecParams.crossSNP=opt::crossSNP;
     ecParams.snpFile=opt::snpFile;
     ecParams.svFile=opt::svFile;
     ecParams.modFile=opt::modFile;
@@ -295,6 +299,7 @@ int PhasingMain(int argc, char** argv, std::string in_version)
     ecParams.version=in_version;
     ecParams.command=opt::command;
     
+
     PhasingProcess processor(ecParams);
 
     return 0;

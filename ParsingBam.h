@@ -116,8 +116,15 @@ class METHParser : public BaseVairantParser{
         PhasingParameters *params;
         SnpParser *snpFile;
         
+        int representativePos;
+        int upMethPos;
+        
         // chr , variant position (0-base), read, (is reverse strand)
         std::map<std::string, std::map<int, std::map<std::string ,RefAlt> > > *chrVariant;
+        // In a series of consecutive methylation positions, 
+        // the first methylation position will be used as the representative after merging.
+        // This map is used to find the coordinates that originally represented itself
+        std::map<int, int > *representativeMap;
 
         // override input parser
         void parserProcess(std::string &input);
@@ -131,7 +138,7 @@ class METHParser : public BaseVairantParser{
         METHParser(PhasingParameters &params, SnpParser &snpFile);
         ~METHParser();
 		
-		//void writeResult(PhasingResult phasingResult);
+		void writeResult(PhasingResult phasingResult);
 };
 
 struct Alignment{
@@ -151,7 +158,7 @@ class BamParser{
     
     private:
         std::string chrName;
-        std::string BamFile;
+        std::vector<std::string> BamFileVec;
         // SNP map and iter
         std::map<int, RefAlt> *currentVariants;
         std::map<int, RefAlt>::iterator firstVariantIter;
@@ -164,7 +171,7 @@ class BamParser{
         void get_snp(const Alignment &align, std::vector<ReadVariant> &readVariantVec, const std::string &ref_string, bool isONT);
    
     public:
-        BamParser(std::string chrName, std::string inputBamFile, SnpParser &snpMap, SVParser &svFile, METHParser &modFile);
+        BamParser(std::string chrName, std::vector<std::string> inputBamFileVec, SnpParser &snpMap, SVParser &svFile, METHParser &modFile);
         ~BamParser();
         
         void direct_detect_alleles(int lastSNPPos, PhasingParameters params, std::vector<ReadVariant> &readVariantVec , const std::string &ref_string);

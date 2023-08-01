@@ -1,0 +1,664 @@
+#include "ModCallParsingBam.h"
+#include "PhasingGraph.h"
+#include "Util.h"
+
+#include <cmath>
+#include <iostream>
+#include <string.h>
+#include <sstream>
+#include <fstream>
+#include <typeinfo>
+#include "htslib/thread_pool.h"
+#include "htslib/sam.h"
+
+MethFastaParser::MethFastaParser(std::string fastaFile, std::map<std::string, std::string> &chrString){
+    if(fastaFile==""){
+        return;
+    }
+    
+    faidx_t *fai = NULL;
+    fai = fai_load(fastaFile.c_str());
+    int fai_nseq = faidx_nseq(fai);
+    const char *seqname;
+    int seqlen = 0;
+    for(int i=0;i<fai_nseq;i++){
+        int ref_len = 0;
+        seqname = faidx_iseq(fai, i);
+        seqlen = faidx_seq_len(fai, seqname);
+        chrString[std::string(seqname)] = faidx_fetch_seq(fai , seqname , 0 ,seqlen+1 , &ref_len);
+    }
+}
+
+MethFastaParser::~MethFastaParser(){
+}
+
+MethBamParser::MethBamParser(ModCallParameters &in_params, std::string &in_refString){
+    params=&in_params;
+    refString=&in_refString;
+    refstartpos = 0;
+    
+    chrMethMap = new std::map<int , MethPosInfo>;
+    readStartEndMap = new std::map<int, std::pair<int,int>>; 
+}
+
+MethBamParser::~MethBamParser(){
+    delete chrMethMap;
+    delete readStartEndMap;
+}
+
+void MethBamParser::detectMeth(std::string chrName, int chr_len, std::vector<ReadVariant> &readVariantVec){
+    int numThreads = params->numThreads;
+
+    // init data structure and get core n
+    htsThreadPool threadPool = {NULL, 0};
+
+    // open cram file
+    samFile *fp_in = hts_open(params->methylBamFile.c_str(),"r");
+    // set reference
+    hts_set_fai_filename(fp_in, params->fastaFile.c_str());        
+    // read header
+    bam_hdr_t *bamHdr = sam_hdr_read(fp_in); 
+    // initialize an alignment
+    bam1_t *aln = bam_init1(); 
+    hts_idx_t *idx = NULL;
+    
+    if ((idx = sam_index_load(fp_in, params->methylBamFile.c_str())) == 0) {
+        std::cout<<"ERROR: Cannot open index for bam file\n";
+        exit(1);
+    }
+    
+    std::string range = chrName + ":1-" + std::to_string(chr_len);
+    hts_itr_t* iter = sam_itr_querys(idx, bamHdr, range.c_str());
+
+    
+    int result;
+    
+    // creat thread pool
+    if (!(threadPool.pool = hts_tpool_init(numThreads))) {
+        fprintf(stderr, "Error creating thread pool\n");
+    }
+    hts_set_opt(fp_in, HTS_OPT_THREAD_POOL, &threadPool);
+
+    while ((result = sam_itr_multi_next(fp_in, iter, aln)) >= 0) { 
+        int flag = aln->core.flag;
+
+        if (  aln->core.qual < 1  // mapping quality
+             || (flag & 0x4)   != 0  // read unmapped
+             || (flag & 0x100) != 0  // secondary alignment. repeat. 
+                                     // A secondary alignment occurs when a given read could align reasonably well to more than one place.
+             || (flag & 0x400) != 0  // duplicate 
+             || (flag & 0x800) != 0  // supplementary alignment
+                                     // A chimeric alignment is represented as a set of linear alignments that do not have large overlaps.
+             ){ 
+            std::string str = bamHdr->target_name[aln->core.tid];
+            continue;
+        }
+
+        AlignmentMethExtend *tmp = new AlignmentMethExtend;
+
+        tmp->chr = bamHdr->target_name[aln->core.tid];
+        tmp->refStart = aln->core.pos;
+        tmp->qname = bam_get_qname(aln);
+        tmp->qlen = aln->core.l_qseq;
+        tmp->cigar_len = aln->core.n_cigar;
+        tmp->op = (int*)malloc(tmp->cigar_len*sizeof(int));
+        tmp->ol = (int*)malloc(tmp->cigar_len*sizeof(int));
+        tmp->is_reverse = bam_is_rev(aln);
+        
+        memset(tmp->op, 0, tmp->cigar_len);
+        memset(tmp->ol, 0, tmp->cigar_len);
+        
+        // set string size
+        tmp->qseq = (char *)malloc( aln->core.l_qseq + 1 );
+        memset(tmp->qseq, 0, tmp->qlen+1);
+        // set string size
+        tmp->quality = (char *)malloc( aln->core.l_qseq + 1 );
+        memset(tmp->quality, 0, tmp->qlen+1);
+        
+        //quality string
+        uint8_t *q = bam_get_seq(aln); 
+        uint8_t *quality = bam_get_qual(aln);
+        
+        for(int i=0; i< aln->core.l_qseq ; i++){
+            // gets nucleotide id and converts them into IUPAC id.
+            tmp->qseq[i] = seq_nt16_str[bam_seqi(q,i)]; 
+            // get base quality
+            tmp->quality[i] = quality[i];
+        }
+        
+        uint32_t *cigar = bam_get_cigar(aln);
+        // store cigar
+        for(unsigned int k =0 ; k < aln->core.n_cigar ; k++){
+            tmp->op[k] = bam_cigar_op(cigar[k]);
+            tmp->ol[k] = bam_cigar_oplen(cigar[k]);
+        }
+        
+        
+        hts_base_mod_state *m = hts_base_mod_state_alloc();
+        if(bam_parse_basemod(aln, m)<0){
+            std::cout<<tmp->qname<<"\tFail pase MM\\ML\n";
+        }
+       
+       
+        //5mC  code:m ascii:109
+        //5hmC code:h ascii:104
+        //see sam tags pdf
+        int j,n,pos;
+        hts_base_mod mods[5];
+        while ((n=bam_next_basemod(aln, m, mods, 5, &pos)) > 0) {
+            
+            for (j = 0; j < n && j < 5; j++) {
+    
+                if( mods[j].modified_base==109 ){
+                    MethPosProb *mpp = new MethPosProb(pos, mods[j].qual);
+                    tmp->queryMethVec.push_back((*mpp)); 
+                    delete mpp;
+                }
+            }
+        }
+        
+        hts_base_mod_state_free(m);
+        
+        
+        parse_CIGAR((*tmp), readVariantVec);
+        //release memory
+        tmp->queryMethVec.clear();
+        tmp->queryMethVec.shrink_to_fit();
+        free(tmp->quality);
+        free(tmp->qseq);
+        free(tmp->op);
+        free(tmp->ol);
+        delete tmp;
+    }
+    hts_idx_destroy(idx);
+    bam_hdr_destroy(bamHdr);
+    bam_destroy1(aln);
+    sam_close(fp_in);
+    hts_tpool_destroy(threadPool.pool);
+}
+
+void MethBamParser::parse_CIGAR(AlignmentMethExtend &align, std::vector<ReadVariant> &readVariantVec){
+
+    if(align.queryMethVec.size() == 0){
+        return;
+    }
+    
+    ReadVariant *tmpReadResult = new ReadVariant();
+    (*tmpReadResult).read_name = align.qname;
+    (*tmpReadResult).source_id = align.chr;
+    (*tmpReadResult).reference_start = align.refStart;
+    (*tmpReadResult).is_reverse = align.is_reverse;
+    
+    int refstart = align.refStart;
+    int refend = refstart + 1;
+    // forward strand is checked from head to tail
+    // reverse strand is checked from tail to head
+    int refpos = (align.is_reverse ? refstart + 1 : refstart);
+    //auto qmethiter = (align.is_reverse ? align.queryMethVec.end()-1 : align.queryMethVec.begin() );
+    auto qmethiter = align.queryMethVec.begin() ;
+    //std::cout<<(*tmpReadResult).read_name<<"\t"<<align.queryMethVec.size()<<"\n";
+    int querypos = 0;
+    //Parse CIGAR 
+    for(int cigaridx = 0; cigaridx < align.cigar_len ; cigaridx++){
+        
+        int cigar_op = align.op[cigaridx];
+        int length = align.ol[cigaridx];
+        
+        // CIGAR operators: MIDNSHP=X correspond 012345678
+        // 0: alignment match (can be a sequence match or mismatch)
+        // 7: sequence match
+        // 8: sequence mismatch
+        if(cigar_op == 0 || cigar_op == 7 || cigar_op == 8){
+            
+            while(true){
+                
+                if( (*qmethiter).position > (querypos+length) ){
+                    break;
+                }
+                else if( qmethiter == align.queryMethVec.end() ){
+                    break;
+                }
+                //translate query (read) position to reference position
+                int methrpos;
+                if(align.is_reverse){
+                    methrpos = (*qmethiter).position - querypos + refpos - 1;
+                    
+                }else{
+                    methrpos = (*qmethiter).position - querypos + refpos;
+                }
+
+                if( int((*refString).length()) < methrpos ){
+                    break;
+                }
+                std::string refChar = (*refString).substr(methrpos,1);
+
+                //modification
+                if( (*qmethiter).prob >= params->modThreshold*255 ){
+                    (*chrMethMap)[methrpos].methreadcnt++;
+                    //strand - is 1, strand + is 0
+                    (*chrMethMap)[methrpos].strand = (align.is_reverse ? 1 : 0); 
+                    (*chrMethMap)[methrpos].modReadVec.push_back(align.qname);
+                    
+                    Variant *tmpVariant = new Variant(methrpos, 0, 60 );
+                    (*tmpReadResult).variantVec.push_back( (*tmpVariant) );
+                    delete tmpVariant;
+                }
+                //non-modification (not include no detected)
+                else if( (*qmethiter).prob <= params->unModThreshold*255 ){ 
+                    (*chrMethMap)[methrpos].canonreadcnt++;
+                    (*chrMethMap)[methrpos].nonModReadVec.push_back(align.qname);
+                    
+                    Variant *tmpVariant = new Variant(methrpos, 1, 60 );
+                    (*tmpReadResult).variantVec.push_back( (*tmpVariant) );
+                    delete tmpVariant;
+                }
+                else{
+                    (*chrMethMap)[methrpos].noisereadcnt++;
+                }    
+
+                qmethiter++;
+            }
+            querypos += length;
+            refpos += length;
+        }
+        // 1: insertion to the reference
+        else if(cigar_op == 1){ 
+            
+            while(qmethiter != align.queryMethVec.end() && (*qmethiter).position <= (querypos+length)){
+                qmethiter++;
+            }
+
+            querypos += length;
+            
+        }
+        // 2: deletion from the reference
+        else if(cigar_op == 2){
+            refpos += length;
+        }
+        // 3: skipped region from the reference
+        else if(cigar_op == 3){
+            refpos += length;
+        }
+        // 4: soft clipping (clipped sequences present in SEQ)
+        else if(cigar_op == 4){
+            while(qmethiter != align.queryMethVec.end() && (*qmethiter).position <= (querypos+length)){
+                qmethiter++;
+            }
+            querypos += length;
+            
+        }
+        // 5: hard clipping (clipped sequences NOT present in SEQ)
+        // 6: padding (silent deletion from padded reference)
+        else if(cigar_op == 5 || cigar_op == 6){
+            //do nothing
+            refpos += length;
+        }
+    }
+    
+    refend = (align.is_reverse ? refpos : refpos + 1);
+
+    if(align.is_reverse){
+        (*readStartEndMap)[refstart+1].second += 1;
+        (*readStartEndMap)[refend].second -= 1;
+    }
+    else{
+        (*readStartEndMap)[refstart+1].first += 1;
+        (*readStartEndMap)[refend].first -= 1;
+    }
+    
+    if( (*tmpReadResult).variantVec.size() > 0 )
+        readVariantVec.push_back((*tmpReadResult));
+    
+    delete tmpReadResult;
+}
+
+void MethBamParser::writeResultVCF( std::string chrName, std::map<std::string, std::string> &chrString, bool isFirstChr, std::map<int,int> &passPosition){
+
+    std::ofstream ModResultVcf(params->resultPrefix+".vcf", std::ios_base::app);
+    if(!ModResultVcf.is_open()){
+        std::cerr<<"Fail to open output file :\n";
+    }
+    else{
+        // set vcf header
+        if(isFirstChr){ 
+            ModResultVcf<<"##fileformat=VCFv4.2\n";
+            ModResultVcf<<"##INFO=<ID=RS,Number=.,Type=String,Description=\"Read Strand\">\n";
+            ModResultVcf<<"##INFO=<ID=MR,Number=.,Type=String,Description=\"Read Name of Modified position\">\n";
+            ModResultVcf<<"##INFO=<ID=NR,Number=.,Type=String,Description=\"Read Name of nonModified position\">\n";
+            ModResultVcf<<"##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n";
+            ModResultVcf<<"##FORMAT=<ID=MD,Number=1,Type=Integer,Description=\"Modified Depth\">\n";
+            ModResultVcf<<"##FORMAT=<ID=UD,Number=1,Type=Integer,Description=\"Unmodified Depth\">\n";
+            ModResultVcf<<"##FORMAT=<ID=DP,Number=1,Type=Integer,Description=\"Read Depth\"\n";
+            for(std::map<std::string, std::string>::iterator chrStringIter = chrString.begin(); chrStringIter != chrString.end(); chrStringIter++){
+                ModResultVcf<<"##contig=<ID="<<(*chrStringIter).first<<",length="<<(*chrStringIter).second.length()<<">\n";
+            }
+            ModResultVcf<<"#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSAMPLE\n";
+        }
+
+        std::vector<std::pair<int , MethPosInfo>> MethPosVec;
+        
+        for(std::map<int , MethPosInfo>::iterator posinfoIter = chrMethMap->begin(); posinfoIter != chrMethMap->end(); posinfoIter++){
+            std::string infostr= "";
+            std::string eachpos;
+            std::string samplestr;
+            std::string strandinfo;
+            
+            int confidentModCount = 0;
+            int confidentnonModCount = 0;
+            
+            auto passPosIter =  passPosition.find((*posinfoIter).first);
+            auto prepassPosIter =  passPosition.find((*posinfoIter).first - 1);
+            auto nextpassPosIter =  passPosition.find((*posinfoIter).first + 1);
+            
+            if( passPosIter ==  passPosition.end() ){
+                continue;
+            }
+            
+            if((*posinfoIter).second.strand == -1){
+                continue;
+            }
+            
+            //Output contains only consecutive methylation position (CpG)
+            if( prepassPosIter == passPosition.end() && nextpassPosIter == passPosition.end() ){
+                //MethPosVec.push_back(std::make_pair((*posinfoIter).first,(*posinfoIter).second));
+                continue;
+            }
+            
+            // append modification reads
+            if((*posinfoIter).second.modReadVec.size() > 0 ){
+                infostr += "MR=";
+                for(auto readName : (*posinfoIter).second.modReadVec ){
+                    confidentModCount++;
+                    infostr += readName + ",";
+                }
+                infostr.back() = ';';
+            }
+                
+            // append non modification reads
+            if((*posinfoIter).second.nonModReadVec.size() > 0 ){
+                infostr += "NR=";
+                for(auto readName : (*posinfoIter).second.nonModReadVec ){
+                    confidentnonModCount++;
+                    infostr += readName + ",";
+                }
+                infostr.back() = ';';
+            }
+            
+            if( confidentModCount == 0 || confidentnonModCount == 0 ){
+                continue;
+            }
+            
+            if((*posinfoIter).second.strand==1){
+                strandinfo = "RS=N;";
+            }
+            else if((*posinfoIter).second.strand==0){
+                strandinfo = "RS=P;";
+            }
+            
+            if((*posinfoIter).second.heterstatus == "0/1"){
+                int nonmethcnt = (*posinfoIter).second.canonreadcnt;
+                samplestr = (*posinfoIter).second.heterstatus + ":" + std::to_string((*posinfoIter).second.methreadcnt) + ":" + std::to_string(nonmethcnt) + ":" + std::to_string((*posinfoIter).second.depth);
+                if( int( chrString[chrName].length() ) < (*posinfoIter).first ){
+                    break;
+                }
+                std::string ref = chrString[chrName].substr((*posinfoIter).first,1);
+                eachpos = chrName + "\t" + std::to_string((*posinfoIter).first + 1) + "\t" + "." + "\t" + ref + "\t" + "." + "\t" + "." + "\t" + "." + "\t" + strandinfo + infostr + "\t" + "GT:MD:UD:DP" + "\t" + samplestr + "\n";
+                ModResultVcf<<eachpos;
+            }
+        }
+    }
+}
+
+void MethBamParser::judgeMethGenotype(std::string chrName, std::vector<ReadVariant> &readVariantVec, std::vector<ReadVariant> &fReadVariantVec, std::vector<ReadVariant> &rReadVariantVec){
+    
+    for(std::map<int, MethPosInfo>::iterator chrmethmapIter = chrMethMap->begin(); chrmethmapIter != chrMethMap->end(); chrmethmapIter++){
+        // methylation and noise are the feature to identify ASM candidate
+        float methcnt      = (*chrmethmapIter).second.methreadcnt;
+        float nonmethcnt   = (*chrmethmapIter).second.canonreadcnt;
+        float depth        = (*chrmethmapIter).second.depth;
+        float noisereadcnt = depth - methcnt - nonmethcnt;
+        
+        if(methcnt < 0 || nonmethcnt < 0){
+            continue;
+        }
+        if(std::max(methcnt, nonmethcnt) == 0){
+            continue;
+        }
+
+        float heterRatio = std::min(methcnt, nonmethcnt) / std::max(methcnt, nonmethcnt);
+        float noiseRatio = noisereadcnt / depth;
+        
+        if(heterRatio >= params->heterRatio && noiseRatio <= params->noiseRatio ){
+            (*chrmethmapIter).second.heterstatus = "0/1";
+        }
+        else if(methcnt >= nonmethcnt){
+            (*chrmethmapIter).second.heterstatus = "1/1";
+        }
+        else{
+            (*chrmethmapIter).second.heterstatus = "0/0";
+        }
+
+    }
+
+    for(std::vector<ReadVariant>::iterator rIter = readVariantVec.begin() ; rIter != readVariantVec.end() ; rIter++ ){
+
+        ReadVariant fVec;
+        ReadVariant rVec;
+        
+        for(std::vector<Variant>::iterator vIter = (*rIter).variantVec.begin(); vIter != (*rIter).variantVec.end() ; vIter++){
+            if( (*chrMethMap)[(*vIter).position].heterstatus == "0/1" ){
+                if((*rIter).is_reverse){
+                    rVec.variantVec.push_back((*vIter));
+                }
+                else{
+                    fVec.variantVec.push_back((*vIter));
+                }
+            }
+        }
+        
+        if( fVec.variantVec.size() > 0 ){
+            fVec.read_name = (*rIter).read_name;
+            fVec.is_reverse = false;
+            fReadVariantVec.push_back(fVec);
+            
+            fVec.variantVec.clear();
+            fVec.variantVec.shrink_to_fit();
+        }
+        if( rVec.variantVec.size() > 0 ){
+            rVec.read_name = (*rIter).read_name;
+            rVec.is_reverse = true;
+            rReadVariantVec.push_back(rVec);
+            
+            rVec.variantVec.clear();
+            rVec.variantVec.shrink_to_fit();
+        }
+    }
+    
+}
+
+void MethBamParser::calculateDepth(){
+    std::map<int , MethPosInfo>::iterator methIter = chrMethMap->begin();
+    std::pair<int,int> currdepth = std::make_pair(0,0);
+    
+    for(auto ReadIter = readStartEndMap->begin(); ReadIter != readStartEndMap->end(); ReadIter++){
+        
+        std::map<int, std::pair<int,int>>::iterator nextReadIter = std::next(ReadIter, 1);
+        if(methIter == chrMethMap->end()){
+            break;
+        }
+        if(nextReadIter == readStartEndMap->end()){
+            break;
+        }
+        currdepth.first += (*ReadIter).second.first;
+        currdepth.second += (*ReadIter).second.second;
+        
+        while((*methIter).first >= (*ReadIter).first && (*methIter).first < (*nextReadIter).first && methIter != chrMethMap->end()){
+            
+            // strand +
+            if((*methIter).second.strand == 0){ 
+                (*methIter).second.depth = currdepth.first;
+            }
+            // strand -
+            else if((*methIter).second.strand == 1){
+                (*methIter).second.depth = currdepth.second;
+            }
+            
+            methIter++;
+        }
+    }
+    
+    readStartEndMap->clear();
+}
+
+MethylationGraph::MethylationGraph(ModCallParameters &in_params){
+    params=&in_params;
+    
+    nodeInfo = new std::map<int,ReadBaseMap*>;
+    edgeList = new std::map<int,VariantEdge*>;
+    forwardModNode = new std::map<int,ReadBaseMap*>;
+    reverseModNode = new std::map<int,ReadBaseMap*>;
+}
+
+MethylationGraph::~MethylationGraph(){
+}
+
+void MethylationGraph::addEdge(std::vector<ReadVariant> &in_readVariant){
+    readVariant = &in_readVariant;
+    // iter all read
+    for(std::vector<ReadVariant>::iterator readIter = in_readVariant.begin() ; readIter != in_readVariant.end() ; readIter++ ){
+        ReadVariant tmpRead;
+        
+        for( auto variant : (*readIter).variantVec ){
+            // modification in the forward strand
+            if( variant.quality == -2 ){
+                auto nodeIter = forwardModNode->find(variant.position);
+                if( nodeIter == forwardModNode->end() ){
+                    (*forwardModNode)[variant.position] = new ReadBaseMap();
+                }
+                
+                (*(*forwardModNode)[variant.position])[(*readIter).read_name] = 60;
+
+                continue;
+            }
+            // modification in the reverse strand
+            if( variant.quality == -3 ){
+                auto nodeIter = reverseModNode->find(variant.position);
+                if( nodeIter == reverseModNode->end() ){
+                    (*reverseModNode)[variant.position] = new ReadBaseMap();
+                }
+                
+                (*(*reverseModNode)[variant.position])[(*readIter).read_name] = 60;
+                
+                continue;
+            }
+            
+            
+            tmpRead.variantVec.push_back(variant);
+            
+            auto nodeIter = nodeInfo->find(variant.position);
+            
+            if( nodeIter == nodeInfo->end() ){
+                (*nodeInfo)[variant.position] = new ReadBaseMap();
+            }
+            
+            (*(*nodeInfo)[variant.position])[(*readIter).read_name] = variant.quality;
+        }
+        // iter all pair of snp and construct initial graph
+        std::vector<Variant>::iterator variant1Iter = tmpRead.variantVec.begin();
+        std::vector<Variant>::iterator variant2Iter = std::next(variant1Iter,1);
+        while(variant1Iter != tmpRead.variantVec.end() && variant2Iter != tmpRead.variantVec.end() ){
+
+            // create new edge if not exist
+            std::map<int,VariantEdge*>::iterator posIter = edgeList->find((*variant1Iter).position);
+            if( posIter == edgeList->end() )
+                (*edgeList)[(*variant1Iter).position] = new VariantEdge((*variant1Iter).position);
+
+            // add edge process
+            for(int nextNode = 0 ; nextNode < params->connectAdjacent; nextNode++){
+
+                // this allele support ref
+                if( (*variant1Iter).allele == 0 )
+                    (*edgeList)[(*variant1Iter).position]->ref->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).read_name);
+                // this allele support alt
+                if( (*variant1Iter).allele == 1 )
+                    (*edgeList)[(*variant1Iter).position]->alt->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).read_name);
+                
+                // next snp
+                variant2Iter++;
+                if( variant2Iter == tmpRead.variantVec.end() ){
+                    break;
+                }
+            }
+
+            variant1Iter++;
+            variant2Iter = std::next(variant1Iter,1);
+        }
+    }
+}
+
+void MethylationGraph::connectResults(std::string chrName, std::map<int,int> &passPosition){
+
+    // check clear connect variant
+    for(std::map<int,ReadBaseMap*>::iterator nodeIter = nodeInfo->begin() ; nodeIter != nodeInfo->end() ; nodeIter++ ){
+
+        // check next position
+        std::map<int,ReadBaseMap*>::iterator nextNodeIter = std::next(nodeIter, 1);
+        if( nextNodeIter == nodeInfo->end() ){
+             break;
+        }
+
+        int currPos = nodeIter->first;
+
+        // Check if there is no edge from current node
+        std::map<int,VariantEdge*>::iterator edgeIter = edgeList->find( currPos );
+        if( edgeIter==edgeList->end() )
+            continue;
+
+        // check connect between surrent SNP and next n SNPs
+        for(int i = 0 ; i < params->connectAdjacent ; i++ ){
+            int nextPos = nextNodeIter->first;
+            // get number of RR read and RA read
+            std::pair<int,int> tmp = edgeIter->second->findNumberOfRead(nextPos);
+            int totalConnectReads = tmp.first + tmp.second;
+            int minimumConnection = (((*(*nodeIter).second).size() + (*(*nextNodeIter).second).size())/4);
+
+            double majorRatio = (double)std::max(tmp.first,tmp.second)/(double)(tmp.first+tmp.second);
+            
+
+            if( majorRatio >= params->connectConfidence && totalConnectReads > minimumConnection && tmp.first + tmp.second > 6 ){
+                passPosition[currPos] = 1;
+                passPosition[nextPos] = 1;
+            }
+            nextNodeIter++;
+            if( nextNodeIter == nodeInfo->end() )
+                break;
+        }
+    }
+}
+
+void MethylationGraph::destroy(){
+
+    for( auto edgeIter = edgeList->begin() ; edgeIter != edgeList->end() ; edgeIter++ ){
+        edgeIter->second->ref->destroy();
+        edgeIter->second->alt->destroy();
+        delete edgeIter->second->ref;
+        delete edgeIter->second->alt;
+    }
+    
+    for( auto nodeIter = nodeInfo->begin() ; nodeIter != nodeInfo->end() ; nodeIter++ ){
+        delete nodeIter->second;
+    }
+    
+    for( auto nodeIter = forwardModNode->begin() ; nodeIter != forwardModNode->end() ; nodeIter++ ){
+        delete nodeIter->second;
+    }
+    
+    for( auto nodeIter = reverseModNode->begin() ; nodeIter != reverseModNode->end() ; nodeIter++ ){
+        delete nodeIter->second;
+    }
+    
+    delete nodeInfo;
+    delete edgeList;
+    delete forwardModNode;
+    delete reverseModNode;
+}
