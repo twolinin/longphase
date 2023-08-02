@@ -101,9 +101,9 @@ namespace opt
     static double snpConfidence  = 0.75;
     static double readConfidence = 0.65;
     
-    double readsThreshold = 0.05;
+    static double readsThreshold = 0.05;
 
-    std::string command;
+    static std::string command;
 }
 
 void PhasingOptions(int argc, char** argv)
@@ -201,7 +201,7 @@ void PhasingOptions(int argc, char** argv)
     
     if( opt::fastaFile != "")
     {
-        std::ifstream openFile( opt::snpFile.c_str() );
+        std::ifstream openFile( opt::fastaFile.c_str() );
         if( !openFile.is_open() )
         {
             std::cerr<< "File " << opt::fastaFile << " not exist.\n\n";
