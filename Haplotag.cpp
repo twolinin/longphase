@@ -12,6 +12,7 @@ static const char *CORRECT_USAGE_MESSAGE =
 "require arguments:\n"
 "      -s, --snp-file=NAME             input SNP vcf file.\n"
 "      -b, --bam-file=NAME             input bam file.\n"
+"      -r, --reference=NAME            reference fasta.\n"
 "optional arguments:\n"
 "      --tagSupplementary              tag supplementary alignment. default:false\n"
 "      --sv-file=NAME                  input phased SV vcf file.\n"
@@ -23,7 +24,7 @@ static const char *CORRECT_USAGE_MESSAGE =
 "      --log                           an additional log file records the result of each read. default:false\n";
 
 
-static const char* shortopts = "s:b:o:t:q:p:";
+static const char* shortopts = "s:b:o:t:q:p:r:";
 
 enum { OPT_HELP = 1, TAG_SUP, SV_FILE, LOG};
 
@@ -31,6 +32,7 @@ static const struct option longopts[] = {
     { "help",                 no_argument,        NULL, OPT_HELP },
     { "snp-file",             required_argument,  NULL, 's' },
     { "bam-file",             required_argument,  NULL, 'b' },
+    { "reference",            required_argument,  NULL, 'r' },
     { "tagSupplementary",     no_argument,        NULL, TAG_SUP },
     { "sv-file",              required_argument,  NULL, SV_FILE },
     { "out-prefix",           required_argument,  NULL, 'o' },
@@ -49,6 +51,7 @@ namespace opt
     static std::string snpFile="";
     static std::string svFile="";
     static std::string bamFile="";
+    static std::string fastaFile="";
     static std::string resultPrefix="result";
     static bool tagSupplementary = false;
     static bool writeReadLog = false;
@@ -67,6 +70,7 @@ void HaplotagOptions(int argc, char** argv)
         case 's': arg >> opt::snpFile; break;
         case 't': arg >> opt::numThreads; break;
         case 'b': arg >> opt::bamFile; break;
+        case 'r': arg >> opt::fastaFile; break; 
         case 'o': arg >> opt::resultPrefix; break;
         case 'q': arg >> opt::qualityThreshold; break;
         case 'p': arg >> opt::percentageThreshold; break;
@@ -123,6 +127,20 @@ void HaplotagOptions(int argc, char** argv)
         die = true;
     }
     
+    if( opt::fastaFile != "")
+    {
+        std::ifstream openFile( opt::snpFile.c_str() );
+        if( !openFile.is_open() )
+        {
+            std::cerr<< "File " << opt::fastaFile << " not exist.\n\n";
+            die = true;
+        }
+    }
+    else{
+        std::cerr << SUBPROGRAM ": missing reference.\n";
+        die = true;
+    }  
+    
     if ( opt::numThreads < 1 ){
         std::cerr << SUBPROGRAM " invalid threads. value: " 
                   << opt::numThreads 
@@ -156,6 +174,7 @@ int HaplotagMain(int argc, char** argv)
     ecParams.snpFile=opt::snpFile;
     ecParams.svFile=opt::svFile;
     ecParams.bamFile=opt::bamFile;
+    ecParams.fastaFile=opt::fastaFile;
     ecParams.resultPrefix=opt::resultPrefix;
     ecParams.tagSupplementary=opt::tagSupplementary;
     ecParams.percentageThreshold=opt::percentageThreshold;
