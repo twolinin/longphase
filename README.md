@@ -176,7 +176,7 @@ This command tags (assigns) each read (in BAM) to one haplotype in the phased SN
 ```
 longphase haplotag \
 -s phased_snp.vcf \
---sv-file phased_sv.vcf
+--sv-file phased_sv.vcf \
 -b alignment.bam \
 -t 8 \
 -o tagged_bam_prefix
