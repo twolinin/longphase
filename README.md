@@ -19,6 +19,7 @@ LongPhase is an ultra-fast program for simultaneously co-phasing SNPs, small ind
 	- [Generate alignment and index files](#generate-alignment-and-index-files)
 	- [Generate single nucleotide polymorphism (SNP) file](#generate-single-nucleotide-polymorphism-snp-file)
 	- [Generate Structural variation (SV) file](#generate-structural-variation-sv-file)
+ 	- [Modified bam process](#modified-bam-process)
 - [Comparison with other SNP-phasing programs](#comparison-with-other-snp-phasing-programs)
 - [Citation](#citation)
 - [Contact](#contact)
@@ -192,23 +193,42 @@ Usage:  haplotag [OPTION] ... READSFILE
 require arguments:
       -s, --snp-file=NAME             input SNP vcf file.
       -b, --bam-file=NAME             input bam file.
+      -r, --reference=NAME            reference fasta.
 optional arguments:
       --tagSupplementary              tag supplementary alignment. default:false
-      -q, --qualityThreshold=Num      not tag alignment if the mapping quality less than threshold. default:20
+      --sv-file=NAME                  input phased SV vcf file.
+      -q, --qualityThreshold=Num      not tag alignment if the mapping quality less than threshold. default:0
       -p, --percentageThreshold=Num   the alignment will be tagged according to the haplotype corresponding to most alleles.
                                       if the alignment has no obvious corresponding haplotype, it will not be tagged. default:0.6
       -t, --threads=Num               number of thread. default:1
       -o, --out-prefix=NAME           prefix of phasing result. default:result
+      --log                           an additional log file records the result of each read. default:false
 ```
 
 ### ModCall command
-Modcall implements a module for calling allele-specific modifications in latest Nanopore and PacBio basecalled reads, assuming the modifications are stored in the raw BAM files using `MM` and `ML` tags. Modcall identifies allele-specific modifications from the BAM files and store them in a VCF file. An example of this command is shown below.
+Modcall implements a module for calling allele-specific modifications in latest Nanopore and PacBio basecalled reads, assuming the modifications are stored in the raw BAM files using `MM` and `ML` tags. Unaligned BAM files can be converted into alignment BAM files through [preprocessing](#modified-bam-process). Modcall identifies allele-specific modifications from the BAM files and store them in a VCF file. An example of this command is shown below.
 ```
 longphase modcall \
 -b alignment.bam \
 -r reference.fasta \
 -t 8 \
 -o modcall
+```
+
+An example of ModCall VCF file
+```
+##INFO=<ID=RS,Number=.,Type=String,Description="Read Strand">
+##INFO=<ID=MR,Number=.,Type=String,Description="Read Name of Modified position">
+##INFO=<ID=NR,Number=.,Type=String,Description="Read Name of nonModified position">
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=MD,Number=1,Type=Integer,Description="Modified Depth">
+##FORMAT=<ID=UD,Number=1,Type=Integer,Description="Unmodified Depth">
+##FORMAT=<ID=DP,Number=1,Type=Integer,Description="Read Depth"
+#CHROM  POS     ID      REF     ALT     QUAL    FILTER  INFO    FORMAT  SAMPLE
+chr1    11200   .       C       .       .       .       RS=P;MR=eb459876-8c81-4714-a496-a90ea8be94d2,6ca3a71f-62fd-416e-8c6e-8c4a9c054e1a,0d8b7c68-d98d-4045-a572-82fedac62da5,4ee6d422-e677-41fc-9ef3-8b387c05973a,71b5dfe9-7cd1-4959-b634-b9d162468edb,6e205f04-560a-4975-932d-dbd60ead695d,ae2238f8-b622-4cb5-8f02-4c3f54ab8ca3,d7ef87d0-bffe-404d-9f10-62eceb0c5121,c0e0c526-e193-4ee2-81d6-1fbe0c970dc1;NR=8249c7c7-fd04-4a4c-985d-2bbcb2030bc4,5db6fcd3-5780-494b-bfdd-4d9d7282d012,e3b03dc0-8399-4e1e-bd0d-e5e4e3e2911a,b8dc7af8-9f78-4dac-b8cc-35e157c51621,0b2638c1-8380-48b4-b08c-a6161495ad9d,7b1e5c16-f0a6-47f6-9726-247c762a10ca,ac7ae685-082e-413e-b5a6-b4c12d49a1c2;     GT:MD:UD:DP     0/1:9:7:16
+chr1    11201   .       G       .       .       .       RS=N;MR=7f505676-704b-41b7-a292-666559b40159,7b070045-225e-49ed-9fff-e7cd1bffdfd5,e7556960-d21d-4859-931c-41c6bc196141,69c925f2-ae2c-4cf1-a8c6-6b39868f0d86,7e6a4472-5f8d-4d20-a70b-ec9db403121b,5f879a79-5b28-4a58-b12a-8445c44a37aa;NR=123518e1-4dbe-4a72-9b31-3450b6b8d3da,1783e61c-546a-4414-a8ef-92297ee1dc1f,c9772456-bb97-41c8-b561-001cbcc1233f,f40a87f4-0240-4137-b3ed-b98ba5a479cb,3c6d0a5e-23a5-4a25-9b3b-ed90b19188a0,d584347d-6db5-42bf-8cd8-95ac8a2c51d1; GT:MD:UD:DP     0/1:6:6:12
+chr1    11434   .       C       .       .       .       RS=P;MR=eb459876-8c81-4714-a496-a90ea8be94d2,6ca3a71f-62fd-416e-8c6e-8c4a9c054e1a,0d8b7c68-d98d-4045-a572-82fedac62da5,71b5dfe9-7cd1-4959-b634-b9d162468edb,5db6fcd3-5780-494b-bfdd-4d9d7282d012,6e205f04-560a-4975-932d-dbd60ead695d,ae2238f8-b622-4cb5-8f02-4c3f54ab8ca3,d7ef87d0-bffe-404d-9f10-62eceb0c5121;NR=8249c7c7-fd04-4a4c-985d-2bbcb2030bc4,e3b03dc0-8399-4e1e-bd0d-e5e4e3e2911a,b8dc7af8-9f78-4dac-b8cc-35e157c51621,0b2638c1-8380-48b4-b08c-a6161495ad9d,7b1e5c16-f0a6-47f6-9726-247c762a10ca,ac7ae685-082e-413e-b5a6-b4c12d49a1c2,c0e0c526-e193-4ee2-81d6-1fbe0c970dc1;  GT:MD:UD:DP     0/1:8:7:16
+chr1    11435   .       G       .       .       .       RS=N;MR=7f505676-704b-41b7-a292-666559b40159,7b070045-225e-49ed-9fff-e7cd1bffdfd5,e7556960-d21d-4859-931c-41c6bc196141,7e6a4472-5f8d-4d20-a70b-ec9db403121b,5f879a79-5b28-4a58-b12a-8445c44a37aa;NR=123518e1-4dbe-4a72-9b31-3450b6b8d3da,1783e61c-546a-4414-a8ef-92297ee1dc1f,c9772456-bb97-41c8-b561-001cbcc1233f,69c925f2-ae2c-4cf1-a8c6-6b39868f0d86,f40a87f4-0240-4137-b3ed-b98ba5a479cb,d584347d-6db5-42bf-8cd8-95ac8a2c51d1;      GT:MD:UD:DP     0/1:5:6:12
 ```
 
 #### The complete list of modcall parameters
@@ -297,6 +317,17 @@ cuteSV alignment.bam reference.fasta SV.vcf work_dir --report_readid --genotype
 --max_cluster_bias_INS 1000 --diff_ratio_merging_INS 0.9 --max_cluster_bias_DEL 1000 --diff_ratio_merging_DEL 0.5
 # ONT data: 
 --max_cluster_bias_INS 100 --diff_ratio_merging_INS 0.3 --max_cluster_bias_DEL 100 --diff_ratio_merging_DEL 0.3
+```
+
+#### [Modified bam process](https://github.com/nanoporetech/dorado/issues/145)
+The `-T` parameter in samtools fastq allows for the extraction of tags from the BAM file and stores them in the header of the FASTQ file. Please ensure that the BAM file includes both `MM` and `ML` tags.
+```
+samtools fastq -T '*' methylcall.raw.bam > methylcall.raw.fastq
+```
+
+The `-y` option in minimap2 allows appending tags stored in the FASTQ header to the alignment.
+```
+minimap2 -ax map-ont -y reference.fasta methylcall.raw.fastq 
 ```
 
 ---
