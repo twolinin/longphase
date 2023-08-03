@@ -1,5 +1,5 @@
 # LongPhase
-LongPhase is an ultra-fast program for simultaneously co-phasing SNPs, small indels, large SVs, and modifications for Nanopore and PacBio platforms. It can produce nearly chromosome-scale haplotype blocks by using Nanpore ultra-long reads without the need for additional trios, chromosome conformation, and strand-seq data. On an 8-core machine, LongPhase can finish phasing a human genome in 10-20 minutes.
+LongPhase is an ultra-fast program for simultaneously co-phasing SNPs, small indels, large SVs, and (5mC) modifications for Nanopore and PacBio platforms. It can produce nearly chromosome-scale haplotype blocks by using Nanpore ultra-long reads without the need for additional trios, chromosome conformation, and strand-seq data. On an 8-core machine, LongPhase can finish phasing a human genome in 10-20 minutes.
 
 ---
 - [Installation](#installation)
@@ -21,7 +21,7 @@ LongPhase is an ultra-fast program for simultaneously co-phasing SNPs, small ind
 	- [Generate alignment and index files](#generate-alignment-and-index-files)
 	- [Generate single nucleotide polymorphism (SNP) file](#generate-single-nucleotide-polymorphism-snp-file)
 	- [Generate Structural variation (SV) file](#generate-structural-variation-sv-file)
- 	- [Carry methylation tags to BAMs](#carry-methylation-tags-to-BAMs)
+ 	- [Carry methylation tags to BAMs](#carry-methylation-tags-to-bams)
 - [Comparison with other SNP-phasing programs](#comparison-with-other-snp-phasing-programs)
 - [Citation](#citation)
 - [Contact](#contact)
@@ -137,8 +137,8 @@ haplotag read correction arguments:
 
 ```
 ---
-### Output files of SNP-only phasing
-When phasing SNPs alone, LongPhase outputs the results into a VCF file. The alleles of the two haplotypes are stored in the GT field (e.g., 1|0), whereas the left and right alleles of the vertical bar represents the paternal or maternal haplotypes. The last PS field (e.g., 16809) represents the identifier of the block. For instance, the following example illustrates two haplotypes of five phased SNPs, CCCCC and GATGT, in the same block 16809.
+### Output of SNP and indel phasing
+When phasing SNPs alone, LongPhase outputs the results into a VCF file. The alleles of the two haplotypes are stored in the GT field (e.g., 1|0), whereas the left and right alleles of the vertical bar represent the paternal or maternal haplotypes. The last PS field (e.g., 16809) represents the identifier of the block. For instance, the following example illustrates two haplotypes of five-phased SNPs, CCCCC and GATGT, in the same block 16809. The output of phased indels is similar and in the same VCF.
 
 ```
 ##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
@@ -208,7 +208,7 @@ optional arguments:
 ```
 
 ### Modcall command
-Modcall is a module for calling allele-specific modifications in the latest Nanopore and PacBio basecalled reads, assuming the modifications are stored in the (aligned) BAM files using `MM` and `ML` tags. Unaligned BAM files can be converted into aligned BAM files through [preprocessing](#Carry-methylation-tags-to-the-aligned-BAM). Modcall identifies allele-specific modifications and stores them into a VCF file. An example of this command is shown below.
+Modcall is a module for calling allele-specific modifications in the latest Nanopore and PacBio basecalled reads, assuming the modifications are stored in the (aligned) BAM files using `MM` and `ML` tags. These tags are stored in the unaligned BAM outputted by the latest ONT/PacBio basecallers, which can be carried to the aligned BAM through proper [preprocessing](#carry-methylation-tags-to-bams). Modcall identifies allele-specific modifications and stores them in a VCF file. An example of this command is shown below.
 ```
 longphase modcall \
 -b alignment.bam \
@@ -217,7 +217,7 @@ longphase modcall \
 -o modcall
 ```
 
-An example of ModCall VCF file
+An output example of a modcall-generated VCF is shown below, which can be provided to longphase for co-phasing with other variants. The phased modifications are written into a new VCF same as SNPs.
 ```
 ##INFO=<ID=RS,Number=.,Type=String,Description="Read Strand">
 ##INFO=<ID=MR,Number=.,Type=String,Description="Read Name of Modified position">
