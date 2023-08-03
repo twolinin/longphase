@@ -14,14 +14,14 @@ LongPhase is an ultra-fast program for simultaneously co-phasing SNPs, small ind
 		- [Output files of SNP and SV co-phasing](#output-files-of-snp-and-sv-co-phasing)
 	- [Haplotag command](#haplotag-command)
 		- [The complete list of haplotag parameters](#the-complete-list-of-haplotag-parameters)
-  	- [ModCall command](#modcall-command)
+  	- [Modcall command](#Modcall-command)
   		- [The complete list of modcall parameters](#the-complete-list-of-modcall-parameters)
 - [Input Preparation](#input-preparation)
 	- [Generate reference index](#generate-reference-index)
 	- [Generate alignment and index files](#generate-alignment-and-index-files)
 	- [Generate single nucleotide polymorphism (SNP) file](#generate-single-nucleotide-polymorphism-snp-file)
 	- [Generate Structural variation (SV) file](#generate-structural-variation-sv-file)
- 	- [Modified bam process](#modified-bam-process)
+ 	- [Carry methylation tags to BAMs](#Carry-methylation-tags-to-BAMs)
 - [Comparison with other SNP-phasing programs](#comparison-with-other-snp-phasing-programs)
 - [Citation](#citation)
 - [Contact](#contact)
@@ -207,8 +207,8 @@ optional arguments:
       --log                           an additional log file records the result of each read. default:false
 ```
 
-### ModCall command
-Modcall implements a module for calling allele-specific modifications in latest Nanopore and PacBio basecalled reads, assuming the modifications are stored in the raw BAM files using `MM` and `ML` tags. Unaligned BAM files can be converted into alignment BAM files through [preprocessing](#modified-bam-process). Modcall identifies allele-specific modifications from the BAM files and store them in a VCF file. An example of this command is shown below.
+### Modcall command
+Modcall is a module for calling allele-specific modifications in the latest Nanopore and PacBio basecalled reads, assuming the modifications are stored in the (aligned) BAM files using `MM` and `ML` tags. Unaligned BAM files can be converted into aligned BAM files through [preprocessing](#Carry-methylation-tags-to-the-aligned-BAM). Modcall identifies allele-specific modifications and stores them into a VCF file. An example of this command is shown below.
 ```
 longphase modcall \
 -b alignment.bam \
@@ -321,13 +321,13 @@ cuteSV alignment.bam reference.fasta SV.vcf work_dir --report_readid --genotype
 --max_cluster_bias_INS 100 --diff_ratio_merging_INS 0.3 --max_cluster_bias_DEL 100 --diff_ratio_merging_DEL 0.3
 ```
 
-#### [Modified bam process](https://github.com/nanoporetech/dorado/issues/145)
-The `-T` parameter in samtools fastq allows for the extraction of tags from the BAM file and stores them in the header of the FASTQ file. Please ensure that the BAM file includes both `MM` and `ML` tags.
+#### Carry methylation tags to BAMs
+[The `-T` parameter](https://github.com/nanoporetech/dorado/issues/145) in samtools fastq extracts tags from the BAM file and stores them in the header of the FASTQ file. Please ensure that the BAM file includes both `MM` and `ML` tags and carried on in the following way.
 ```
 samtools fastq -T '*' methylcall.raw.bam > methylcall.raw.fastq
 ```
 
-The `-y` option in minimap2 allows appending tags stored in the FASTQ header to the alignment.
+Then, specify the `-y` option in minimap2 which appends tags stored in the FASTQ header into the BAM file.
 ```
 minimap2 -ax map-ont -y reference.fasta methylcall.raw.fastq 
 ```
