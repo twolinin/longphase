@@ -14,6 +14,8 @@ LongPhase is an ultra-fast program for simultaneously co-phasing SNPs, small ind
 		- [Output files of SNP and SV co-phasing](#output-files-of-snp-and-sv-co-phasing)
 	- [Haplotag command](#haplotag-command)
 		- [The complete list of haplotag parameters](#the-complete-list-of-haplotag-parameters)
+  	- [ModCall command](#modcall-command)
+  		- [The complete list of modcall parameters](#the-complete-list-of-modcall-parameters)
 - [Input Preparation](#input-preparation)
 	- [Generate reference index](#generate-reference-index)
 	- [Generate alignment and index files](#generate-alignment-and-index-files)
