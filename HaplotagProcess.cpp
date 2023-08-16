@@ -336,7 +336,7 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
                       << "HP2Allele\t"
                       << "phasingQuality(PQ)\t"
                       << "(Variant,HP)\t"
-                      << "(PhaseSet,Variantcount)";
+                      << "(PhaseSet,Variantcount)\n";
                       
         }
     }     
