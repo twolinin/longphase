@@ -330,11 +330,13 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
                       << "ReadStart\t"
                       << "Confidnet(%)\t"
                       << "Haplotype\t"
+                      << "PhaseSet\t"
                       << "TotalAllele\t"
                       << "HP1Allele\t"
                       << "HP2Allele\t"
                       << "phasingQuality(PQ)\t"
-                      << "(Variant,HP)\n";
+                      << "(Variant,HP)\t"
+                      << "(PhaseSet,Variantcount)";
                       
         }
     }     
@@ -502,7 +504,8 @@ int HaplotagProcess::judgeHaplotype(Alignment align, std::string chrName, double
     int hp1Count = 0;
     int hp2Count = 0;
     //record variants on this read
-    std::map<int,int> variants;
+    std::map<int,int> variantsHP;
+    std::map<int,int> countPS;
 
     // Skip variants that are to the left of this read
     while( firstVariantIter != currentVariants.end() && (*firstVariantIter).first < align.refStart )
@@ -563,12 +566,13 @@ int HaplotagProcess::judgeHaplotype(Alignment align, std::string chrName, double
                         else{
                             if( base == chrVariantHP1[chrName][(*currentVariantIter).first]){
                                 hp1Count++;
-                                variants[(*currentVariantIter).first]=0;
+                                variantsHP[(*currentVariantIter).first]=0;
                             }
                             if( base == chrVariantHP2[chrName][(*currentVariantIter).first]){
                                 hp2Count++;
-                                variants[(*currentVariantIter).first]=1;
+                                variantsHP[(*currentVariantIter).first]=1;
                             }
+                            countPS[chrVariantPS[chrName][(*currentVariantIter).first]]++;
                         }
                     }
                 }
@@ -648,19 +652,45 @@ int HaplotagProcess::judgeHaplotype(Alignment align, std::string chrName, double
     if(tagResult!=NULL){
         //write tag log file
         std::string hpResultStr = ((hpResult == 0 )? "." : std::to_string(hpResult) );
+        std::string psResultStr = ".";
+        
+        if( hpResultStr != "." ){
+            auto psIter = countPS.begin();
+            psResultStr = std::to_string((*psIter).first);
+        }
+        
+        // cross two block
+        if( countPS.size() > 1  ){
+            hpResultStr = ".";
+            psResultStr = ".";
+            hpResult = 0;
+        }
+        
+        
         (*tagResult)<< align.qname       << "\t" 
                  << align.chr         << "\t" 
-                 << align.refStart    << "\t" 
+                 << align.refStart    << "\t"
                  << max/(max+min)     << "\t" 
                  << hpResultStr       << "\t"
+                 << psResultStr       << "\t"
                  << hp1Count+hp2Count << "\t" 
                  << hp1Count          << "\t" 
                  << hp2Count          << "\t"
                  << pqValue           << "\t";
-        // loop each variant         
-        for(auto v : variants ){
+                 
+        
+        // print position and HP
+        for(auto v : variantsHP ){
             (*tagResult)<< " " << v.first << "," << v.second ;
         }
+        
+        (*tagResult) << "\t";
+        
+        // belong PS, number of variant
+        for(auto v : countPS ){
+            (*tagResult)<< " " << v.first << "," << v.second ;
+        }
+        
         (*tagResult)<< "\n";  
     }
     
