@@ -10,7 +10,7 @@ LongPhase is an ultra-fast program for simultaneously co-phasing SNPs, small ind
 		- [SNP and SV co-phasing](#snp-and-sv-co-phasing)
 		- [SNP and modification co-phasing](#snp-and-modification-co-phasing)
 		- [The complete list of phase parameters](#the-complete-list-of-phase-parameters)
-		- [Output files of SNP-only phasing](#output-files-of-snp-only-phasing)
+		- [Output of SNP and indel phasing](#output-of-snp-and-indel-phasing)
 		- [Output files of SNP and SV co-phasing](#output-files-of-snp-and-sv-co-phasing)
 	- [Haplotag command](#haplotag-command)
 		- [The complete list of haplotag parameters](#the-complete-list-of-haplotag-parameters)
@@ -34,7 +34,7 @@ wget https://github.com/twolinin/longphase/releases/download/v1.5.1/longphase_li
 tar -xJf longphase_linux-x64.tar.xz
 ```
 
-An executable file, longphase_linux-x64, can be executed directly. If you need to compile a local version, you can clone and compile using the following commands. 
+An executable file, longphase_linux-x64, can be executed directly. If you need to compile a local version, you can clone and compile using the following commands, and make sure that the environment has zlib installed. If you require setting up a virtual environment, we also provide a [Dockerfile](https://github.com/twolinin/longphase/blob/main/Dockerfile).
 
 ```
 git clone https://github.com/twolinin/longphase.git
