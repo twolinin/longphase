@@ -27,9 +27,8 @@ static const char *CORRECT_USAGE_MESSAGE =
 "   -q, --mappingQuality=Num               filter alignment if mapping quality is lower than threshold. default:1\n\n"
 
 "phasing graph arguments:\n"
-"   -a, --connectAdjacent=Num              connect adjacent N SNPs. default:6\n"
+"   -a, --connectAdjacent=Num              connect adjacent N SNPs. default:20\n"
 "   -d, --distance=Num                     phasing two variant if distance less than threshold. default:300000\n"
-//"   -c, --crossSNP=Num                     block phasing step. sample N SNPs in each block. default:15\n"
 "   -1, --readsThreshold=[0~1]             give up SNP-SNP phasing pair if the number of reads of the \n"
 "                                          two combinations are similar. default:0.05\n"
 "   -v, --confidentHaplotype=[0~1]         the haplotype of the current SNP is judged by the haplotype of the previous N SNPs.\n"
@@ -44,7 +43,7 @@ static const char *CORRECT_USAGE_MESSAGE =
 
 "\n";
 
-static const char* shortopts = "s:b:o:t:r:d:c:1:a:q:j:i:v:n:m:";
+static const char* shortopts = "s:b:o:t:r:d:1:a:q:j:i:v:n:m:";
 
 enum { OPT_HELP = 1 , DOT_FILE, SV_FILE, MOD_FILE, IS_ONT, IS_PB, PHASE_INDEL, VERSION};
 
@@ -63,7 +62,6 @@ static const struct option longopts[] = {
     { "out-prefix",           required_argument,  NULL, 'o' },
     { "threads",              required_argument,  NULL, 't' },
     { "distance",             required_argument,  NULL, 'd' },
-    //{ "crossSNP",             required_argument,  NULL, 'c' },
     { "readsThreshold",       required_argument,  NULL, '1' },
     { "connectAdjacent",      required_argument,  NULL, 'a' },
     { "mappingQuality",       required_argument,  NULL, 'q' },
@@ -79,7 +77,6 @@ namespace opt
 {
     static int numThreads = 1;
     static int distance = 300000;
-    //static int crossSNP = 15;
     static std::string snpFile="";
     static std::string svFile="";
     static std::string modFile="";
@@ -91,7 +88,7 @@ namespace opt
     static bool isPB=false;
     static bool phaseIndel=false;
     
-    static int connectAdjacent = 6;
+    static int connectAdjacent = 20;
     static int mappingQuality =1;
     
     static double confidentHaplotype = 0.5;
@@ -101,7 +98,7 @@ namespace opt
     static double snpConfidence  = 0.75;
     static double readConfidence = 0.65;
     
-    static double readsThreshold = 0.05;
+    static double readsThreshold = 0.7;
 
     static std::string command;
 }
@@ -121,7 +118,6 @@ void PhasingOptions(int argc, char** argv)
         case 'o': arg >> opt::resultPrefix; break;
         case 'r': arg >> opt::fastaFile; break;  
         case 'd': arg >> opt::distance; break;  
-        //case 'c': arg >> opt::crossSNP; break;  
         case '1': arg >> opt::readsThreshold; break; 
         case 'a': arg >> opt::connectAdjacent; break;
         case 'q': arg >> opt::mappingQuality; break;
@@ -183,22 +179,6 @@ void PhasingOptions(int argc, char** argv)
         die = true;
     }
     
-
-    /*
-    if( opt::bamFile != "")
-    {
-        std::ifstream openFile( opt::bamFile.c_str() );
-        if( !openFile.is_open() )
-        {
-            std::cerr<< "File " << opt::bamFile << " not exist.\n\n";
-            die = true;
-        }
-    }
-    else{
-        std::cerr << SUBPROGRAM ": missing bam file.\n";
-        die = true;
-    }*/
-    
     if( opt::fastaFile != "")
     {
         std::ifstream openFile( opt::fastaFile.c_str() );
@@ -226,13 +206,6 @@ void PhasingOptions(int argc, char** argv)
                   << "\n please check -d or --distance=Num\n";
         die = true;
     }
-
-    /*if ( opt::crossSNP < 0 ){
-        std::cerr << SUBPROGRAM " invalid crossSNP. value: " 
-                  << opt::crossSNP 
-                  << "\n please check -c, --crossSNP=Num\n";
-        die = true;
-    }*/
 
     if ( opt::connectAdjacent < 0 ){
         std::cerr << SUBPROGRAM " invalid connectAdjacent. value: " 
@@ -272,7 +245,6 @@ int PhasingMain(int argc, char** argv, std::string in_version)
 
     ecParams.numThreads=opt::numThreads;
     ecParams.distance=opt::distance;
-    //ecParams.crossSNP=opt::crossSNP;
     ecParams.snpFile=opt::snpFile;
     ecParams.svFile=opt::svFile;
     ecParams.modFile=opt::modFile;

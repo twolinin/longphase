@@ -8,7 +8,6 @@ struct PhasingParameters
 {
     int numThreads;
     int distance;
-    //int crossSNP;
     std::string snpFile;
     std::string svFile;
     std::vector<std::string> bamFile;

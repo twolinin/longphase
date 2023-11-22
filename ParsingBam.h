@@ -63,7 +63,9 @@ class SnpParser : public BaseVairantParser{
         void parserProcess(std::string &input);
         // override output parser
         void writeLine(std::string &input, bool &ps_def, std::ofstream &resultVcf, PhasingResult &phasingResult);
-    
+        
+        bool commandLine;
+        
     public:
     
         SnpParser(PhasingParameters &in_params);
@@ -100,6 +102,8 @@ class SVParser : public BaseVairantParser{
         // override output parser
         void writeLine(std::string &input, bool &ps_def, std::ofstream &resultVcf, PhasingResult &phasingResult);
         
+        bool commandLine;
+        
     public:
     
         SVParser(PhasingParameters &params, SnpParser &snpFile);
@@ -130,7 +134,9 @@ class METHParser : public BaseVairantParser{
         void parserProcess(std::string &input);
         // override output parser
         void writeLine(std::string &input, bool &ps_def, std::ofstream &resultVcf, PhasingResult &phasingResult);
-      
+        
+        bool commandLine;
+        
     public:
         
         std::map<int, std::map<std::string ,RefAlt> > getVariants(std::string chrName);  

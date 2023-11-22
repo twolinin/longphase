@@ -202,8 +202,8 @@ void BaseVairantParser::unCompressInput(std::string variantFile, std::string res
 
 
 // SNP
-SnpParser::SnpParser(PhasingParameters &in_params){
-    
+SnpParser::SnpParser(PhasingParameters &in_params):commandLine(false){
+
     chrVariant = new std::map<std::string, std::map<int, RefAlt> >;
     
     params = &in_params;
@@ -263,6 +263,11 @@ SnpParser::SnpParser(PhasingParameters &in_params){
                 tmp.Ref = rec->d.allele[0]; 
                 tmp.Alt = rec->d.allele[1];
                 
+                //prevent the MAVs calling error which makes the GT=0/1
+                if ( rec->d.allele[1][2] != '\0' ){
+                    continue;
+                }
+                
                 // record 
                 (*chrVariant)[chr][variantPos] = tmp;
             }
@@ -290,7 +295,12 @@ SnpParser::SnpParser(PhasingParameters &in_params){
                 RefAlt tmp;
                 tmp.Ref = rec->d.allele[0]; 
                 tmp.Alt = rec->d.allele[1];
-
+                
+                //prevent the MAVs calling error which makes the GT=0/1
+                if ( rec->d.allele[1][tmp.Alt.size()+1] != '\0' ){
+                   continue ;
+                }
+                
                 // record 
                 (*chrVariant)[chr][variantPos] = tmp;
             }
@@ -361,12 +371,14 @@ void SnpParser::writeLine(std::string &input, bool &ps_def, std::ofstream &resul
             ps_def = true;
         }
         // format line 
-        if(input.find("##")== std::string::npos && ps_def == false){
-            resultVcf << "##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase set identifier\">\n";
-        }
-        if( input.find("##")== std::string::npos){
+        if( input.find("##")== std::string::npos && commandLine == false){
+            if(ps_def == false){
+                resultVcf <<  "##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase set identifier\">\n";
+                ps_def = true;
+            }
             resultVcf << "##longphaseVersion=" << params->version << "\n";
             resultVcf << "##commandline=\"" << params->command << "\"\n";
+            commandLine = true;
         }
         resultVcf << input << "\n";
     }
@@ -586,7 +598,7 @@ void SnpParser::filterSNP(std::string chr, std::vector<ReadVariant> &readVariant
 }
 
 // SV
-SVParser::SVParser(PhasingParameters &in_params, SnpParser &in_snpFile){
+SVParser::SVParser(PhasingParameters &in_params, SnpParser &in_snpFile):commandLine(false){
     params = &in_params;
     snpFile = &in_snpFile;
     
@@ -721,12 +733,14 @@ void SVParser::writeLine(std::string &input, bool &ps_def, std::ofstream &result
             ps_def = true;
         }
         // format line 
-        if(input.find("##")== std::string::npos && ps_def == false){
-            resultVcf <<  "##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase set identifier\">\n";
-        }
-        if( input.find("##")== std::string::npos){
+        if( input.find("##")== std::string::npos && commandLine == false){
+            if(ps_def == false){
+                resultVcf <<  "##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase set identifier\">\n";
+                ps_def = true;
+            }
             resultVcf << "##longphaseVersion=" << params->version << "\n";
             resultVcf << "##commandline=\"" << params->command << "\"\n";
+            commandLine = true;
         }
         resultVcf << input << "\n";
     }
@@ -1103,6 +1117,7 @@ void BamParser::get_snp(const Alignment &align, std::vector<ReadVariant> &readVa
                 int refAlleleLen = (*currentVariantIter).second.Ref.length();
                 int altAlleleLen = (*currentVariantIter).second.Alt.length();
                 int offset = (*currentVariantIter).first - ref_pos;
+                int base_q = 0;
 
                 if( query_pos + offset + 1 > int(qseq.length()) ){
                     return;
@@ -1118,6 +1133,8 @@ void BamParser::get_snp(const Alignment &align, std::vector<ReadVariant> &readVa
                         allele = 0;
                     else if( base == (*currentVariantIter).second.Alt )
                         allele = 1;
+                    
+                    base_q = align.quality[query_pos + offset];
                 } 
                 
                 // insertion
@@ -1132,6 +1149,8 @@ void BamParser::get_snp(const Alignment &align, std::vector<ReadVariant> &readVa
                     else {
                         allele = 0 ;
                     }
+                    // using this quality to identify indel
+                    base_q = -4;
                 } 
                 
                 // deletion
@@ -1144,10 +1163,11 @@ void BamParser::get_snp(const Alignment &align, std::vector<ReadVariant> &readVa
                     else {
                         allele = 0 ;
                     }
+                    // using this quality to identify indel
+                    base_q = -4;
                 } 
                 
                 if( allele != -1 ){
-                    int base_q = align.quality[query_pos + offset];
                     // record snp result
                     Variant *tmpVariant = new Variant((*currentVariantIter).first, allele, base_q);
                     (*tmpReadResult).variantVec.push_back( (*tmpVariant) );
@@ -1184,6 +1204,7 @@ void BamParser::get_snp(const Alignment &align, std::vector<ReadVariant> &readVa
                         
                         int refAlleleLen = (*currentVariantIter).second.Ref.length();
                         int altAlleleLen = (*currentVariantIter).second.Alt.length();
+                        int base_q = 0;  
                         
                         if( query_pos + 1 > int(qseq.length()) ){
                             return;
@@ -1198,6 +1219,8 @@ void BamParser::get_snp(const Alignment &align, std::vector<ReadVariant> &readVa
                                 allele = 0;
                             else if( base == (*currentVariantIter).second.Alt )
                                 allele = 1;
+                            
+                            base_q = align.quality[query_pos];
                         }
                         
                         // the read deletion contain VCF's deletion
@@ -1207,14 +1230,17 @@ void BamParser::get_snp(const Alignment &align, std::vector<ReadVariant> &readVa
                             std::string altSeq = (*currentVariantIter).second.Alt;
 
                             allele = 1;
+                            // using this quality to identify indel
+                            base_q = -4;
                         }
                         else if ( allele == -1 ) {
                             allele = 0;
+                            // using this quality to identify indel
+                            base_q = -4;
                         }
                         
                         if(allele != -1){
-                            int base_q = align.quality[query_pos];
-                            Variant *tmpVariant = new Variant((*currentVariantIter).first, allele, base_q/2);
+                            Variant *tmpVariant = new Variant((*currentVariantIter).first, allele, base_q);
                             (*tmpReadResult).variantVec.push_back( (*tmpVariant) );
                             currentVariantIter++;
                             delete tmpVariant;
@@ -1250,7 +1276,7 @@ void BamParser::get_snp(const Alignment &align, std::vector<ReadVariant> &readVa
     delete tmpReadResult;
 }
 
-METHParser::METHParser(PhasingParameters &in_params, SnpParser &in_snpFile){
+METHParser::METHParser(PhasingParameters &in_params, SnpParser &in_snpFile):commandLine(false){
 	params = &in_params;
     snpFile = &in_snpFile;
     representativePos=-1;
@@ -1398,16 +1424,17 @@ void METHParser::writeLine(std::string &input, bool &ps_def, std::ofstream &resu
             ps_def = true;
         }
         // format line 
-        if(input.find("##")== std::string::npos && ps_def == false){
-            resultVcf <<  "##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase set identifier\">\n";
-        }
-        if( input.find("##")== std::string::npos){
+        if( input.find("##")== std::string::npos && commandLine == false){
+            if(ps_def == false){
+                resultVcf <<  "##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase set identifier\">\n";
+                ps_def = true;
+            }
             resultVcf << "##longphaseVersion=" << params->version << "\n";
             resultVcf << "##commandline=\"" << params->command << "\"\n";
+            commandLine = true;
         }
         resultVcf << input << "\n";
     }
-    
     else if( input.find("#")== std::string::npos ){
         std::istringstream iss(input);
         std::vector<std::string> fields((std::istream_iterator<std::string>(iss)),std::istream_iterator<std::string>());

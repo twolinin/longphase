@@ -32,16 +32,17 @@ class SubEdge{
         
         void destroy();
         
-        int getQuality(PosAllele targetPos);
-        int getAvgQuality(PosAllele targetPos);
-        int getRefReadCount(int targetPos);
-        int getAltReadCount(int targetPos);
-        
         void addSubEdge(int currentQuality, Variant connectNode, std::string readName);
+        std::pair<int,int> BestPair(int targetPos);
+        int getRefReadCount(int targetPos);
+        int getAltReadCount(int targetPos);        
+        
         std::vector<std::string> showEdge(std::string message);
         std::vector<std::pair<int,int>> getConnectPos();
-        std::pair<int,int> BestPair(int targetPos);
-        void getReadVariant(std::map< std::string,std::map<int,int> > &readVariantMap);
+ 
+        int getQuality(PosAllele targetPos);
+        int getAvgQuality(PosAllele targetPos);
+
 };
 
 
@@ -52,7 +53,7 @@ struct VariantEdge{
 
     VariantEdge(int currPos);
     // node pair 
-    std::pair<PosAllele,PosAllele> findBestEdgePair(int targetPos, bool isONT, double diffRatioThreshold, bool repair, bool debug);
+    std::pair<PosAllele,PosAllele> findBestEdgePair(int targetPos, bool isONT, double diffRatioThreshold, bool debug);
     // number of read of two node. AA and AB combination
     std::pair<int,int> findNumberOfRead(int targetPos);
 };
@@ -85,7 +86,8 @@ class VairiantGraph{
         // record all variant position, include SNP and SV 
         // position, quality
         std::map<int,ReadBaseMap*> *nodeInfo;
-        std::map<int,int> *svPosition;
+        // position, type < 0=SNP 1=SV 2=MOD 3=INDEL >
+        std::map<int,int> *variantType;
         // phasing result, store final path
         std::map<PosAllele,PosAllele> *bestEdgeConnect;
         // the smallest position in the block will be used as the representative of the block
@@ -107,10 +109,6 @@ class VairiantGraph{
         // store phased read and read's haplotype
         std::map<std::string,int> *readHpMap;
 
-        // block phasing
-        std::vector<ReadVariant> getBlockRead(std::pair<int,std::vector<int> > currentBlockVec, BlockRead &totalRead , int sampleNum);
-        bool blockPhaseing();
-        
         void modBridging();
         
         int subBridge(int breakPos, int nextPos, std::map<int,ReadBaseMap*> &modNode);
@@ -135,10 +133,6 @@ class VairiantGraph{
         std::map<std::string,int>* getReadHP();
         void exportResult(std::string chrName, PhasingResult &result);
         int totalNode();
-        
-        // test
-        void connectTest(std::string chrName, std::map<int,int> &passPosition);
-
 
         void destroy();
         
