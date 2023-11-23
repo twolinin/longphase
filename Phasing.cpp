@@ -30,7 +30,7 @@ static const char *CORRECT_USAGE_MESSAGE =
 "   -a, --connectAdjacent=Num              connect adjacent N SNPs. default:20\n"
 "   -d, --distance=Num                     phasing two variant if distance less than threshold. default:300000\n"
 "   -1, --readsThreshold=[0~1]             give up SNP-SNP phasing pair if the number of reads of the \n"
-"                                          two combinations are similar. default:0.05\n"
+"                                          two combinations are similar. default:0.7\n"
 "   -v, --confidentHaplotype=[0~1]         the haplotype of the current SNP is judged by the haplotype of the previous N SNPs.\n"
 "                                          if the threshold is higher, the consistency of SNP needs to be higher. default:0.5\n"
 "   -j, --judgeInconsistent=[0~1]          the proportion of inconsistent haplotypes among the haplotypes of the previous N SNPs.\n"
