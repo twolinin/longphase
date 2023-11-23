@@ -121,10 +121,10 @@ parse alignment arguments:
    -q, --mappingQuality=Num               filter alignment if mapping quality is lower than threshold. default:1
 
 phasing graph arguments:
-   -a, --connectAdjacent=Num              connect adjacent N SNPs. default:6
+   -a, --connectAdjacent=Num              connect adjacent N SNPs. default:20
    -d, --distance=Num                     phasing two variant if distance less than threshold. default:300000
    -1, --readsThreshold=[0~1]             give up SNP-SNP phasing pair if the number of reads of the
-                                          two combinations are similar. default:0.05
+                                          two combinations are similar. default:0.7
    -v, --confidentHaplotype=[0~1]         the haplotype of the current SNP is judged by the haplotype of the previous N SNPs.
                                           if the threshold is higher, the consistency of SNP needs to be higher. default:0.5
    -j, --judgeInconsistent=[0~1]          the proportion of inconsistent haplotypes among the haplotypes of the previous N SNPs.
