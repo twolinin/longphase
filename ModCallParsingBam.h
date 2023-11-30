@@ -70,7 +70,7 @@ class MethBamParser{
         
         // get methylation tag from BAM file
         std::string get_aux_tag(const bam1_t *aln, const char tag[2]);
-        void parse_CIGAR(AlignmentMethExtend &align, std::vector<ReadVariant> &readVariantVec);
+        void parse_CIGAR(const  bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<ReadVariant> &readVariantVec);
         
         // record methylation position and probability from methylation tag
         void getmeth(AlignmentMethExtend &align);

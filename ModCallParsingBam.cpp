@@ -91,86 +91,11 @@ void MethBamParser::detectMeth(std::string chrName, int chr_len, std::vector<Rea
                  || (flag & 0x400) != 0  // duplicate 
                  || (flag & 0x800) != 0  // supplementary alignment
                                          // A chimeric alignment is represented as a set of linear alignments that do not have large overlaps.
-                 ){ 
-                std::string str = bamHdr->target_name[aln->core.tid];
+                 ){
                 continue;
             }
+            parse_CIGAR(*bamHdr,*aln, readVariantVec);
 
-            AlignmentMethExtend *tmp = new AlignmentMethExtend;
-
-            tmp->chr = bamHdr->target_name[aln->core.tid];
-            tmp->refStart = aln->core.pos;
-            tmp->qname = bam_get_qname(aln);
-            tmp->qlen = aln->core.l_qseq;
-            tmp->cigar_len = aln->core.n_cigar;
-            tmp->op = (int*)malloc(tmp->cigar_len*sizeof(int));
-            tmp->ol = (int*)malloc(tmp->cigar_len*sizeof(int));
-            tmp->is_reverse = bam_is_rev(aln);
-            
-            memset(tmp->op, 0, tmp->cigar_len);
-            memset(tmp->ol, 0, tmp->cigar_len);
-            
-            // set string size
-            tmp->qseq = (char *)malloc( aln->core.l_qseq + 1 );
-            memset(tmp->qseq, 0, tmp->qlen+1);
-            // set string size
-            tmp->quality = (char *)malloc( aln->core.l_qseq + 1 );
-            memset(tmp->quality, 0, tmp->qlen+1);
-            
-            //quality string
-            uint8_t *q = bam_get_seq(aln); 
-            uint8_t *quality = bam_get_qual(aln);
-            
-            for(int i=0; i< aln->core.l_qseq ; i++){
-                // gets nucleotide id and converts them into IUPAC id.
-                tmp->qseq[i] = seq_nt16_str[bam_seqi(q,i)]; 
-                // get base quality
-                tmp->quality[i] = quality[i];
-            }
-            
-            uint32_t *cigar = bam_get_cigar(aln);
-            // store cigar
-            for(unsigned int k =0 ; k < aln->core.n_cigar ; k++){
-                tmp->op[k] = bam_cigar_op(cigar[k]);
-                tmp->ol[k] = bam_cigar_oplen(cigar[k]);
-            }
-            
-            
-            hts_base_mod_state *m = hts_base_mod_state_alloc();
-            if(bam_parse_basemod(aln, m)<0){
-                std::cout<<tmp->qname<<"\tFail pase MM\\ML\n";
-            }
-           
-           
-            //5mC  code:m ascii:109
-            //5hmC code:h ascii:104
-            //see sam tags pdf
-            int j,n,pos;
-            hts_base_mod mods[5];
-            while ((n=bam_next_basemod(aln, m, mods, 5, &pos)) > 0) {
-                
-                for (j = 0; j < n && j < 5; j++) {
-        
-                    if( mods[j].modified_base==109 ){
-                        MethPosProb *mpp = new MethPosProb(pos, mods[j].qual);
-                        tmp->queryMethVec.push_back((*mpp)); 
-                        delete mpp;
-                    }
-                }
-            }
-            
-            hts_base_mod_state_free(m);
-            
-            
-            parse_CIGAR((*tmp), readVariantVec);
-            //release memory
-            tmp->queryMethVec.clear();
-            tmp->queryMethVec.shrink_to_fit();
-            free(tmp->quality);
-            free(tmp->qseq);
-            free(tmp->op);
-            free(tmp->ol);
-            delete tmp;
         }
         hts_idx_destroy(idx);
         bam_hdr_destroy(bamHdr);
@@ -180,127 +105,142 @@ void MethBamParser::detectMeth(std::string chrName, int chr_len, std::vector<Rea
     }
 }
 
-void MethBamParser::parse_CIGAR(AlignmentMethExtend &align, std::vector<ReadVariant> &readVariantVec){
-
-    if(align.queryMethVec.size() == 0){
-        return;
+void MethBamParser::parse_CIGAR(const bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<ReadVariant> &readVariantVec){
+    hts_base_mod_state *m = hts_base_mod_state_alloc();
+    if(bam_parse_basemod(&aln, m)<0){
+        std::cout<<bam_get_qname(&aln)<<"\tFail pase MM\\ML\n";
     }
     
+
+ /*
+    while ((n = bam_next_basemod(&aln, m, mods, 5, &pos)) > 0) {
+        for (j = 0; j < n && j < 5; j++) {
+            if (mods[j].modified_base == 109) {
+                queryMethVec.emplace_back(pos, mods[j].qual);
+            }
+        }
+    }
+ */
+ 
     ReadVariant *tmpReadResult = new ReadVariant();
-    (*tmpReadResult).read_name = align.qname;
-    (*tmpReadResult).source_id = align.chr;
-    (*tmpReadResult).reference_start = align.refStart;
-    (*tmpReadResult).is_reverse = align.is_reverse;
+    (*tmpReadResult).read_name = bam_get_qname(&aln);
+    (*tmpReadResult).source_id = bamHdr.target_name[aln.core.tid];
+    (*tmpReadResult).reference_start = aln.core.pos;
+    (*tmpReadResult).is_reverse = bam_is_rev(&aln);
     
-    int refstart = align.refStart;
-    int refend = refstart + 1;
+    int refstart = aln.core.pos;
     // forward strand is checked from head to tail
     // reverse strand is checked from tail to head
-    int refpos = (align.is_reverse ? refstart + 1 : refstart);
+    int refpos = (bam_is_rev(&aln) ? refstart + 1 : refstart);
     //auto qmethiter = (align.is_reverse ? align.queryMethVec.end()-1 : align.queryMethVec.begin() );
-    auto qmethiter = align.queryMethVec.begin() ;
     //std::cout<<(*tmpReadResult).read_name<<"\t"<<align.queryMethVec.size()<<"\n";
     int querypos = 0;
+    
+    hts_base_mod mods[5];
+    int n,pos;
+    n = bam_next_basemod(&aln, m, mods, 5, &pos);
+    if(n <= 0){ 
+    hts_base_mod_state_free(m);
+    return;
+    }
     //Parse CIGAR 
-    for(int cigaridx = 0; cigaridx < align.cigar_len ; cigaridx++){
-        
-        int cigar_op = align.op[cigaridx];
-        int length = align.ol[cigaridx];
-        
-        // CIGAR operators: MIDNSHP=X correspond 012345678
-        // 0: alignment match (can be a sequence match or mismatch)
-        // 7: sequence match
-        // 8: sequence mismatch
-        if(cigar_op == 0 || cigar_op == 7 || cigar_op == 8){
-            
-            while(true){
-                
-                if( (*qmethiter).position > (querypos+length) ){
+    for(int cigaridx = 0; cigaridx < int(aln.core.n_cigar) ; cigaridx++){
+      uint32_t *cigar = bam_get_cigar(&aln);
+      int cigar_op = bam_cigar_op(cigar[cigaridx]);
+      int length = bam_cigar_oplen(cigar[cigaridx]);
+      
+      // CIGAR operators: MIDNSHP=X correspond 012345678
+      // 0: alignment match (can be a sequence match or mismatch)
+      // 7: sequence match
+      // 8: sequence mismatch
+      
+      if(cigar_op == 0 || cigar_op == 7 || cigar_op == 8){
+          while(true){
+               if( pos > (querypos+length) ){
                     break;
                 }
-                else if( qmethiter == align.queryMethVec.end() ){
+                if( n <= 0 ){
                     break;
                 }
-                //translate query (read) position to reference position
                 int methrpos;
-                if(align.is_reverse){
-                    methrpos = (*qmethiter).position - querypos + refpos - 1;
+                if(bam_is_rev(&aln)){
+                    methrpos = pos - querypos + refpos - 1;
                     
                 }else{
-                    methrpos = (*qmethiter).position - querypos + refpos;
+                    methrpos = pos - querypos + refpos;
                 }
 
                 if( int((*refString).length()) < methrpos ){
                     break;
                 }
-                std::string refChar = (*refString).substr(methrpos,1);
-
-                //modification
-                if( (*qmethiter).prob >= params->modThreshold*255 ){
-                    (*chrMethMap)[methrpos].methreadcnt++;
-                    //strand - is 1, strand + is 0
-                    (*chrMethMap)[methrpos].strand = (align.is_reverse ? 1 : 0); 
-                    (*chrMethMap)[methrpos].modReadVec.push_back(align.qname);
-                    
-                    Variant *tmpVariant = new Variant(methrpos, 0, 60 );
-                    (*tmpReadResult).variantVec.push_back( (*tmpVariant) );
-                    delete tmpVariant;
-                }
-                //non-modification (not include no detected)
-                else if( (*qmethiter).prob <= params->unModThreshold*255 ){ 
-                    (*chrMethMap)[methrpos].canonreadcnt++;
-                    (*chrMethMap)[methrpos].nonModReadVec.push_back(align.qname);
-                    
-                    Variant *tmpVariant = new Variant(methrpos, 1, 60 );
-                    (*tmpReadResult).variantVec.push_back( (*tmpVariant) );
-                    delete tmpVariant;
-                }
-                else{
-                    (*chrMethMap)[methrpos].noisereadcnt++;
-                }    
-
-                qmethiter++;
-            }
-            querypos += length;
-            refpos += length;
-        }
-        // 1: insertion to the reference
-        else if(cigar_op == 1){ 
-            
-            while(qmethiter != align.queryMethVec.end() && (*qmethiter).position <= (querypos+length)){
-                qmethiter++;
-            }
-
-            querypos += length;
-            
-        }
-        // 2: deletion from the reference
-        else if(cigar_op == 2){
-            refpos += length;
-        }
-        // 3: skipped region from the reference
-        else if(cigar_op == 3){
-            refpos += length;
-        }
-        // 4: soft clipping (clipped sequences present in SEQ)
-        else if(cigar_op == 4){
-            while(qmethiter != align.queryMethVec.end() && (*qmethiter).position <= (querypos+length)){
-                qmethiter++;
-            }
-            querypos += length;
-            
-        }
-        // 5: hard clipping (clipped sequences NOT present in SEQ)
-        // 6: padding (silent deletion from padded reference)
-        else if(cigar_op == 5 || cigar_op == 6){
-            //do nothing
-            refpos += length;
-        }
+                for (int j = 0; j < n && j < 5; j++) {
+                    if (mods[j].modified_base == 109 && pos <= (querypos+length)) {
+                        //modification
+                        if( mods[j].qual >= params->modThreshold*255 ){
+                            (*chrMethMap)[methrpos].methreadcnt++;
+                            //strand - is 1, strand + is 0
+                            (*chrMethMap)[methrpos].strand = (bam_is_rev(&aln) ? 1 : 0);
+                            (*chrMethMap)[methrpos].modReadVec.push_back(bam_get_qname(&aln));
+                            
+                //                    Variant *tmpVariant = new Variant(methrpos, 0, 60 );
+                            (*tmpReadResult).variantVec.emplace_back(methrpos, 0, 60);
+                //                    delete tmpVariant;
+                        }
+                        //non-modification (not include no detected)
+                        else if( mods[j].qual <= params->unModThreshold*255 ){ 
+                            (*chrMethMap)[methrpos].canonreadcnt++;
+                            (*chrMethMap)[methrpos].nonModReadVec.push_back(bam_get_qname(&aln));
+                            
+                //                    Variant *tmpVariant = new Variant(methrpos, 1, 60 );
+                            (*tmpReadResult).variantVec.emplace_back(methrpos, 1, 60  );
+                //                    delete tmpVariant;
+                        }
+                        else{
+                            (*chrMethMap)[methrpos].noisereadcnt++;
+                        }
+                      }
+                  }
+                  n = bam_next_basemod(&aln, m, mods, 5, &pos);
+             }
+          querypos += length;
+          refpos += length;
+      }
+      // 1: insertion to the reference
+      else if(cigar_op == 1){ 
+          while(n>0 && pos <= (querypos+length)){
+            n = bam_next_basemod(&aln, m, mods, 5, &pos);
+          }
+          querypos += length;
+          
+      }
+      // 2: deletion from the reference
+      else if(cigar_op == 2){
+          refpos += length;
+      }
+      // 3: skipped region from the reference
+      else if(cigar_op == 3){
+          refpos += length;
+      }
+      // 4: soft clipping (clipped sequences present in SEQ)
+      else if(cigar_op == 4){
+          while(n>0 && pos <= (querypos+length)){
+            n = bam_next_basemod(&aln, m, mods, 5, &pos);
+          }
+          querypos += length;
+      }
+      // 5: hard clipping (clipped sequences NOT present in SEQ)
+      // 6: padding (silent deletion from padded reference)
+      else if(cigar_op == 5 || cigar_op == 6){
+          //do nothing
+          refpos += length;
+      }
     }
     
-    refend = (align.is_reverse ? refpos : refpos + 1);
+    hts_base_mod_state_free(m);
+    
+    int refend = (bam_is_rev(&aln) ? refpos : refpos + 1);
 
-    if(align.is_reverse){
+    if(bam_is_rev(&aln)){
         (*readStartEndMap)[refstart+1].second += 1;
         (*readStartEndMap)[refend].second -= 1;
     }
@@ -311,7 +251,7 @@ void MethBamParser::parse_CIGAR(AlignmentMethExtend &align, std::vector<ReadVari
     
     if( (*tmpReadResult).variantVec.size() > 0 )
         readVariantVec.push_back((*tmpReadResult));
-    
+
     delete tmpReadResult;
 }
 
