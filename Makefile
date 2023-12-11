@@ -26,7 +26,7 @@ CXX	= g++
 AR       = ar
 AWK      = awk
 CFLAGS   = -g -Wall -O2 -pedantic -std=c99 -D_XOPEN_SOURCE=600
-CPPFLAGS  = -std=c++11 -g -Wall -O3
+CPPFLAGS  = -std=c++11 -g -Wall -O3 -fopenmp
 LDFLAGS  = 
 LIBS     =
 
