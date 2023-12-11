@@ -76,7 +76,7 @@ static const struct option longopts[] = {
 
 namespace opt
 {
-    static int numThreads = 1;
+    static int numThreads = 0;
     static int distance = 300000;
     static std::string snpFile="";
     static std::string svFile="";
