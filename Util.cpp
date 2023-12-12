@@ -4,6 +4,31 @@ void ReadVariant::sort(){
     std::sort(variantVec.begin(), variantVec.end(), less_than_key());
 }
 
+void mergeAllChrPhasingResult(const ChrPhasingResult& allChrPhasingResults, PhasingResult& mergedPhasingResult) {
+    for(const auto& chrPair : allChrPhasingResults){
+        const PhasingResult& singlePhasingResult = chrPair.second;
+        mergedPhasingResult.insert(singlePhasingResult.begin(), singlePhasingResult.end());
+    }
+}
+
+void setNumThreads(const int& defaultChrThreads,const int& availableThreads,  int& chrNumThreads, int& bamParserNumThreads){
+    chrNumThreads = defaultChrThreads;
+    bamParserNumThreads = 5;
+    if(availableThreads > 0){
+        if(availableThreads <= 24){
+            chrNumThreads = availableThreads;
+            bamParserNumThreads = 1;
+
+        }else if(availableThreads <= 48){
+            chrNumThreads = 12;
+            bamParserNumThreads = std::max(1, availableThreads / 12);
+        }else{
+            chrNumThreads = availableThreads / 4;
+            bamParserNumThreads = 4;
+        }
+    }
+}
+
 std::string getTargetString(std::string line, std::string start_sign, std::string end_sign){
     int start = line.find(start_sign) + 1;
     int end   = line.find(end_sign);
@@ -44,10 +69,3 @@ int homopolymerLength(int snp_pos, const std::string &ref_string){
 
     return homopolymer_length;
 }
-
-
-
-
-
-
-

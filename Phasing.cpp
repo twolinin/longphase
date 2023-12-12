@@ -18,7 +18,8 @@ static const char *CORRECT_USAGE_MESSAGE =
 "optional arguments:\n"
 "   --sv-file=NAME                         input SV vcf file.\n"
 "   --mod-file=NAME                        input modified vcf file.(produce by longphase modcall)\n"
-"   -t, --threads=Num                      number of thread. default:1\n"
+"   -t, --threads=Num                      number of thread. default:0\n"
+"                                          If set to 0, use all available threads.\n"
 "   -o, --out-prefix=NAME                  prefix of phasing result. default: result\n"
 "   --indels                               phase small indel. default: False\n"
 "   --dot                                  each contig/chromosome will generate dot file. \n\n"
@@ -75,7 +76,7 @@ static const struct option longopts[] = {
 
 namespace opt
 {
-    static int numThreads = 1;
+    static int numThreads = 0;
     static int distance = 300000;
     static std::string snpFile="";
     static std::string svFile="";
@@ -193,7 +194,7 @@ void PhasingOptions(int argc, char** argv)
         die = true;
     }  
     
-    if ( opt::numThreads < 1 ){
+    if ( opt::numThreads < 0 ){
         std::cerr << SUBPROGRAM " invalid threads. value: " 
                   << opt::numThreads 
                   << "\n please check -t, --threads=Num\n";

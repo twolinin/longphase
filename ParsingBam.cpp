@@ -901,7 +901,7 @@ BamParser::~BamParser(){
     delete currentMod;
 }
 
-void BamParser::direct_detect_alleles(int lastSNPPos, PhasingParameters params, std::vector<ReadVariant> &readVariantVec, const std::string &ref_string){
+void BamParser::direct_detect_alleles(int lastSNPPos, int &numThreads, PhasingParameters params, std::vector<ReadVariant> &readVariantVec, const std::string &ref_string){
     
     // record SNP start iter
     std::map<int, RefAlt>::iterator tmpFirstVariantIter = firstVariantIter;
@@ -916,7 +916,6 @@ void BamParser::direct_detect_alleles(int lastSNPPos, PhasingParameters params, 
         firstSVIter = tmpFirstSVIter;
         firstModIter = tmpFirstModIter;
               
-        int numThreads = params.numThreads;
         // init data structure and get core n
         htsThreadPool threadPool = {NULL, 0};
         // open bam file
