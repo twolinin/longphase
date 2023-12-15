@@ -106,21 +106,31 @@ void MethBamParser::detectMeth(std::string chrName, int chr_len, std::vector<Rea
 }
 
 void MethBamParser::parse_CIGAR(const bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<ReadVariant> &readVariantVec){
-    hts_base_mod_state *m = hts_base_mod_state_alloc();
-    if(bam_parse_basemod(&aln, m)<0){
+    // see detail https://github.com/samtools/htslib/blob/develop/sam_mods.c
+    
+    // hts_base_mod_state can parse MM, ML and MN tags
+    hts_base_mod_state *mod_state = hts_base_mod_state_alloc();
+    if( bam_parse_basemod( &aln, mod_state) < 0 ){
         std::cout<<bam_get_qname(&aln)<<"\tFail pase MM\\ML\n";
     }
     
-
- /*
-    while ((n = bam_next_basemod(&aln, m, mods, 5, &pos)) > 0) {
-        for (j = 0; j < n && j < 5; j++) {
-            if (mods[j].modified_base == 109) {
-                queryMethVec.emplace_back(pos, mods[j].qual);
+    /* 
+    // see detail https://github.com/samtools/htslib/issues/1550
+    
+    // Assuming there are a total of 10 types of modifications.
+    n_mods = 10;
+    hts_base_mod allmod[n_mods];
+    while ((n = bam_next_basemod(&aln, mod_state, allmod, n_mods, &pos)) > 0) {
+        // Report 'n'th mod at sequence position 'pos'
+        for (j = 0; j < n && j < n_mods; j++) {
+            //5mC  code:m ascii:109
+            //5hmC code:h ascii:104
+            //see sam tags pdf
+            if (allmod[j].modified_base == 109) {
+                queryMethVec.emplace_back(pos, allmod[j].qual);
             }
         }
-    }
- */
+    }*/
  
     ReadVariant *tmpReadResult = new ReadVariant();
     (*tmpReadResult).read_name = bam_get_qname(&aln);
@@ -137,12 +147,14 @@ void MethBamParser::parse_CIGAR(const bam_hdr_t &bamHdr,const bam1_t &aln, std::
     int querypos = 0;
     
     hts_base_mod mods[5];
-    int n,pos;
-    n = bam_next_basemod(&aln, m, mods, 5, &pos);
-    if(n <= 0){ 
-    hts_base_mod_state_free(m);
-    return;
+    int pos;
+    // bam_next_basemod can iterate over this cached state.
+    int n = bam_next_basemod(&aln, mod_state, mods, 5, &pos);
+    if( n <= 0 ){ 
+        hts_base_mod_state_free(mod_state);
+        return;
     }
+    
     //Parse CIGAR 
     for(int cigaridx = 0; cigaridx < int(aln.core.n_cigar) ; cigaridx++){
       uint32_t *cigar = bam_get_cigar(&aln);
@@ -181,26 +193,21 @@ void MethBamParser::parse_CIGAR(const bam_hdr_t &bamHdr,const bam1_t &aln, std::
                             //strand - is 1, strand + is 0
                             (*chrMethMap)[methrpos].strand = (bam_is_rev(&aln) ? 1 : 0);
                             (*chrMethMap)[methrpos].modReadVec.push_back(bam_get_qname(&aln));
-                            
-                //                    Variant *tmpVariant = new Variant(methrpos, 0, 60 );
                             (*tmpReadResult).variantVec.emplace_back(methrpos, 0, 60);
-                //                    delete tmpVariant;
+
                         }
                         //non-modification (not include no detected)
                         else if( mods[j].qual <= params->unModThreshold*255 ){ 
                             (*chrMethMap)[methrpos].canonreadcnt++;
                             (*chrMethMap)[methrpos].nonModReadVec.push_back(bam_get_qname(&aln));
-                            
-                //                    Variant *tmpVariant = new Variant(methrpos, 1, 60 );
                             (*tmpReadResult).variantVec.emplace_back(methrpos, 1, 60  );
-                //                    delete tmpVariant;
                         }
                         else{
                             (*chrMethMap)[methrpos].noisereadcnt++;
                         }
                       }
                   }
-                  n = bam_next_basemod(&aln, m, mods, 5, &pos);
+                  n = bam_next_basemod(&aln, mod_state, mods, 5, &pos);
              }
           querypos += length;
           refpos += length;
@@ -208,7 +215,7 @@ void MethBamParser::parse_CIGAR(const bam_hdr_t &bamHdr,const bam1_t &aln, std::
       // 1: insertion to the reference
       else if(cigar_op == 1){ 
           while(n>0 && pos <= (querypos+length)){
-            n = bam_next_basemod(&aln, m, mods, 5, &pos);
+            n = bam_next_basemod(&aln, mod_state, mods, 5, &pos);
           }
           querypos += length;
           
@@ -224,7 +231,7 @@ void MethBamParser::parse_CIGAR(const bam_hdr_t &bamHdr,const bam1_t &aln, std::
       // 4: soft clipping (clipped sequences present in SEQ)
       else if(cigar_op == 4){
           while(n>0 && pos <= (querypos+length)){
-            n = bam_next_basemod(&aln, m, mods, 5, &pos);
+            n = bam_next_basemod(&aln, mod_state, mods, 5, &pos);
           }
           querypos += length;
       }
@@ -236,7 +243,7 @@ void MethBamParser::parse_CIGAR(const bam_hdr_t &bamHdr,const bam1_t &aln, std::
       }
     }
     
-    hts_base_mod_state_free(m);
+    hts_base_mod_state_free(mod_state);
     
     int refend = (bam_is_rev(&aln) ? refpos : refpos + 1);
 
