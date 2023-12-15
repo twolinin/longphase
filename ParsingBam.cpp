@@ -326,13 +326,13 @@ std::vector<std::string> SnpParser::getChrVec(){
     return chrName;
 }
 
-bool SnpParser::findChromosome(std::string chrName){
+/*bool SnpParser::findChromosome(std::string chrName){
     std::map<std::string, std::map< int, RefAlt > >::iterator chrVariantIter = chrVariant->find(chrName);
     // this chromosome not exist in this file. 
     if(chrVariantIter == chrVariant->end())
         return false;
     return true;
-}
+}*/
 
 int SnpParser::getLastSNP(std::string chrName){
     std::map<std::string, std::map< int, RefAlt > >::iterator chrVariantIter = chrVariant->find(chrName);
@@ -528,6 +528,7 @@ void SnpParser::filterSNP(std::string chr, std::vector<ReadVariant> &readVariant
     std::map<int, std::map<int, std::map<int, bool> > > posAlleleStrand;
     std::map< int, bool > methylation;
     
+    /*
     // iter all variant, record the strand contained in each SNP
     for( auto readSNPVecIter : readVariantVec ){
         // tag allele on forward or reverse strand
@@ -535,6 +536,7 @@ void SnpParser::filterSNP(std::string chr, std::vector<ReadVariant> &readVariant
             posAlleleStrand[variantIter.position][variantIter.allele][readSNPVecIter.is_reverse] = true;
         }
     }
+    
     // iter all SNP, both alleles that require SNP need to appear in the two strand
     for(auto pos: posAlleleStrand){
         // this position contain two allele, REF allele appear in the two strand, ALT allele appear in the two strand
@@ -545,6 +547,7 @@ void SnpParser::filterSNP(std::string chr, std::vector<ReadVariant> &readVariant
             //methylation[pos.first] = true;
         }
     }
+    */
 
     // Filter SNPs that are not easy to phasing due to homopolymer
     // get variant list
@@ -575,7 +578,6 @@ void SnpParser::filterSNP(std::string chr, std::vector<ReadVariant> &readVariant
         }
         
     }
-    
     
     // iter all reads
     for( std::vector<ReadVariant>::iterator readSNPVecIter = readVariantVec.begin() ; readSNPVecIter != readVariantVec.end() ; readSNPVecIter++ ){
@@ -995,9 +997,7 @@ void BamParser::get_snp(const  bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<
 
     // position relative to read
     int query_pos = 0;
-//    int prev_query_pos = 0;
     // translation char* to string;
-//    std::string qseq = align.qseq;
 
     // set variant start for current alignment
     std::map<int, RefAlt>::iterator currentVariantIter = firstVariantIter;
@@ -1095,7 +1095,11 @@ void BamParser::get_snp(const  bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<
                 //if( refAlleleLen == 1 && altAlleleLen != 1 && align.op[i+1] == 1 && i+1 < align.cigar_len){
                 if( refAlleleLen == 1 && altAlleleLen != 1 && i+1 < aln_core_n_cigar){
                     
-//                    std::string prevIns = ( align.op[i-1] == 1 ? qseq.substr(prev_query_pos, align.ol[i-1]) : "" );
+                    // currently, qseq conversion is not performed. Below is the old method for obtaining insertion sequence.
+                    
+                    // uint8_t *qstring = bam_get_seq(aln); 
+                    // qseq[i] = seq_nt16_str[bam_seqi(qstring,i)]; 
+                    // std::string prevIns = ( align.op[i-1] == 1 ? qseq.substr(prev_query_pos, align.ol[i-1]) : "" );
 
                     if ( ref_pos + length - 1 == (*currentVariantIter).first && bam_cigar_op(cigar[i+1]) == 1 ) {
                         allele = 1 ;
@@ -1129,13 +1133,12 @@ void BamParser::get_snp(const  bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<
                 }
                 currentVariantIter++;
             }
-//            prev_query_pos = query_pos;
+            
             query_pos += length;
             ref_pos += length;
         }
         // 1: insertion to the reference
         else if( cigar_op == 1 ){
-//            prev_query_pos = query_pos;
             query_pos += length;
         }
         // 2: deletion from the reference
@@ -1179,9 +1182,9 @@ void BamParser::get_snp(const  bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<
                         
                         // the read deletion contain VCF's deletion
                         if( refAlleleLen != 1 && altAlleleLen == 1){
-//                            std::string delSeq = ref_string.substr(ref_pos - 1, align.ol[i] + 1);
-//                            std::string refSeq = (*currentVariantIter).second.Ref;
-//                            std::string altSeq = (*currentVariantIter).second.Alt;
+                            //std::string delSeq = ref_string.substr(ref_pos - 1, align.ol[i] + 1);
+                            //std::string refSeq = (*currentVariantIter).second.Ref;
+                            //std::string altSeq = (*currentVariantIter).second.Alt;
 
                             allele = 1;
                             // using this quality to identify indel
@@ -1211,7 +1214,6 @@ void BamParser::get_snp(const  bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<
         }
         // 4: soft clipping (clipped sequences present in SEQ)
         else if( cigar_op == 4 ){
-//            prev_query_pos = query_pos;
             query_pos += length;
         }
         // 5: hard clipping (clipped sequences NOT present in SEQ)

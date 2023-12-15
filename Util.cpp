@@ -12,20 +12,26 @@ void mergeAllChrPhasingResult(const ChrPhasingResult& allChrPhasingResults, Phas
 }
 
 void setNumThreads(const int& defaultChrThreads,const int& availableThreads,  int& chrNumThreads, int& bamParserNumThreads){
-    chrNumThreads = defaultChrThreads;
-    bamParserNumThreads = 5;
-    if(availableThreads > 0){
-        if(availableThreads <= 24){
-            chrNumThreads = availableThreads;
-            bamParserNumThreads = 1;
-
-        }else if(availableThreads <= 48){
-            chrNumThreads = 12;
-            bamParserNumThreads = std::max(1, availableThreads / 12);
-        }else{
-            chrNumThreads = availableThreads / 4;
-            bamParserNumThreads = 4;
-        }
+    if(availableThreads == 0){
+        // The default thread value is 0, indicating that each chromosome concurrently utilizes 
+        // a single thread for computation. Due to the limited multithreading acceleration space 
+        // in htslib and an average utilization of no more than 5 threads per chromosome, the 
+        // default value is set to 5.
+        chrNumThreads = defaultChrThreads;
+        bamParserNumThreads = 5;
+    }
+    else if( defaultChrThreads > availableThreads){
+        // Due to the number of available threads being less than the number of chromosomes, 
+        // processing is performed on a subset of chromosomes equal to the availableThreads count, 
+        // with a limitation on the number of threads for reading the BAM file for each chromosome.
+        chrNumThreads = availableThreads;
+        bamParserNumThreads = 1;
+    }
+    else{
+        // If the number of available threads exceeds the count of chromosomes, the surplus 
+        // threads will be utilized to accelerate the speed of htslib in parsing BAM files.
+        chrNumThreads = defaultChrThreads;
+        bamParserNumThreads = std::max(1,availableThreads/defaultChrThreads);
     }
 }
 

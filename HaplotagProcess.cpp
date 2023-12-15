@@ -26,38 +26,6 @@ void HaplotagProcess::compressParser(std::string &variantFile){
         std::cerr<< "Fail to open vcf: " << variantFile << "\n";
     }
     else{  
-        /*char buffer[1048576]; // 1M
-        char* offset = buffer;
-            
-        while(true) {
-            int len = sizeof(buffer)-(offset-buffer);
-            if (len == 0){
-                std::cerr<<"Buffer to small for input line lengths\n";
-                exit(EXIT_FAILURE);
-            }
-
-            len = gzread(file, offset, len);
-
-            if (len == 0) break;    
-            if (len <  0){ 
-                int err;
-                fprintf (stderr, "Error: %s.\n", gzerror(file, &err));
-                exit(EXIT_FAILURE);
-            }
-
-            char* cur = buffer;
-            char* end = offset+len;
-
-            for (char* eol; (cur<end) && (eol = std::find(cur, end, '\n')) < end; cur = eol + 1)
-            {
-                std::string input = std::string(cur, eol);
-                parserProcess(input);
-            }
-            // any trailing data in [eol, end) now is a partial line
-            offset = std::copy(cur, end, buffer);
-        }
-        gzclose (file);*/
-        
         int buffer_size = 1048576; // 1M
         char* buffer = (char*) malloc(buffer_size);
         if(!buffer){
@@ -362,19 +330,6 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
 
         std::map<int, RefAlt>::reverse_iterator last = currentVariants.rbegin();
 
-        //int chunkSize = chrLength[chr]/params.numThreads + params.numThreads;
-        //char *bamList[params.numThreads];
-        //for(int i=0;i<params.numThreads;i++){
-        //    std::string tmp = chr + ":" + std::to_string(i*chunkSize+1) + "-" + std::to_string((i+1)*chunkSize);
-        //    bamList[i] = new char[tmp.length()+1];
-        //    strcpy(bamList[i], tmp.c_str());
-        //}
-        //hts_itr_multi_t *iter;
-        //if( (iter = sam_itr_regarray(idx, bamHdr, bamList, params.numThreads)) == 0){
-        //    std::cerr<<"Warning: Cannot open iterator for " << chr << " for bam file\n";
-        //    continue;
-        //}
-
         std::string range = chr + ":1-" + std::to_string(chrLength[chr]);
         hts_itr_t* iter = sam_itr_querys(idx, bamHdr, range.c_str());
 
@@ -475,14 +430,8 @@ int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, 
     int ref_pos = aln.core.pos;
     // position relative to read
     int query_pos = 0;
-    // translation char* to string;
-//    std::string qseq = align.qseq;
-    // translation char* to string;
-
     // set variant start for current alignment
     std::map<int, RefAlt>::iterator currentVariantIter = firstVariantIter;
-
-    //std::map<int, RefAlt>::reverse_iterator last = currentVariants.rbegin();
 
     // reading cigar to detect snp on this read
     int aln_core_n_cigar = int(aln.core.n_cigar);
