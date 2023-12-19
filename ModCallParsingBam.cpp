@@ -356,7 +356,7 @@ void MethBamParser::writeResultVCF( std::string chrName, std::map<std::string, s
                     break;
                 }
                 std::string ref = chrString[chrName].substr((*posinfoIter).first,1);
-                eachpos = chrName + "\t" + std::to_string((*posinfoIter).first + 1) + "\t" + "." + "\t" + ref + "\t" + "." + "\t" + "." + "\t" + "." + "\t" + strandinfo + infostr + "\t" + "GT:MD:UD:DP" + "\t" + samplestr + "\n";
+                eachpos = chrName + "\t" + std::to_string((*posinfoIter).first + 1) + "\t" + "." + "\t" + ref + "\t" + "N" + "\t" + "." + "\t" + "." + "\t" + strandinfo + infostr + "\t" + "GT:MD:UD:DP" + "\t" + samplestr + "\n";
                 ModResultVcf<<eachpos;
             }
         }
