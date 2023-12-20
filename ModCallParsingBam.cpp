@@ -296,25 +296,44 @@ void MethBamParser::writeResultVCF( std::string chrName, std::map<std::string, s
             std::string eachpos;
             std::string samplestr;
             std::string strandinfo;
-            
-            int confidentModCount = 0;
-            int confidentnonModCount = 0;
+            std::string ref;
             
             auto passPosIter =  passPosition.find((*posinfoIter).first);
             auto prepassPosIter =  passPosition.find((*posinfoIter).first - 1);
             auto nextpassPosIter =  passPosition.find((*posinfoIter).first + 1);
             
-            if( passPosIter ==  passPosition.end() ){
+            // prevent variant coordinates from exceeding the reference.
+            if( int( chrString[chrName].length() ) < (*posinfoIter).first ){
                 continue;
             }
             
-            if((*posinfoIter).second.strand == -1){
+            // prevent abnormal REF allele.
+            ref = chrString[chrName].substr((*posinfoIter).first,1);
+            if( ref != "A" && ref != "T" && ref != "C" && ref != "G" && 
+                ref != "a" && ref != "t" && ref != "c" && ref != "g"  ){
+                continue;
+            }
+            
+            // set variant strand
+            if( (*posinfoIter).second.strand == 1 ){
+                strandinfo = "RS=N;";
+            }
+            else if( (*posinfoIter).second.strand == 0 ){
+                strandinfo = "RS=P;";
+            }
+            else{
                 continue;
             }
             
             //Output contains only consecutive methylation position (CpG)
-            if( prepassPosIter == passPosition.end() && nextpassPosIter == passPosition.end() ){
-                //MethPosVec.push_back(std::make_pair((*posinfoIter).first,(*posinfoIter).second));
+            if( (prepassPosIter == passPosition.end() && nextpassPosIter == passPosition.end()) || passPosIter ==  passPosition.end() ){
+                if( params->outputAllMod ){
+                    int nonmethcnt = (*posinfoIter).second.canonreadcnt;
+                    samplestr = (*posinfoIter).second.heterstatus + ":" + std::to_string((*posinfoIter).second.methreadcnt) + ":" + std::to_string(nonmethcnt) + ":" + std::to_string((*posinfoIter).second.depth);
+
+                    eachpos = chrName + "\t" + std::to_string((*posinfoIter).first + 1) + "\t" + "." + "\t" + ref + "\t" + "N" + "\t" + "." + "\t" + "." + "\t" + strandinfo + infostr + "\t" + "GT:MD:UD:DP" + "\t" + samplestr + "\n";
+                    ModResultVcf<<eachpos;
+                }         
                 continue;
             }
             
@@ -322,7 +341,6 @@ void MethBamParser::writeResultVCF( std::string chrName, std::map<std::string, s
             if((*posinfoIter).second.modReadVec.size() > 0 ){
                 infostr += "MR=";
                 for(auto readName : (*posinfoIter).second.modReadVec ){
-                    confidentModCount++;
                     infostr += readName + ",";
                 }
                 infostr.back() = ';';
@@ -332,33 +350,19 @@ void MethBamParser::writeResultVCF( std::string chrName, std::map<std::string, s
             if((*posinfoIter).second.nonModReadVec.size() > 0 ){
                 infostr += "NR=";
                 for(auto readName : (*posinfoIter).second.nonModReadVec ){
-                    confidentnonModCount++;
                     infostr += readName + ",";
                 }
                 infostr.back() = ';';
             }
-            
-            if( confidentModCount == 0 || confidentnonModCount == 0 ){
-                continue;
-            }
-            
-            if((*posinfoIter).second.strand==1){
-                strandinfo = "RS=N;";
-            }
-            else if((*posinfoIter).second.strand==0){
-                strandinfo = "RS=P;";
-            }
-            
+
             if((*posinfoIter).second.heterstatus == "0/1"){
                 int nonmethcnt = (*posinfoIter).second.canonreadcnt;
                 samplestr = (*posinfoIter).second.heterstatus + ":" + std::to_string((*posinfoIter).second.methreadcnt) + ":" + std::to_string(nonmethcnt) + ":" + std::to_string((*posinfoIter).second.depth);
-                if( int( chrString[chrName].length() ) < (*posinfoIter).first ){
-                    break;
-                }
-                std::string ref = chrString[chrName].substr((*posinfoIter).first,1);
-                eachpos = chrName + "\t" + std::to_string((*posinfoIter).first + 1) + "\t" + "." + "\t" + ref + "\t" + "." + "\t" + "." + "\t" + "." + "\t" + strandinfo + infostr + "\t" + "GT:MD:UD:DP" + "\t" + samplestr + "\n";
+
+                eachpos = chrName + "\t" + std::to_string((*posinfoIter).first + 1) + "\t" + "." + "\t" + ref + "\t" + "N" + "\t" + "." + "\t" + "PASS" + "\t" + strandinfo + infostr + "\t" + "GT:MD:UD:DP" + "\t" + samplestr + "\n";
                 ModResultVcf<<eachpos;
             }
+
         }
     }
 }
