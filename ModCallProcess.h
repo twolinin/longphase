@@ -18,6 +18,8 @@ struct ModCallParameters
     
     std::string version;
     std::string command;
+    
+    bool outputAllMod;
 };
 
 class ModCallProcess
