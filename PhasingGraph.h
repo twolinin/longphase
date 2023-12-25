@@ -22,8 +22,8 @@ class SubEdge{
         std::map<int, int> *refQuality;
         std::map<int, int> *altQuality;
         // < next position, read count >
-        std::map<int, int> *refReadCount;
-        std::map<int, int> *altReadCount;
+        std::map<int, float> *refReadCount;
+        std::map<int, float> *altReadCount;
 
     public:
         
@@ -33,9 +33,9 @@ class SubEdge{
         void destroy();
         
         void addSubEdge(int currentQuality, Variant connectNode, std::string readName);
-        std::pair<int,int> BestPair(int targetPos);
-        int getRefReadCount(int targetPos);
-        int getAltReadCount(int targetPos);        
+        std::pair<float,float> BestPair(int targetPos);
+        float getRefReadCount(int targetPos);
+        float getAltReadCount(int targetPos);        
         
         std::vector<std::string> showEdge(std::string message);
         std::vector<std::pair<int,int>> getConnectPos();

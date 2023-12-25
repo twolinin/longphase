@@ -7,8 +7,8 @@ SubEdge::SubEdge():readCount(0){
     altRead = new std::map<int, std::vector<std::string> >;
     refQuality = new std::map<int, int>;
     altQuality = new std::map<int, int>;
-    refReadCount = new std::map<int, int>;
-    altReadCount = new std::map<int, int>;
+    refReadCount = new std::map<int, float>;
+    altReadCount = new std::map<int, float>;
 }
 
 SubEdge::~SubEdge(){ 
@@ -36,7 +36,12 @@ void SubEdge::addSubEdge(int currentQuality, Variant connectNode, std::string re
         else{
             (*refQuality)[connectNode.position] += currentQuality + connectNode.quality;
         }*/
-        (*refReadCount)[connectNode.position]++;
+	if ( currentQuality >= 12 && connectNode.quality >= 12 )
+            (*refReadCount)[connectNode.position]++;
+        else {
+            (*refReadCount)[connectNode.position] = (*refReadCount)[connectNode.position] + 0.1 ;
+        }
+	//(*refReadCount)[connectNode.position]++;
     }
     // target noded is ALT allele
     else if(connectNode.allele == 1 ){
@@ -50,25 +55,30 @@ void SubEdge::addSubEdge(int currentQuality, Variant connectNode, std::string re
         else{
             (*altQuality)[connectNode.position] += currentQuality + connectNode.quality;
         }*/
-        (*altReadCount)[connectNode.position]++;
+	if ( currentQuality >= 12 && connectNode.quality >= 12 )
+            (*altReadCount)[connectNode.position]++;
+        else {
+            (*altReadCount)[connectNode.position] = (*altReadCount)[connectNode.position] + 0.1 ;
+        }
+	//(*altReadCount)[connectNode.position]++;
     }
     readCount++;
 }
 
-std::pair<int,int> SubEdge::BestPair(int targetPos){
+std::pair<float,float> SubEdge::BestPair(int targetPos){
     return std::make_pair( getRefReadCount(targetPos), getAltReadCount(targetPos) );
 }
 
-int SubEdge::getRefReadCount(int targetPos){
-    std::map<int, int>::iterator posIter = refReadCount->find(targetPos);
+float SubEdge::getRefReadCount(int targetPos){
+    std::map<int, float>::iterator posIter = refReadCount->find(targetPos);
     if( posIter != refReadCount->end() ){
         return (*refReadCount)[targetPos];
     }
     return 0;
 }
 
-int SubEdge::getAltReadCount(int targetPos){
-    std::map<int, int>::iterator posIter = altReadCount->find(targetPos);
+float SubEdge::getAltReadCount(int targetPos){
+    std::map<int, float>::iterator posIter = altReadCount->find(targetPos);
     if( posIter != altReadCount->end() ){
         return (*altReadCount)[targetPos];
     }
@@ -77,10 +87,10 @@ int SubEdge::getAltReadCount(int targetPos){
 
 std::vector<std::string> SubEdge::showEdge(std::string message){
     std::vector<std::string> result;
-    for(std::map<int, int>::iterator edgeIter = refReadCount->begin() ; edgeIter != refReadCount->end() ; edgeIter++ ){
+    for(std::map<int, float>::iterator edgeIter = refReadCount->begin() ; edgeIter != refReadCount->end() ; edgeIter++ ){
         result.push_back(message +" -> ref_" + std::to_string((*edgeIter).first) + "[label=" + std::to_string((*edgeIter).second) + "];");
     }
-    for(std::map<int, int>::iterator edgeIter = altReadCount->begin() ; edgeIter != altReadCount->end() ; edgeIter++ ){
+    for(std::map<int, float>::iterator edgeIter = altReadCount->begin() ; edgeIter != altReadCount->end() ; edgeIter++ ){
         result.push_back(message +" -> alt_" + std::to_string((*edgeIter).first) + "[label=" + std::to_string((*edgeIter).second) + "];");
     }
     return result;
@@ -88,10 +98,10 @@ std::vector<std::string> SubEdge::showEdge(std::string message){
 
 std::vector<std::pair<int,int>> SubEdge::getConnectPos(){
     std::vector<std::pair<int,int>> result;
-    for(std::map<int, int >::iterator edgeIter = refReadCount->begin() ; edgeIter != refReadCount->end() ; edgeIter++ ){
+    for(std::map<int, float >::iterator edgeIter = refReadCount->begin() ; edgeIter != refReadCount->end() ; edgeIter++ ){
         result.push_back( std::make_pair( (*edgeIter).first, 0 ) );
     }
-    for(std::map<int, int >::iterator edgeIter = altReadCount->begin() ; edgeIter != altReadCount->end() ; edgeIter++ ){
+    for(std::map<int, float >::iterator edgeIter = altReadCount->begin() ; edgeIter != altReadCount->end() ; edgeIter++ ){
         result.push_back( std::make_pair( (*edgeIter).first, 1 ) );
     }
     return result;
@@ -145,13 +155,13 @@ VariantEdge::VariantEdge(int inCurrPos){
 
 //VariantEdge
 std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool isONT, double readsThreshold, bool debug){
-    std::pair<int,int> refBestPair  = ref->BestPair(targetPos);
-    std::pair<int,int> altBestPair  = alt->BestPair(targetPos);
+    std::pair<float,float> refBestPair  = ref->BestPair(targetPos);
+    std::pair<float,float> altBestPair  = alt->BestPair(targetPos);
     // get the weight of each pair
-    int rr = refBestPair.first;
-    int ra = refBestPair.second;
-    int ar = altBestPair.first;
-    int aa = altBestPair.second;
+    float rr = refBestPair.first;
+    float ra = refBestPair.second;
+    float ar = altBestPair.first;
+    float aa = altBestPair.second;
     // initialize the edge connection
     // -1 : not connect
     int refAllele = -1;
