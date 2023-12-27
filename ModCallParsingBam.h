@@ -30,15 +30,24 @@ struct MethPosInfo{
     std::vector<std::string> nonModReadVec;
 };
 
+// The ReferenceChromosome struct is used to store information about a reference fasta.
+struct ReferenceChromosome {
+    std::string name;      
+    std::string sequence;  
+    int length;            
+
+    ReferenceChromosome(const std::string& name, const std::string& sequence, int length)
+        : name(name), sequence(sequence), length(length) {}
+};
+
 //FastaParser: to get each chromosome name and lastpos(for chunksize)
 class MethFastaParser{
     private:
         // file name
         std::string fastaFile ;
-        std::vector<std::string> chrName;
-        
+
     public:
-        MethFastaParser(std::string fastaFile, std::map<std::string, std::string> &chrString);
+        MethFastaParser(std::string fastaFile, std::vector<ReferenceChromosome> &chrInfo);
         ~MethFastaParser();
 };
 
@@ -78,12 +87,14 @@ class MethBamParser{
     public:
         MethBamParser(ModCallParameters &params, std::string &refString);
         ~MethBamParser();
-        void detectMeth(std::string chrName, int chr_len, std::vector<ReadVariant> &readVariantVec);
-        void writeResultVCF(std::string chrName, std::map<std::string, std::string> &chrString, bool isFirstChr, std::map<int,int> &passPosition);
+        void detectMeth(std::string chrName, int chr_len, int numThreads, std::vector<ReadVariant> &readVariantVec);
+        void exportResult(std::string chrName, std::string chrSquence, int chrLen , std::map<int,int> &passPosition, std::ostringstream &methResult);
         void judgeMethGenotype(std::string chrName, std::vector<ReadVariant> &readVariantVec, std::vector<ReadVariant> &fReadVariantVec, std::vector<ReadVariant> &rReadVariantVec );
         void calculateDepth();
         
 };
+
+void writeResultVCF(ModCallParameters &params, std::vector<ReferenceChromosome> &chrInfo, std::map<std::string,std::ostringstream> &chrResult);
 
 class MethylationGraph{
     private:

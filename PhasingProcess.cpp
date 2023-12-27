@@ -45,7 +45,7 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
     
     // set chrNumThreads and bamParserNumThreads based on parameters
     int chrNumThreads,bamParserNumThreads;
-    setNumThreads(chrName.size(), params.numThreads, chrNumThreads, bamParserNumThreads);
+    setPhasingNumThreads(chrName.size(), params.numThreads, chrNumThreads, bamParserNumThreads);
     begin = time(NULL);
     
     // loop all chromosome
