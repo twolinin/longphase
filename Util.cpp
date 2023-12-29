@@ -11,7 +11,7 @@ void mergeAllChrPhasingResult(const ChrPhasingResult& allChrPhasingResults, Phas
     }
 }
 
-void setNumThreads(const int& defaultChrThreads,const int& availableThreads,  int& chrNumThreads, int& bamParserNumThreads){
+void setPhasingNumThreads(const int& defaultChrThreads,const int& availableThreads,  int& chrNumThreads, int& bamParserNumThreads){
     if(availableThreads == 0){
         // The default thread value is 0, indicating that each chromosome concurrently utilizes 
         // a single thread for computation. Due to the limited multithreading acceleration space 
@@ -33,6 +33,20 @@ void setNumThreads(const int& defaultChrThreads,const int& availableThreads,  in
         chrNumThreads = defaultChrThreads;
         bamParserNumThreads = std::max(1,availableThreads/defaultChrThreads);
     }
+}
+
+void setModcallNumThreads(const int& availableThreads,  int& chrNumThreads, int& bamParserNumThreads){
+    // Using 4 threads in htslib tends to yield higher utilization.
+    // Allocate threads to the BAM parser, but do not exceed the maximum number of threads.
+    // This ensures that, even when more threads are available, the BAM parser does not use too many,
+    // thereby leaving resources available for other tasks.
+    const int maxBamParserThreads = 4;
+    bamParserNumThreads = std::min(maxBamParserThreads, availableThreads);
+
+    // Allocate at least one thread to the chromosome processing task.
+    // If there are enough available threads, the remaining threads will be allocated to this task.
+    // This allocation maintains a balance in the total number of threads used.
+    chrNumThreads = std::max(1, availableThreads / bamParserNumThreads);
 }
 
 std::string getTargetString(std::string line, std::string start_sign, std::string end_sign){

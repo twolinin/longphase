@@ -38,14 +38,18 @@ void mergeAllChrPhasingResult(const ChrPhasingResult& allChrPhasingResults, Phas
  * @param availableThreads  Total threads available for processing
  * @param chrnumThreads Set to the number of threads for chromosome processing.
  * @param bamParsernumThreads Set to the number of threads for BAM parsing.
- *
- * Depending on availableThreads, this function adjusts chrnumThreads and bamParsernumThreads 
- * for optimized parallel processing. The thread allocation strategy changes based on 
- * whether availableThreads is less than or equal to 24, between 25 and 48, or greater than 48.
- * This function's thread allocation strategy is designed considering the typical count 
- * of human chromosomes.
  */
-void setNumThreads(const int& defaultChrThreads,const int& availableThreads,  int& chrnumThreads, int& bamParsernumThreads);
+void setPhasingNumThreads(const int& defaultChrThreads,const int& availableThreads,  int& chrnumThreads, int& bamParsernumThreads);
+
+/**
+ * Configures thread counts for chromosome processing and BAM parsing.
+ *
+ * @param availableThreads  Total threads available for processing
+ * @param chrnumThreads Set to the number of threads for chromosome processing.
+ * @param bamParsernumThreads Set to the number of threads for BAM parsing.
+ */
+void setModcallNumThreads(const int& availableThreads,  int& chrNumThreads, int& bamParserNumThreads);
+
 
 // use for parsing
 struct Variant{
