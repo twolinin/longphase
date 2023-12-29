@@ -36,6 +36,7 @@ Thumbs.db
  
 longphase 
 htslib/*
+jemalloc/*
 configure
 config.*
 autom4te.cache/
