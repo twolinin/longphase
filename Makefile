@@ -14,7 +14,7 @@ PROGRAMS = longphase
 all: subprojects
 
 subprojects:
-	$(MAKE)	-C	./jemalloc -ld
+	$(MAKE)	-C	./jemalloc
 	$(MAKE)	-C	./htslib
 	$(MAKE)	$(PROGRAMS)
 
