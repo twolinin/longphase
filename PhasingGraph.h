@@ -83,35 +83,19 @@ class VairiantGraph{
         // By default, a Map in C++ is sorted in increasing order based on its key.
         // position, edge
         std::map<int,VariantEdge*> *edgeList;
-        // record all variant position, include SNP and SV 
-        // position, quality
-        std::map<int,ReadBaseMap*> *nodeInfo;
+        // Each position will record the included reads and their corresponding base qualities.
+        // position, < read name, quality>
+        std::map<int,ReadBaseMap*> *totalVariantInfo;
         // position, type < 0=SNP 1=SV 2=MOD 3=INDEL >
         std::map<int,int> *variantType;
-        // phasing result, store final path
-        std::map<PosAllele,PosAllele> *bestEdgeConnect;
-        // the smallest position in the block will be used as the representative of the block
-        std::map<int,int> *posAppear;
-        std::map<int,int> *blockStart;
-        
-        // modifications
-        // position, quality
-        std::map<int,ReadBaseMap*> *forwardModNode;
-        std::map<int,ReadBaseMap*> *reverseModNode;
         
         // phasing result     
         // PosAllele , block_start    
         std::map<PosAllele,int> *bkResult;
         // record each position haplotype
         std::map<PosAllele,int> *subNodeHP;
-        // store each block and containing positions
-        std::map<int,std::vector<int> >  *blockVec;
         // store phased read and read's haplotype
         std::map<std::string,int> *readHpMap;
-
-        void modBridging();
-        
-        int subBridge(int breakPos, int nextPos, std::map<int,ReadBaseMap*> &modNode);
 
         // produce PS tag and determine phased GT tag
         void storeResultPath();
@@ -126,7 +110,7 @@ class VairiantGraph{
         VairiantGraph(std::string &ref, PhasingParameters &params);
         ~VairiantGraph();
     
-        void addEdge(std::vector<ReadVariant> &readVariant);
+        void addEdge(std::vector<ReadVariant> &in_readVariant);
         
         void phasingProcess();
         void writingDotFile(std::string dotPrefix);
