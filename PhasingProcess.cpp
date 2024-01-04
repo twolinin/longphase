@@ -4,6 +4,29 @@
 
 PhasingProcess::PhasingProcess(PhasingParameters params)
 {
+    std::cerr<< "LongPhase Ver " << params.version << "\n";
+    std::cerr<< "\n";
+    std::cerr<< "--- File Parameter --- \n";
+    std::cerr<< "SNP File      : " << params.snpFile      << "\n";
+    std::cerr<< "SV  File      : " << params.svFile       << "\n";
+    std::cerr<< "MOD File      : " << params.modFile      << "\n";
+    std::cerr<< "REF File      : " << params.fastaFile    << "\n";
+    std::cerr<< "Output Prefix : " << params.resultPrefix << "\n";
+    std::cerr<< "Generate Dot  : " << ( params.generateDot ? "True" : "False" ) << "\n";
+    std::cerr<< "\n";
+    std::cerr<< "--- Phasing Parameter --- \n";
+    std::cerr<< "Seq Platform       : " << ( params.isONT ? "ONT" : "PB" ) << "\n";
+    std::cerr<< "Phase Indel        : " << ( params.phaseIndel ? "True" : "False" )  << "\n";
+    std::cerr<< "Distance Threshold : " << params.distance        << "\n";
+    std::cerr<< "Connect Adjacent   : " << params.connectAdjacent << "\n";
+    std::cerr<< "Edge Threshold     : " << params.edgeThreshold   << "\n";
+    std::cerr<< "Mapping Quality    : " << params.mappingQuality  << "\n";
+    std::cerr<< "Variant Confidence : " << params.snpConfidence   << "\n";
+    std::cerr<< "ReadTag Confidence : " << params.readConfidence  << "\n";
+    std::cerr<< "\n";
+    
+    std::time_t processBegin = time(NULL);
+    
     // load SNP vcf file
     std::time_t begin = time(NULL);
     std::cerr<< "parsing VCF ... ";
@@ -134,6 +157,8 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
         modFile.writeResult(mergedPhasingResult);
         std::cerr<< difftime(time(NULL), begin) << "s\n";
     }
+
+    std::cerr<< "\ntotal process: " << difftime(time(NULL), processBegin) << "s\n";
 
     return;
 };
