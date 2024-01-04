@@ -13,6 +13,12 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
     std::cerr<< "REF File      : " << params.fastaFile    << "\n";
     std::cerr<< "Output Prefix : " << params.resultPrefix << "\n";
     std::cerr<< "Generate Dot  : " << ( params.generateDot ? "True" : "False" ) << "\n";
+    std::cerr<< "BAM File      : ";
+    for( auto file : params.bamFile){
+        std::cerr<< file <<" " ;   
+    }
+    std::cerr << "\n";
+    
     std::cerr<< "\n";
     std::cerr<< "--- Phasing Parameter --- \n";
     std::cerr<< "Seq Platform       : " << ( params.isONT ? "ONT" : "PB" ) << "\n";
