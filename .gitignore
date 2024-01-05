@@ -1,0 +1,42 @@
+# Compiled executable and object files
+*.exe
+*.o
+*.obj
+
+# Static and dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Intermediate files
+*.swo
+*.swp
+*.swn
+
+# Temporary files created during compilation
+*.tmp
+*.temp
+
+# IDE configuration files
+*.suo
+*.user
+*.userprefs
+*.pidb
+*.sdf
+*.opensdf
+*.un~ 
+
+# Build directories
+build/
+out/
+
+# Other unnecessary files
+.DS_Store
+Thumbs.db
+ 
+longphase 
+htslib/*
+jemalloc/*
+configure
+config.*
+autom4te.cache/

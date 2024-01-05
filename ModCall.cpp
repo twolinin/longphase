@@ -17,6 +17,7 @@ static const char *CORRECT_USAGE_MESSAGE =
 "optional arguments:\n"
 "      -o, --out-prefix=NAME         prefix of phasing result. default: modcall_result\n"
 "      -t, --threads=Num             number of thread. default:1\n"
+"      --all                         output all coordinates where modifications have been detected.\n"
 
 "phasing arguments:\n"
 "      -m, --modThreshold=[0~1]      value extracted from MM tag and ML tag. \n"
@@ -35,10 +36,11 @@ static const char *CORRECT_USAGE_MESSAGE =
 
 static const char* shortopts = "o:t:r:b:m:u:e:i:";
 
-enum { OPT_HELP = 1 };
+enum { OPT_HELP = 1, ALL_MOD };
 
 static const struct option longopts[] = { 
     { "help",              no_argument,        NULL, OPT_HELP }, 
+    { "all",               no_argument,        NULL, ALL_MOD },
     { "reference",         required_argument,  NULL, 'r' },
     { "out-prefix",        required_argument,  NULL, 'o' },
     { "threads",           required_argument,  NULL, 't' },
@@ -66,6 +68,8 @@ namespace opt
     static float connectConfidence = 0.9;
     
     static std::string command;
+    
+    bool outputAllMod = false;
 }
 
 void ModCallOptions(int argc, char** argv)
@@ -92,6 +96,7 @@ void ModCallOptions(int argc, char** argv)
             arg >> bamFile;
             opt::bamFileVec.push_back(bamFile); break;
         }
+        case ALL_MOD: opt::outputAllMod=true; break;
         case OPT_HELP:
             std::cout << CORRECT_USAGE_MESSAGE;
             exit(EXIT_SUCCESS);
@@ -175,6 +180,8 @@ int ModCallMain(int argc, char** argv, std::string in_version)
     
     ecParams.version=in_version;
     ecParams.command=opt::command;
+    
+    ecParams.outputAllMod=opt::outputAllMod;
     
     ModCallProcess processor(ecParams);
 

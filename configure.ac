@@ -1,6 +1,7 @@
 AC_INIT(longPhase,1.0)
 AC_CONFIG_HEADERS([config.h])
 
+AC_CONFIG_SUBDIRS([htslib jemalloc])
 m4_include([m4/hts_with_curses.m4])
 m4_include([m4/ax_with_htslib.m4])
 
@@ -15,4 +16,3 @@ fi
 
 AC_CONFIG_FILES([config.mk])
 AC_OUTPUT
-
