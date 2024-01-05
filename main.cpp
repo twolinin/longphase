@@ -6,7 +6,7 @@
 
 
 #define PROGRAM_BIN "main"
-#define VERSION "1.5.2"
+#define VERSION "1.6"
 
 static std::string version = VERSION;
 

@@ -326,13 +326,13 @@ std::vector<std::string> SnpParser::getChrVec(){
     return chrName;
 }
 
-bool SnpParser::findChromosome(std::string chrName){
+/*bool SnpParser::findChromosome(std::string chrName){
     std::map<std::string, std::map< int, RefAlt > >::iterator chrVariantIter = chrVariant->find(chrName);
     // this chromosome not exist in this file. 
     if(chrVariantIter == chrVariant->end())
         return false;
     return true;
-}
+}*/
 
 int SnpParser::getLastSNP(std::string chrName){
     std::map<std::string, std::map< int, RefAlt > >::iterator chrVariantIter = chrVariant->find(chrName);
@@ -528,6 +528,7 @@ void SnpParser::filterSNP(std::string chr, std::vector<ReadVariant> &readVariant
     std::map<int, std::map<int, std::map<int, bool> > > posAlleleStrand;
     std::map< int, bool > methylation;
     
+    /*
     // iter all variant, record the strand contained in each SNP
     for( auto readSNPVecIter : readVariantVec ){
         // tag allele on forward or reverse strand
@@ -535,6 +536,7 @@ void SnpParser::filterSNP(std::string chr, std::vector<ReadVariant> &readVariant
             posAlleleStrand[variantIter.position][variantIter.allele][readSNPVecIter.is_reverse] = true;
         }
     }
+    
     // iter all SNP, both alleles that require SNP need to appear in the two strand
     for(auto pos: posAlleleStrand){
         // this position contain two allele, REF allele appear in the two strand, ALT allele appear in the two strand
@@ -545,6 +547,7 @@ void SnpParser::filterSNP(std::string chr, std::vector<ReadVariant> &readVariant
             //methylation[pos.first] = true;
         }
     }
+    */
 
     // Filter SNPs that are not easy to phasing due to homopolymer
     // get variant list
@@ -575,7 +578,6 @@ void SnpParser::filterSNP(std::string chr, std::vector<ReadVariant> &readVariant
         }
         
     }
-    
     
     // iter all reads
     for( std::vector<ReadVariant>::iterator readSNPVecIter = readVariantVec.begin() ; readSNPVecIter != readVariantVec.end() ; readSNPVecIter++ ){
@@ -901,7 +903,7 @@ BamParser::~BamParser(){
     delete currentMod;
 }
 
-void BamParser::direct_detect_alleles(int lastSNPPos, PhasingParameters params, std::vector<ReadVariant> &readVariantVec, const std::string &ref_string){
+void BamParser::direct_detect_alleles(int lastSNPPos, int &numThreads, PhasingParameters params, std::vector<ReadVariant> &readVariantVec, const std::string &ref_string){
     
     // record SNP start iter
     std::map<int, RefAlt>::iterator tmpFirstVariantIter = firstVariantIter;
@@ -916,7 +918,6 @@ void BamParser::direct_detect_alleles(int lastSNPPos, PhasingParameters params, 
         firstSVIter = tmpFirstSVIter;
         firstModIter = tmpFirstModIter;
               
-        int numThreads = params.numThreads;
         // init data structure and get core n
         htsThreadPool threadPool = {NULL, 0};
         // open bam file
@@ -956,57 +957,11 @@ void BamParser::direct_detect_alleles(int lastSNPPos, PhasingParameters params, 
                  || (flag & 0x400) != 0  // duplicate 
                  // (flag & 0x800) != 0  // supplementary alignment
                                          // A chimeric alignment is represented as a set of linear alignments that do not have large overlaps.
-                 ){ 
-                std::string str = bamHdr->target_name[aln->core.tid];
+                 ){
                 continue;
             }
 
-            Alignment tmp;
-            
-            tmp.chr = bamHdr->target_name[aln->core.tid];
-            tmp.refStart = aln->core.pos;
-            tmp.qname = bam_get_qname(aln);
-            tmp.qlen = aln->core.l_qseq;
-            tmp.cigar_len = aln->core.n_cigar;
-            tmp.op = (int*)malloc(tmp.cigar_len*sizeof(int));
-            tmp.ol = (int*)malloc(tmp.cigar_len*sizeof(int));
-            tmp.is_reverse = bam_is_rev(aln);
-            
-            memset(tmp.op, 0, tmp.cigar_len);
-            memset(tmp.ol, 0, tmp.cigar_len);
-                    
-            // set string size
-            tmp.qseq = (char *)malloc(tmp.qlen+1);
-            memset(tmp.qseq, 0, tmp.qlen+1);
-            // set string size
-            tmp.quality = (char *)malloc(tmp.qlen+1);
-            memset(tmp.quality, 0, tmp.qlen+1);
-            
-            //quality string
-            uint8_t *qstring = bam_get_seq(aln); 
-            uint8_t *quality = bam_get_qual(aln);
-            
-            for(int i=0; i< tmp.qlen ; i++){
-                // gets nucleotide id and converts them into IUPAC id.
-                tmp.qseq[i] = seq_nt16_str[bam_seqi(qstring,i)]; 
-                // get base quality
-                tmp.quality[i] = quality[i];
-            }
-     
-            uint32_t *cigar = bam_get_cigar(aln);
-            // store cigar
-            for(unsigned int k =0 ; k < aln->core.n_cigar ; k++){
-                tmp.op[k] = bam_cigar_op(cigar[k]);
-                tmp.ol[k] = bam_cigar_oplen(cigar[k]);
-            }
-            std::string a= tmp.qseq;
-            
-            get_snp(tmp, readVariantVec, ref_string, params.isONT);
-            
-            free(tmp.quality);
-            free(tmp.qseq);
-            free(tmp.op);
-            free(tmp.ol);
+            get_snp(*bamHdr,*aln,readVariantVec, ref_string, params.isONT);
         }
         hts_idx_destroy(idx);
         bam_hdr_destroy(bamHdr);
@@ -1017,34 +972,32 @@ void BamParser::direct_detect_alleles(int lastSNPPos, PhasingParameters params, 
     
 }
 
-void BamParser::get_snp(const Alignment &align, std::vector<ReadVariant> &readVariantVec,const std::string &ref_string, bool isONT){
+void BamParser::get_snp(const  bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<ReadVariant> &readVariantVec,const std::string &ref_string, bool isONT){
 
     ReadVariant *tmpReadResult = new ReadVariant();
-    (*tmpReadResult).read_name = align.qname;
-    (*tmpReadResult).source_id = align.chr;
-    (*tmpReadResult).reference_start = align.refStart;
-    (*tmpReadResult).is_reverse = align.is_reverse;
+    (*tmpReadResult).read_name = bam_get_qname(&aln);
+    (*tmpReadResult).source_id = bamHdr.target_name[aln.core.tid];
+    (*tmpReadResult).reference_start = aln.core.pos;
+    (*tmpReadResult).is_reverse = bam_is_rev(&aln);
     
     // Skip variants that are to the left of this read
-    while( firstVariantIter != currentVariants->end() && (*firstVariantIter).first < align.refStart )
+    while( firstVariantIter != currentVariants->end() && (*firstVariantIter).first < aln.core.pos )
         firstVariantIter++;
     
     // Skip structure variants that are to the left of this read
-    while( firstSVIter != currentSV->end() && (*firstSVIter).first < align.refStart )
+    while( firstSVIter != currentSV->end() && (*firstSVIter).first < aln.core.pos )
         firstSVIter++;
     
     // Skip modify that are to the left of this read
-    while( firstModIter != currentMod->end() && (*firstModIter).first < align.refStart )
+    while( firstModIter != currentMod->end() && (*firstModIter).first < aln.core.pos )
         firstModIter++;
     
     // position relative to reference
-    int ref_pos = align.refStart;
+    int ref_pos = aln.core.pos;
 
     // position relative to read
     int query_pos = 0;
-    int prev_query_pos = 0;
     // translation char* to string;
-    std::string qseq = align.qseq;
 
     // set variant start for current alignment
     std::map<int, RefAlt>::iterator currentVariantIter = firstVariantIter;
@@ -1054,22 +1007,24 @@ void BamParser::get_snp(const Alignment &align, std::vector<ReadVariant> &readVa
      
     // set modify start for current alignment
     std::map<int, std::map<std::string ,RefAlt> >::iterator currentModIter = firstModIter;
-    
+
+    uint32_t *cigar = bam_get_cigar(&aln);
     // reading cigar to detect snp on this read
-    for(int i = 0; i < align.cigar_len ; i++ ){
-        int cigar_op = align.op[i];
-        int length   = align.ol[i];
+    int aln_core_n_cigar = aln.core.n_cigar;
+    for(int i = 0; i < aln_core_n_cigar ; i++ ){
+        int cigar_op = bam_cigar_op(cigar[i]);
+        int length   = bam_cigar_oplen(cigar[i]);
         
         // iterator next modify
         while( currentModIter != currentMod->end() && (*currentModIter).first < ref_pos ){
             // check this read contain modify
-            std::map<std::string ,RefAlt>::iterator readIter = (*currentModIter).second.find(align.qname);
+            std::map<std::string ,RefAlt>::iterator readIter = (*currentModIter).second.find(bam_get_qname(&aln));
             if( readIter != (*currentModIter).second.end() && (*currentModIter).first < (*currentVariantIter).first){
                 // check varaint strand in vcf file is same as bam file
-                if( (*readIter).second.is_reverse == align.is_reverse ){
+                if( (*readIter).second.is_reverse == bam_is_rev(&aln) ){
                     // -2 : forward strand
                     // -3 : reverse strand
-                    int strand = ( align.is_reverse ? -3 : -2);
+                    int strand = ( bam_is_rev(&aln) ? -3 : -2);
                     int allele = ((*readIter).second.is_modify ? 0 : 1) ;
                     Variant *tmpVariant = new Variant((*currentModIter).first, allele, strand );
                     // push mod into result vector
@@ -1083,7 +1038,7 @@ void BamParser::get_snp(const Alignment &align, std::vector<ReadVariant> &readVa
         // iterator next SV
         while( currentSVIter != currentSV->end() && (*currentSVIter).first < ref_pos ){
             if( (*currentSVIter).first < (*currentVariantIter).first ){
-                std::map<std::string ,bool>::iterator readIter = (*currentSV)[(*currentSVIter).first].find(align.qname);
+                std::map<std::string ,bool>::iterator readIter = (*currentSV)[(*currentSVIter).first].find(bam_get_qname(&aln));
                 // If this read not contain SV, it means this read is the same as reference genome.
                 // default this read the same as ref
                 int allele = 0; 
@@ -1119,7 +1074,7 @@ void BamParser::get_snp(const Alignment &align, std::vector<ReadVariant> &readVa
                 int offset = (*currentVariantIter).first - ref_pos;
                 int base_q = 0;
 
-                if( query_pos + offset + 1 > int(qseq.length()) ){
+                if( query_pos + offset + 1 > int(aln.core.l_qseq) ){
                     return;
                 }
 
@@ -1127,23 +1082,26 @@ void BamParser::get_snp(const Alignment &align, std::vector<ReadVariant> &readVa
                 
                 // SNP
                 if( refAlleleLen == 1 && altAlleleLen == 1){
-                    std::string base = qseq.substr(query_pos + offset, 1);
-                    
-                    if( base == (*currentVariantIter).second.Ref )
+                    char base = seq_nt16_str[bam_seqi(bam_get_seq(&aln), query_pos + offset)];
+                    if(base == (*currentVariantIter).second.Ref[0])
                         allele = 0;
-                    else if( base == (*currentVariantIter).second.Alt )
+                    else if(base == (*currentVariantIter).second.Alt[0])
                         allele = 1;
                     
-                    base_q = align.quality[query_pos + offset];
+                    base_q = bam_get_qual(&aln)[query_pos + offset];
                 } 
                 
                 // insertion
                 //if( refAlleleLen == 1 && altAlleleLen != 1 && align.op[i+1] == 1 && i+1 < align.cigar_len){
-                if( refAlleleLen == 1 && altAlleleLen != 1 && i+1 < align.cigar_len){      
+                if( refAlleleLen == 1 && altAlleleLen != 1 && i+1 < aln_core_n_cigar){
                     
-                    std::string prevIns = ( align.op[i-1] == 1 ? qseq.substr(prev_query_pos, align.ol[i-1]) : "" );
+                    // currently, qseq conversion is not performed. Below is the old method for obtaining insertion sequence.
+                    
+                    // uint8_t *qstring = bam_get_seq(aln); 
+                    // qseq[i] = seq_nt16_str[bam_seqi(qstring,i)]; 
+                    // std::string prevIns = ( align.op[i-1] == 1 ? qseq.substr(prev_query_pos, align.ol[i-1]) : "" );
 
-                    if ( ref_pos + length - 1 == (*currentVariantIter).first && align.op[i+1] == 1 ) {
+                    if ( ref_pos + length - 1 == (*currentVariantIter).first && bam_cigar_op(cigar[i+1]) == 1 ) {
                         allele = 1 ;
                     }
                     else {
@@ -1155,9 +1113,9 @@ void BamParser::get_snp(const Alignment &align, std::vector<ReadVariant> &readVa
                 
                 // deletion
                 //if( refAlleleLen != 1 && altAlleleLen == 1 && align.op[i+1] == 2 && i+1 < align.cigar_len){
-                if( refAlleleLen != 1 && altAlleleLen == 1 && i+1 < align.cigar_len) {
+                if( refAlleleLen != 1 && altAlleleLen == 1 && i+1 < aln_core_n_cigar) {
 
-                    if ( ref_pos + length - 1 == (*currentVariantIter).first && align.op[i+1] == 2 ) {
+                    if ( ref_pos + length - 1 == (*currentVariantIter).first && bam_cigar_op(cigar[i+1]) == 2 ) {
                         allele = 1 ;
                     }
                     else {
@@ -1175,13 +1133,12 @@ void BamParser::get_snp(const Alignment &align, std::vector<ReadVariant> &readVa
                 }
                 currentVariantIter++;
             }
-            prev_query_pos = query_pos;
+            
             query_pos += length;
             ref_pos += length;
         }
         // 1: insertion to the reference
         else if( cigar_op == 1 ){
-            prev_query_pos = query_pos;
             query_pos += length;
         }
         // 2: deletion from the reference
@@ -1206,28 +1163,28 @@ void BamParser::get_snp(const Alignment &align, std::vector<ReadVariant> &readVa
                         int altAlleleLen = (*currentVariantIter).second.Alt.length();
                         int base_q = 0;  
                         
-                        if( query_pos + 1 > int(qseq.length()) ){
+                        if( query_pos + 1 > aln.core.l_qseq ){
                             return;
                         }
-                        // get the next match
-                        std::string base = qseq.substr(query_pos , 1);
 
                         int allele = -1;
                         // SNP
                         if( refAlleleLen == 1 && altAlleleLen == 1){
-                            if( base == (*currentVariantIter).second.Ref )
+                            // get the next match
+                            char base = seq_nt16_str[bam_seqi(bam_get_seq(&aln), query_pos)];
+                            if( base == (*currentVariantIter).second.Ref[0] )
                                 allele = 0;
-                            else if( base == (*currentVariantIter).second.Alt )
+                            else if( base == (*currentVariantIter).second.Alt[0] )
                                 allele = 1;
                             
-                            base_q = align.quality[query_pos];
+                            base_q = bam_get_qual(&aln)[query_pos];
                         }
                         
                         // the read deletion contain VCF's deletion
                         if( refAlleleLen != 1 && altAlleleLen == 1){
-                            std::string delSeq = ref_string.substr(ref_pos - 1, align.ol[i] + 1);
-                            std::string refSeq = (*currentVariantIter).second.Ref;
-                            std::string altSeq = (*currentVariantIter).second.Alt;
+                            //std::string delSeq = ref_string.substr(ref_pos - 1, align.ol[i] + 1);
+                            //std::string refSeq = (*currentVariantIter).second.Ref;
+                            //std::string altSeq = (*currentVariantIter).second.Alt;
 
                             allele = 1;
                             // using this quality to identify indel
@@ -1257,7 +1214,6 @@ void BamParser::get_snp(const Alignment &align, std::vector<ReadVariant> &readVa
         }
         // 4: soft clipping (clipped sequences present in SEQ)
         else if( cigar_op == 4 ){
-            prev_query_pos = query_pos;
             query_pos += length;
         }
         // 5: hard clipping (clipped sequences NOT present in SEQ)
@@ -1266,7 +1222,7 @@ void BamParser::get_snp(const Alignment &align, std::vector<ReadVariant> &readVa
             // do nothing
         }
         else{
-            std::cerr<< "alignment find unsupported CIGAR operation from read: " << align.qname << "\n";
+            std::cerr<< "alignment find unsupported CIGAR operation from read: " << bam_get_qname(&aln) << "\n";
             exit(1);
         }
     }

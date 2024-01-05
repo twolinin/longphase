@@ -50,7 +50,7 @@ class HaplotagProcess
 
     void initFlag(bam1_t *aln, std::string flag);
     
-    int judgeHaplotype(Alignment align, std::string chrName, double percentageThreshold, std::ofstream *tagResult, int &pqValue);
+    int judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, std::string chrName, double percentageThreshold, std::ofstream *tagResult, int &pqValue);
     
     int totalAlignment;
     int totalSupplementary;
