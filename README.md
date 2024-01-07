@@ -309,7 +309,7 @@ e.g. [sniffles](https://github.com/fritzsedlazeck/Sniffles) or [CuteSV](https://
 ```
 # In sniffles1 please specofic --num_reads_report -1. For sniffles2 please specify --output-rnames instead.
 sniffles -t 10 --num_reads_report -1 -m alignment.bam -v SV.vcf # for sniffles1
-sniffles --threads 10 --output-rnames -1 --input alignment.bam --vcf SV.vcf # for sniffles2
+sniffles --threads 10 --output-rnames --input alignment.bam --vcf SV.vcf # for sniffles2
 
 # cuteSV command for PacBio CLR data:
 cuteSV alignment.bam reference.fasta SV.vcf work_dir --report_readid --genotype
