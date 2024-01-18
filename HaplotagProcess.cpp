@@ -276,6 +276,21 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
         exit(1);
     }
 
+    // record reference last variant pos
+    std::vector<int> last_pos;
+    for( auto chr : chrVec ){
+        auto lastVariantIter = chrVariantPS[chr].rbegin();
+        if( lastVariantIter != chrVariantPS[chr].rend() ){
+            last_pos.push_back(lastVariantIter->second);
+        }
+        else{
+            last_pos.push_back(0);
+        }
+    }
+
+    // reference fasta parser
+    FastaParser fastaParser(params.fastaFile , chrVec, last_pos);
+
     // write tag read detail information
     std::ofstream *tagResult=NULL;
     if(params.writeReadLog){
@@ -324,21 +339,29 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
     for(auto chr : chrVec ){
         std::time_t begin = time(NULL);
         std::cerr<<"chr: " << chr << " ... " ;
-
-        currentVariants = chrVariant[chr];
-        firstVariantIter = currentVariants.begin();
-
-        std::map<int, RefAlt>::reverse_iterator last = currentVariants.rbegin();
-
+        // records all variants within this chromosome.
+        currentChrVariants = chrVariant[chr];
+        // since each read is sorted based on the start coordinates, to save time, 
+        // firstVariantIter keeps track of the first variant that each read needs to check.
+        firstVariantIter = currentChrVariants.begin();
+        // get the coordinates of the last variant
+        // the tagging process will not be perform if the read's start coordinate are over than last variant.
+        std::map<int, RefAlt>::reverse_iterator last = currentChrVariants.rbegin();
+        
+        // fetch chromosome string
+        std::string chr_reference = fastaParser.chrString.at(chr);
+        
+        // tagging will be attempted for reads within the specified coordinate range.
         std::string range = chr + ":1-" + std::to_string(chrLength[chr]);
         hts_itr_t* iter = sam_itr_querys(idx, bamHdr, range.c_str());
-
+        // iter all reads
         while ((result = sam_itr_multi_next(in, iter, aln)) >= 0) {
             totalAlignment++;
             int flag = aln->core.flag;
 
             if ( aln->core.qual < params.qualityThreshold ){
                 // mapping quality is lower than threshold
+                // write this alignment to result bam file
                 result = sam_write1(out, bamHdr, aln);
                 continue;
             }
@@ -346,6 +369,7 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
             if( (flag & 0x4) != 0 ){
                 // read unmapped
                 totalUnmapped++;
+                // write this alignment to result bam file
                 result = sam_write1(out, bamHdr, aln);
                 continue;
             }
@@ -353,6 +377,7 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
                 // secondary alignment. repeat.
                 // A secondary alignment occurs when a given read could align reasonably well to more than one place.
                 totalSecondary++;
+                // write this alignment to result bam file
                 result = sam_write1(out, bamHdr, aln);
                 continue;
             }
@@ -360,16 +385,18 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
                 // supplementary alignment
                 // A chimeric alignment is represented as a set of linear alignments that do not have large overlaps.
                 totalSupplementary++;
+                // write this alignment to result bam file
                 result = sam_write1(out, bamHdr, aln);
                 continue;
             }
 
-            if(last == currentVariants.rend()){
+            if(last == currentChrVariants.rend()){
+                // skip 
                 totalUnTagCuonnt++;
             }
             else if(int(aln->core.pos) <= (*last).first){
                 int pqValue = 0;
-                int haplotype = judgeHaplotype(*bamHdr, *aln, chr, params.percentageThreshold, tagResult, pqValue);
+                int haplotype = judgeHaplotype(*bamHdr, *aln, chr, params.percentageThreshold, tagResult, pqValue, chr_reference);
 
                 initFlag(aln, "HP");
                 initFlag(aln, "PS");
@@ -387,6 +414,7 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
                     totalUnTagCuonnt++;
                 }
             }
+            // write this alignment to result bam file
             result = sam_write1(out, bamHdr, aln);
         }
         std::cerr<< difftime(time(NULL), begin) << "s\n";
@@ -411,7 +439,7 @@ void HaplotagProcess::initFlag(bam1_t *aln, std::string flag){
     return;
 }
 
-int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, std::string chrName, double percentageThreshold, std::ofstream *tagResult, int &pqValue){
+int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, std::string chrName, double percentageThreshold, std::ofstream *tagResult, int &pqValue, const std::string &ref_string){
 
     int hp1Count = 0;
     int hp2Count = 0;
@@ -420,11 +448,13 @@ int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, 
     std::map<int,int> countPS;
 
     // Skip variants that are to the left of this read
-    while( firstVariantIter != currentVariants.end() && (*firstVariantIter).first < aln.core.pos )
+    while( firstVariantIter != currentChrVariants.end() && (*firstVariantIter).first < aln.core.pos ){
         firstVariantIter++;
-
-    if( firstVariantIter == currentVariants.end() )
+    }
+    
+    if( firstVariantIter == currentChrVariants.end() ){
         return 0;
+    }
 
     // position relative to reference
     int ref_pos = aln.core.pos;
@@ -441,7 +471,7 @@ int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, 
         int length   = bam_cigar_oplen(cigar[i]);
 
         // iterator next variant
-        while( currentVariantIter != currentVariants.end() && (*currentVariantIter).first < ref_pos ){
+        while( currentVariantIter != currentChrVariants.end() && (*currentVariantIter).first < ref_pos ){
             currentVariantIter++;
         }
 
@@ -451,8 +481,10 @@ int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, 
         // 8: sequence mismatch
         if( cigar_op == 0 || cigar_op == 7 || cigar_op == 8 ){
 
-            while( currentVariantIter != currentVariants.end() && (*currentVariantIter).first < ref_pos + length){
+            while( currentVariantIter != currentChrVariants.end() && (*currentVariantIter).first < ref_pos + length){
 
+                int refAlleleLen = (*currentVariantIter).second.Ref.length();
+                int altAlleleLen = (*currentVariantIter).second.Alt.length();
                 int offset = (*currentVariantIter).first - ref_pos;
 
                 if( offset < 0){
@@ -461,29 +493,99 @@ int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, 
                     uint8_t *q = bam_get_seq(&aln);
                     char base_chr = seq_nt16_str[bam_seqi(q,query_pos + offset)];
                     std::string base(1, base_chr);
-                    // base match SNP allele
-                    if( (base == (*currentVariantIter).second.Ref) || (base == (*currentVariantIter).second.Alt) ){
+                    
+                    // currentVariant is SNP
+                    if( refAlleleLen == 1 && altAlleleLen == 1 ){
+                        // Detected that the base of the read is either REF or ALT. 
+                        if( (base == (*currentVariantIter).second.Ref) || (base == (*currentVariantIter).second.Alt) ){
 
-                        std::map<int, int>::iterator posPSiter = chrVariantPS[chrName].find((*currentVariantIter).first);
+                            std::map<int, int>::iterator posPSiter = chrVariantPS[chrName].find((*currentVariantIter).first);
 
-                        if( posPSiter == chrVariantPS[chrName].end() ){
-                            std::cerr<< (*currentVariantIter).first << "\t"
-                                     << (*currentVariantIter).second.Ref << "\t"
-                                     << (*currentVariantIter).second.Alt << "\n";
-                            exit(EXIT_SUCCESS);
+                            if( posPSiter == chrVariantPS[chrName].end() ){
+                                std::cerr<< (*currentVariantIter).first << "\t"
+                                         << (*currentVariantIter).second.Ref << "\t"
+                                         << (*currentVariantIter).second.Alt << "\n";
+                                exit(EXIT_SUCCESS);
+                            }
+                            else{
+                                if( base == chrVariantHP1[chrName][(*currentVariantIter).first]){
+                                    hp1Count++;
+                                    variantsHP[(*currentVariantIter).first]=0;
+                                }
+                                if( base == chrVariantHP2[chrName][(*currentVariantIter).first]){
+                                    hp2Count++;
+                                    variantsHP[(*currentVariantIter).first]=1;
+                                }
+                                countPS[chrVariantPS[chrName][(*currentVariantIter).first]]++;
+                            }
+                            
                         }
-                        else{
-                            if( base == chrVariantHP1[chrName][(*currentVariantIter).first]){
+                    }
+                    // currentVariant is insertion
+                    else if( refAlleleLen == 1 && altAlleleLen != 1 && i+1 < aln_core_n_cigar){
+                        
+                        int hp1Length = chrVariantHP1[chrName][(*currentVariantIter).first].length();
+                        int hp2Length = chrVariantHP2[chrName][(*currentVariantIter).first].length();
+                        
+                        if ( ref_pos + length - 1 == (*currentVariantIter).first && bam_cigar_op(cigar[i+1]) == 1 ) {
+                            // hp1 occur insertion
+                            if( hp1Length != 1 && hp2Length == 1 ){
                                 hp1Count++;
                                 variantsHP[(*currentVariantIter).first]=0;
                             }
-                            if(base == chrVariantHP2[chrName][(*currentVariantIter).first]){
+                            // hp2 occur insertion
+                            else if( hp1Length == 1 && hp2Length != 1 ){
                                 hp2Count++;
                                 variantsHP[(*currentVariantIter).first]=1;
                             }
-                            countPS[chrVariantPS[chrName][(*currentVariantIter).first]]++;
                         }
-                    }
+                        else {
+                            // hp1 occur insertion
+                            if( hp1Length != 1 && hp2Length == 1 ){
+                                hp2Count++;
+                                variantsHP[(*currentVariantIter).first]=1;
+                            }
+                            // hp2 occur insertion
+                            else if( hp1Length == 1 && hp2Length != 1 ){
+                                hp1Count++;
+                                variantsHP[(*currentVariantIter).first]=0;
+                            }
+                        }
+                        countPS[chrVariantPS[chrName][(*currentVariantIter).first]]++;
+                    } 
+                    // currentVariant is deletion
+                    else if( refAlleleLen != 1 && altAlleleLen == 1 && i+1 < aln_core_n_cigar) {
+                        
+                        int hp1Length = chrVariantHP1[chrName][(*currentVariantIter).first].length();
+                        int hp2Length = chrVariantHP2[chrName][(*currentVariantIter).first].length();
+                        
+                        if ( ref_pos + length - 1 == (*currentVariantIter).first && bam_cigar_op(cigar[i+1]) == 2 ) {
+                            // hp1 occur deletion
+                            if( hp1Length != 1 && hp2Length == 1 ){
+                                hp1Count++;
+                                variantsHP[(*currentVariantIter).first]=0;
+                            }
+                            // hp2 occur deletion
+                            else if( hp1Length == 1 && hp2Length != 1 ){
+                                hp2Count++;
+                                variantsHP[(*currentVariantIter).first]=1;
+                            }
+                        }
+                        else {
+                            // hp2 occur deletion
+                            if( hp1Length != 1 && hp2Length == 1 ){
+                                hp2Count++;
+                                variantsHP[(*currentVariantIter).first]=1;
+                            }
+                            // hp1 occur deletion
+                            else if( hp1Length == 1 && hp2Length != 1 ){
+                                hp1Count++;
+                                variantsHP[(*currentVariantIter).first]=0;
+                            }
+                        }
+                        countPS[chrVariantPS[chrName][(*currentVariantIter).first]]++;
+                    } 
+
                 }
                 currentVariantIter++;
             }
@@ -496,6 +598,58 @@ int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, 
         }
             // 2: deletion from the reference
         else if( cigar_op == 2 ){
+            
+            if(ref_string != ""){
+                int del_len = length;
+                if ( ref_pos + del_len + 1 == (*currentVariantIter).first ){
+                    //if( homopolymerLength((*currentVariantIter).first , ref_string) >=3 ){
+                        // special case
+                    //}
+                }
+                else if( (*currentVariantIter).first >= ref_pos  && (*currentVariantIter).first < ref_pos + del_len ){
+                    // check variant in homopolymer
+                    if( homopolymerLength((*currentVariantIter).first , ref_string) >=3 ){
+                        
+                        int refAlleleLen = (*currentVariantIter).second.Ref.length();
+                        int altAlleleLen = (*currentVariantIter).second.Alt.length();
+                        
+                        // SNP
+                        if( refAlleleLen == 1 && altAlleleLen == 1){
+                            // get the next match
+                            char base_chr = seq_nt16_str[bam_seqi(bam_get_seq(&aln), query_pos)];
+                            std::string base(1, base_chr);
+
+                            if( base == chrVariantHP1[chrName][(*currentVariantIter).first]){
+                                hp1Count++;
+                                variantsHP[(*currentVariantIter).first]=0;
+                            }
+                            if( base == chrVariantHP2[chrName][(*currentVariantIter).first]){
+                                hp2Count++;
+                                variantsHP[(*currentVariantIter).first]=1;
+                            }
+                            countPS[chrVariantPS[chrName][(*currentVariantIter).first]]++;
+                        }
+                        
+                        // the read deletion contain VCF's deletion
+                        else if( refAlleleLen != 1 && altAlleleLen == 1){
+
+                            int hp1Length = chrVariantHP1[chrName][(*currentVariantIter).first].length();
+                            int hp2Length = chrVariantHP2[chrName][(*currentVariantIter).first].length();
+                            // hp1 occur deletion
+                            if( hp1Length != 1 && hp2Length == 1 ){
+                                hp1Count++;
+                                variantsHP[(*currentVariantIter).first]=0;
+                            }
+                            // hp2 occur deletion
+                            else if( hp1Length == 1 && hp2Length != 1 ){
+                                hp2Count++;
+                                variantsHP[(*currentVariantIter).first]=1;
+                            }
+                            countPS[chrVariantPS[chrName][(*currentVariantIter).first]]++;
+                        }
+                    }
+                }
+            }
             ref_pos += length;
         }
             // 3: skipped region from the reference

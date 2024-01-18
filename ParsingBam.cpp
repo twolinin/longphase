@@ -972,7 +972,7 @@ void BamParser::direct_detect_alleles(int lastSNPPos, int &numThreads, PhasingPa
     
 }
 
-void BamParser::get_snp(const  bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<ReadVariant> &readVariantVec,const std::string &ref_string, bool isONT){
+void BamParser::get_snp(const  bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<ReadVariant> &readVariantVec, const std::string &ref_string, bool isONT){
 
     ReadVariant *tmpReadResult = new ReadVariant();
     (*tmpReadResult).read_name = bam_get_qname(&aln);
@@ -1148,7 +1148,7 @@ void BamParser::get_snp(const  bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<
             // it will determine whether the SNP falls in the homopolymer
             // and start the processing of the SNP fall in the alignment GAP
             
-            if(ref_string != "" && isONT){
+            if(ref_string != ""){
                 int del_len = length;
                 if ( ref_pos + del_len + 1 == (*currentVariantIter).first ){
                     //if( homopolymerLength((*currentVariantIter).first , ref_string) >=3 ){
@@ -1172,28 +1172,32 @@ void BamParser::get_snp(const  bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<
                         if( refAlleleLen == 1 && altAlleleLen == 1){
                             // get the next match
                             char base = seq_nt16_str[bam_seqi(bam_get_seq(&aln), query_pos)];
-                            if( base == (*currentVariantIter).second.Ref[0] )
+                            if( base == (*currentVariantIter).second.Ref[0] ){
                                 allele = 0;
-                            else if( base == (*currentVariantIter).second.Alt[0] )
+                            }
+                            else if( base == (*currentVariantIter).second.Alt[0] ){
                                 allele = 1;
-                            
+                            }
                             base_q = bam_get_qual(&aln)[query_pos];
                         }
-                        
                         // the read deletion contain VCF's deletion
-                        if( refAlleleLen != 1 && altAlleleLen == 1){
-                            //std::string delSeq = ref_string.substr(ref_pos - 1, align.ol[i] + 1);
-                            //std::string refSeq = (*currentVariantIter).second.Ref;
-                            //std::string altSeq = (*currentVariantIter).second.Alt;
+                        else if( refAlleleLen != 1 && altAlleleLen == 1 ){
 
-                            allele = 1;
-                            // using this quality to identify indel
-                            base_q = -4;
-                        }
-                        else if ( allele == -1 ) {
-                            allele = 0;
-                            // using this quality to identify indel
-                            base_q = -4;
+                            if( refAlleleLen != 1 && altAlleleLen == 1){
+                                //std::string delSeq = ref_string.substr(ref_pos - 1, align.ol[i] + 1);
+                                //std::string refSeq = (*currentVariantIter).second.Ref;
+                                //std::string altSeq = (*currentVariantIter).second.Alt;
+
+                                allele = 1;
+                                // using this quality to identify indel
+                                base_q = -4;
+                            }
+                            else if ( allele == -1 ) {
+                                allele = 0;
+                                // using this quality to identify indel
+                                base_q = -4;
+                            }
+                            
                         }
                         
                         if(allele != -1){
@@ -1202,7 +1206,7 @@ void BamParser::get_snp(const  bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<
                             currentVariantIter++;
                             delete tmpVariant;
                         }
-                        
+
                     }
                 }
             }

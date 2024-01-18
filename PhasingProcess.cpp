@@ -97,7 +97,7 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
         // use to store variant
         std::vector<ReadVariant> readVariantVec;
         // run fetch variant process
-        bamParser->direct_detect_alleles(lastSNPpos, bamParserNumThreads, params, readVariantVec ,chr_reference);
+        bamParser->direct_detect_alleles(lastSNPpos, bamParserNumThreads, params, readVariantVec , chr_reference);
         // free memory
         delete bamParser;
         
