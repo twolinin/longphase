@@ -90,7 +90,7 @@ void HaplotagProcess::unCompressParser(std::string &variantFile){
 }
 
 void HaplotagProcess::parserProcess(std::string &input){
-    if( input.find("#")!= std::string::npos && !parseSVFile ){
+    if( input.find("#")!= std::string::npos && parseSnpFile ){
         if( input.find("contig=")!= std::string::npos ){
             int id_start  = input.find("ID=")+3;
             int id_end    = input.find(",length=");
@@ -178,7 +178,7 @@ void HaplotagProcess::parserProcess(std::string &input){
             }
             
             // snp file
-            if( !parseSVFile ){
+            if( parseSnpFile ){
                 RefAlt tmp;
                 tmp.Ref = fields[3]; 
                 tmp.Alt = fields[4];
@@ -238,6 +238,37 @@ void HaplotagProcess::parserProcess(std::string &input){
                    readSVHapCount[read][svHaplotype]++;
                 }
                 
+            }
+            // mod file
+            if( parseMODFile ){
+                // get read INFO
+                int read_pos = fields[7].find("MR=");
+                read_pos = fields[7].find("=",read_pos);
+                read_pos++;
+                        
+                int next_field = fields[7].find(";",read_pos);
+                std::string totalRead = fields[7].substr(read_pos,next_field-read_pos);
+                std::stringstream totalReadStream(totalRead);
+                
+                int modHaplotype;
+                // In which haplotype does SV occur
+                if( fields[9][modifu_start] == '0' && fields[9][modifu_start+2] == '1' ){
+                    modHaplotype = 1;
+                }
+                else if( fields[9][modifu_start] == '1' && fields[9][modifu_start+2] == '0' ){
+                    modHaplotype = 0;
+                }
+                
+                std::string read;
+                while(std::getline(totalReadStream, read, ','))
+                {
+                   auto readIter = readSVHapCount.find(read);
+                   if(readIter==readSVHapCount.end()){
+                       readSVHapCount[read][0]=0;
+                       readSVHapCount[read][1]=0;
+                   }
+                   readSVHapCount[read][modHaplotype]++;
+                }
             }
         }
     }
@@ -765,6 +796,7 @@ totalAlignment(0),totalSupplementary(0),totalSecondary(0),totalUnmapped(0),total
 {
     std::cerr<< "phased SNP file:   " << params.snpFile             << "\n";
     std::cerr<< "phased SV file:    " << params.svFile              << "\n";
+    std::cerr<< "phased MOD file:   " << params.modFile              << "\n";
     std::cerr<< "input bam file:    " << params.bamFile             << "\n";
     std::cerr<< "input ref file:    " << params.fastaFile           << "\n";
     std::cerr<< "output bam file:   " << params.resultPrefix+".bam" << "\n";
@@ -780,16 +812,28 @@ totalAlignment(0),totalSupplementary(0),totalSecondary(0),totalUnmapped(0),total
     // load SNP vcf file
     std::time_t begin = time(NULL);
     std::cerr<< "parsing SNP VCF ... ";
-    parseSVFile = false;
+    parseSnpFile = true;
     variantParser(params.snpFile);
+    parseSnpFile = false;
     std::cerr<< difftime(time(NULL), begin) << "s\n";
 
     // load SV vcf file
     if(params.svFile!=""){
         begin = time(NULL);
-        std::cerr<< "parsing SV VCF ...\n";
+        std::cerr<< "parsing SV VCF ... ";
         parseSVFile = true;
         variantParser(params.svFile);
+        parseSVFile = false;
+        std::cerr<< difftime(time(NULL), begin) << "s\n";    
+    }
+    
+    // load MOD vcf file
+    if(params.modFile!=""){
+        begin = time(NULL);
+        std::cerr<< "parsing MOD VCF ... ";
+        parseMODFile = true;
+        variantParser(params.modFile);
+        parseMODFile = false;
         std::cerr<< difftime(time(NULL), begin) << "s\n";    
     }
 

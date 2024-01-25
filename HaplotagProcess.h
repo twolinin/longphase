@@ -14,6 +14,7 @@ struct HaplotagParameters
     
     std::string snpFile;
     std::string svFile;
+    std::string modFile;
     std::string bamFile;
     std::string fastaFile;
     std::string resultPrefix;
@@ -61,7 +62,9 @@ class HaplotagProcess
     
     std::time_t processBegin;
     bool integerPS;
+    bool parseSnpFile;
     bool parseSVFile;
+    bool parseMODFile;
     
     public:
         HaplotagProcess(HaplotagParameters params);
