@@ -468,7 +468,7 @@ void SnpParser::writeLine(std::string &input, bool &ps_def, std::ofstream &resul
         auto posIter = (*chrVariant)[fields[0]].find(posIdx);
         
         // this pos is phase
-        if( psElementIter != phasingResult.end() /*&& posIter != (*chrVariant)[fields[0]].end()*/ ){
+        if( psElementIter != phasingResult.end() && posIter != (*chrVariant)[fields[0]].end() ){
             // add PS flag and value
             fields[8] = fields[8] + ":PS";
             fields[9] = fields[9] + ":" + std::to_string((*psElementIter).second.block);
@@ -837,7 +837,7 @@ void SVParser::writeLine(std::string &input, bool &ps_def, std::ofstream &result
         auto posIter = (*chrVariant)[fields[0]].find(posIdx);
         
         // this pos is phase and exist in map
-        if( psElementIter != phasingResult.end() /*&& posIter != (*chrVariant)[fields[0]].end()*/ ){
+        if( psElementIter != phasingResult.end() && posIter != (*chrVariant)[fields[0]].end() ){
                     
             // add PS flag and value
             fields[8] = fields[8] + ":PS";
@@ -1491,7 +1491,7 @@ void METHParser::writeLine(std::string &input, bool &ps_def, std::ofstream &resu
         auto posIter = (*chrVariant)[fields[0]].find(posIdx); 
         
         // this pos is phase and exist in map
-        if( psElementIter != phasingResult.end()/* && posIter != (*chrVariant)[fields[0]].end() */){
+        if( psElementIter != phasingResult.end() && posIter != (*chrVariant)[fields[0]].end() ){
                     
             // add PS flag and value
             fields[8] = fields[8] + ":PS";
