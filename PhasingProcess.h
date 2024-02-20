@@ -30,6 +30,9 @@ struct PhasingParameters
     double readConfidence;
     
     double readsThreshold;
+
+    int baseQuality;
+    double edgeWeight;
     
     std::string version;
     std::string command;

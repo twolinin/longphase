@@ -44,7 +44,7 @@ static const char *CORRECT_USAGE_MESSAGE =
 
 "\n";
 
-static const char* shortopts = "s:b:o:t:r:d:1:a:q:j:i:v:n:m:";
+static const char* shortopts = "s:b:o:t:r:d:1:a:q:p:e:j:i:v:n:m:";
 
 enum { OPT_HELP = 1 , DOT_FILE, SV_FILE, MOD_FILE, IS_ONT, IS_PB, PHASE_INDEL, VERSION};
 
@@ -66,6 +66,8 @@ static const struct option longopts[] = {
     { "readsThreshold",       required_argument,  NULL, '1' },
     { "connectAdjacent",      required_argument,  NULL, 'a' },
     { "mappingQuality",       required_argument,  NULL, 'q' },
+    { "baseQuality",          required_argument,  NULL, 'p' },
+    { "edgeWeight",          required_argument,  NULL, 'e' },
     { "judgeInconsistent",    required_argument,  NULL, 'j' },
     { "inconsistentThreshold",required_argument,  NULL, 'i' },
     { "confidentHaplotype",   required_argument,  NULL, 'v' },
@@ -91,7 +93,9 @@ namespace opt
     
     static int connectAdjacent = 20;
     static int mappingQuality =1;
-    
+    static int baseQuality =12;
+   
+    static double edgeWeight = 0.1;
     static double confidentHaplotype = 0.5;
     static double judgeInconsistent  = 0.4 ;
     static int inconsistentThreshold = 5 ;
@@ -122,6 +126,8 @@ void PhasingOptions(int argc, char** argv)
         case '1': arg >> opt::readsThreshold; break; 
         case 'a': arg >> opt::connectAdjacent; break;
         case 'q': arg >> opt::mappingQuality; break;
+        case 'p': arg >> opt::baseQuality; break;
+	case 'e': arg >> opt::edgeWeight; break;
         case 'j': arg >> opt::judgeInconsistent; break;
         case 'i': arg >> opt::inconsistentThreshold; break;
         case 'v': arg >> opt::confidentHaplotype; break;
@@ -222,6 +228,20 @@ void PhasingOptions(int argc, char** argv)
         die = true;
     }
 
+    if ( opt::baseQuality < 0 ){
+        std::cerr << SUBPROGRAM " invalid mappingQuality. value: "
+                  << opt::baseQuality
+                  << "\n please check -p, --baseQuality=Num\n";
+        die = true;
+    }
+
+    if ( opt::edgeWeight < 0 ){
+        std::cerr << SUBPROGRAM " invalid edgeWeight. value: "
+                  << opt::edgeWeight
+                  << "\n please check -e, --edgeWeight=Num\n";
+        die = true;
+    }
+
     if ( opt::readsThreshold < 0 || opt::readsThreshold > 1 ){
         std::cerr << SUBPROGRAM " invalid readsThreshold. value: " 
                   << opt::readsThreshold 
@@ -259,7 +279,9 @@ int PhasingMain(int argc, char** argv, std::string in_version)
     
     ecParams.connectAdjacent=opt::connectAdjacent;
     ecParams.mappingQuality=opt::mappingQuality;
+    ecParams.baseQuality=opt::baseQuality;
     
+    ecParams.edgeWeight=opt::edgeWeight;
     ecParams.confidentHaplotype=opt::confidentHaplotype;
     ecParams.judgeInconsistent=opt::judgeInconsistent;
     ecParams.inconsistentThreshold=opt::inconsistentThreshold;
