@@ -23,7 +23,7 @@ void SubEdge::destroy(){
     delete altReadCount;
 }
 
-void SubEdge::addSubEdge(int currentQuality, Variant connectNode, std::string readName){
+void SubEdge::addSubEdge(int currentQuality, Variant connectNode, std::string readName, int baseQuality, double edgeWeight){
     // target noded is REF allele
     if(connectNode.allele == 0 ){
         // debug, this parameter will record the names of all reads between two points
@@ -36,10 +36,10 @@ void SubEdge::addSubEdge(int currentQuality, Variant connectNode, std::string re
         else{
             (*refQuality)[connectNode.position] += currentQuality + connectNode.quality;
         }*/
-	if ( currentQuality >= 12 && connectNode.quality >= 12 )
+	if ( currentQuality >= baseQuality && connectNode.quality >= baseQuality )
             (*refReadCount)[connectNode.position]++;
         else {
-            (*refReadCount)[connectNode.position] = (*refReadCount)[connectNode.position] + 0.1 ;
+            (*refReadCount)[connectNode.position] = (*refReadCount)[connectNode.position] + edgeWeight ;
         }
 	//(*refReadCount)[connectNode.position]++;
     }
@@ -55,10 +55,10 @@ void SubEdge::addSubEdge(int currentQuality, Variant connectNode, std::string re
         else{
             (*altQuality)[connectNode.position] += currentQuality + connectNode.quality;
         }*/
-	if ( currentQuality >= 12 && connectNode.quality >= 12 )
+	if ( currentQuality >= baseQuality && connectNode.quality >= baseQuality )
             (*altReadCount)[connectNode.position]++;
         else {
-            (*altReadCount)[connectNode.position] = (*altReadCount)[connectNode.position] + 0.1 ;
+            (*altReadCount)[connectNode.position] = (*altReadCount)[connectNode.position] + edgeWeight ;
         }
 	//(*altReadCount)[connectNode.position]++;
     }
@@ -477,10 +477,10 @@ void VairiantGraph::addEdge(std::vector<ReadVariant> &in_readVariant){
             for(int nextNode = 0 ; nextNode < params->connectAdjacent; nextNode++){
                 // this allele support ref
                 if( (*variant1Iter).allele == 0 )
-                    (*edgeList)[(*variant1Iter).position]->ref->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).read_name);
+                    (*edgeList)[(*variant1Iter).position]->ref->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).read_name,params->baseQuality,params->edgeWeight);
                 // this allele support alt
                 if( (*variant1Iter).allele == 1 )
-                    (*edgeList)[(*variant1Iter).position]->alt->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).read_name);
+                    (*edgeList)[(*variant1Iter).position]->alt->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).read_name,params->baseQuality,params->edgeWeight);
                 
                 // next snp
                 variant2Iter++;
