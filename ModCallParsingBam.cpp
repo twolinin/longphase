@@ -11,7 +11,7 @@
 #include "htslib/thread_pool.h"
 #include "htslib/sam.h"
 
-MethFastaParser::MethFastaParser(std::string fastaFile, std::map<std::string, std::string> &chrString){
+MethFastaParser::MethFastaParser(std::string fastaFile, std::vector<ReferenceChromosome> &chrInfo){
     if(fastaFile==""){
         return;
     }
@@ -25,7 +25,7 @@ MethFastaParser::MethFastaParser(std::string fastaFile, std::map<std::string, st
         int ref_len = 0;
         seqname = faidx_iseq(fai, i);
         seqlen = faidx_seq_len(fai, seqname);
-        chrString[std::string(seqname)] = faidx_fetch_seq(fai , seqname , 0 ,seqlen+1 , &ref_len);
+        chrInfo.emplace_back(seqname, faidx_fetch_seq(fai , seqname , 0 ,seqlen+1 , &ref_len), seqlen);
     }
 }
 
@@ -46,9 +46,7 @@ MethBamParser::~MethBamParser(){
     delete readStartEndMap;
 }
 
-void MethBamParser::detectMeth(std::string chrName, int chr_len, std::vector<ReadVariant> &readVariantVec){
-    int numThreads = params->numThreads;
-
+void MethBamParser::detectMeth(std::string chrName, int chr_len, int numThreads, std::vector<ReadVariant> &readVariantVec){
     // init data structure and get core n
     htsThreadPool threadPool = {NULL, 0};
 
@@ -262,108 +260,109 @@ void MethBamParser::parse_CIGAR(const bam_hdr_t &bamHdr,const bam1_t &aln, std::
     delete tmpReadResult;
 }
 
-void MethBamParser::writeResultVCF( std::string chrName, std::map<std::string, std::string> &chrString, bool isFirstChr, std::map<int,int> &passPosition){
+void MethBamParser::exportResult(std::string chrName, std::string chrSquence, int chrLen , std::map<int,int> &passPosition, std::ostringstream &modCallResult){
+    
+    for(std::map<int , MethPosInfo>::iterator posinfoIter = chrMethMap->begin(); posinfoIter != chrMethMap->end(); posinfoIter++){
+        std::string infostr= "";
+        std::string eachpos;
+        std::string samplestr;
+        std::string strandinfo;
+        std::string ref;
+        
+        auto passPosIter =  passPosition.find((*posinfoIter).first);
+        auto prepassPosIter =  passPosition.find((*posinfoIter).first - 1);
+        auto nextpassPosIter =  passPosition.find((*posinfoIter).first + 1);
+        
+        // prevent variant coordinates from exceeding the reference.
+        if( chrLen < (*posinfoIter).first ){
+            continue;
+        }
 
-    std::ofstream ModResultVcf(params->resultPrefix+".vcf", std::ios_base::app);
-    if(!ModResultVcf.is_open()){
+        // prevent abnormal REF allele.
+        ref = chrSquence.substr((*posinfoIter).first,1);
+        if( ref != "A" && ref != "T" && ref != "C" && ref != "G" && 
+            ref != "a" && ref != "t" && ref != "c" && ref != "g"  ){
+            continue;
+        }
+        
+        // set variant strand
+        if( (*posinfoIter).second.strand == 1 ){
+            strandinfo = "RS=N;";
+        }
+        else if( (*posinfoIter).second.strand == 0 ){
+            strandinfo = "RS=P;";
+        }
+        else{
+            continue;
+        }
+        
+        //Output contains only consecutive methylation position (CpG)
+        if( (prepassPosIter == passPosition.end() && nextpassPosIter == passPosition.end()) || passPosIter ==  passPosition.end() ){
+            if( params->outputAllMod ){
+                int nonmethcnt = (*posinfoIter).second.canonreadcnt;
+                samplestr = (*posinfoIter).second.heterstatus + ":" + std::to_string((*posinfoIter).second.methreadcnt) + ":" + std::to_string(nonmethcnt) + ":" + std::to_string((*posinfoIter).second.depth);
+
+                eachpos = chrName + "\t" + std::to_string((*posinfoIter).first + 1) + "\t" + "." + "\t" + ref + "\t" + "N" + "\t" + "." + "\t" + "." + "\t" + strandinfo + infostr + "\t" + "GT:MD:UD:DP" + "\t" + samplestr + "\n";
+                modCallResult<<eachpos;
+            }         
+            continue;
+        }
+        
+        // append modification reads
+        if((*posinfoIter).second.modReadVec.size() > 0 ){
+            infostr += "MR=";
+            for(auto readName : (*posinfoIter).second.modReadVec ){
+                infostr += readName + ",";
+            }
+            infostr.back() = ';';
+        }
+            
+        // append non modification reads
+        if((*posinfoIter).second.nonModReadVec.size() > 0 ){
+            infostr += "NR=";
+            for(auto readName : (*posinfoIter).second.nonModReadVec ){
+                infostr += readName + ",";
+            }
+            infostr.back() = ';';
+        }
+
+        if((*posinfoIter).second.heterstatus == "0/1"){
+            int nonmethcnt = (*posinfoIter).second.canonreadcnt;
+            samplestr = (*posinfoIter).second.heterstatus + ":" + std::to_string((*posinfoIter).second.methreadcnt) + ":" + std::to_string(nonmethcnt) + ":" + std::to_string((*posinfoIter).second.depth);
+
+            eachpos = chrName + "\t" + std::to_string((*posinfoIter).first + 1) + "\t" + "." + "\t" + ref + "\t" + "N" + "\t" + "." + "\t" + "PASS" + "\t" + strandinfo + infostr + "\t" + "GT:MD:UD:DP" + "\t" + samplestr + "\n";
+
+            modCallResult<<eachpos;
+        }
+    }
+}
+
+void writeResultVCF( ModCallParameters &params, std::vector<ReferenceChromosome> &chrInfo, std::map<std::string,std::ostringstream> &chrModCallResult){
+
+    std::ofstream modCallResultVcf(params.resultPrefix+".vcf", std::ios_base::app);
+    if(!modCallResultVcf.is_open()){
         std::cerr<<"Fail to open output file :\n";
     }
     else{
         // set vcf header
-        if(isFirstChr){ 
-            ModResultVcf<<"##fileformat=VCFv4.2\n";
-            ModResultVcf<<"##INFO=<ID=RS,Number=.,Type=String,Description=\"Read Strand\">\n";
-            ModResultVcf<<"##INFO=<ID=MR,Number=.,Type=String,Description=\"Read Name of Modified position\">\n";
-            ModResultVcf<<"##INFO=<ID=NR,Number=.,Type=String,Description=\"Read Name of nonModified position\">\n";
-            ModResultVcf<<"##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n";
-            ModResultVcf<<"##FORMAT=<ID=MD,Number=1,Type=Integer,Description=\"Modified Depth\">\n";
-            ModResultVcf<<"##FORMAT=<ID=UD,Number=1,Type=Integer,Description=\"Unmodified Depth\">\n";
-            ModResultVcf<<"##FORMAT=<ID=DP,Number=1,Type=Integer,Description=\"Read Depth\"\n";
-            for(std::map<std::string, std::string>::iterator chrStringIter = chrString.begin(); chrStringIter != chrString.end(); chrStringIter++){
-                ModResultVcf<<"##contig=<ID="<<(*chrStringIter).first<<",length="<<(*chrStringIter).second.length()<<">\n";
-            }
-            
-            ModResultVcf << "##longphaseVersion=" << params->version << "\n";
-            ModResultVcf << "##commandline=\""    << params->command << "\"\n";
-
-            ModResultVcf<<"#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSAMPLE\n";
+        modCallResultVcf<<"##fileformat=VCFv4.2\n";
+        modCallResultVcf<<"##INFO=<ID=RS,Number=.,Type=String,Description=\"Read Strand\">\n";
+        modCallResultVcf<<"##INFO=<ID=MR,Number=.,Type=String,Description=\"Read Name of Modified position\">\n";
+        modCallResultVcf<<"##INFO=<ID=NR,Number=.,Type=String,Description=\"Read Name of nonModified position\">\n";
+        modCallResultVcf<<"##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n";
+        modCallResultVcf<<"##FORMAT=<ID=MD,Number=1,Type=Integer,Description=\"Modified Depth\">\n";
+        modCallResultVcf<<"##FORMAT=<ID=UD,Number=1,Type=Integer,Description=\"Unmodified Depth\">\n";
+        modCallResultVcf<<"##FORMAT=<ID=DP,Number=1,Type=Integer,Description=\"Read Depth\"\n";
+        for(const auto& chrIter : chrInfo){
+            modCallResultVcf<<"##contig=<ID="<<chrIter.name<<",length="<<chrIter.length<<">\n";
         }
-
-        std::vector<std::pair<int , MethPosInfo>> MethPosVec;
+        modCallResultVcf << "##longphaseVersion=" << params.version << "\n";
+        modCallResultVcf << "##commandline=\""    << params.command << "\"\n";
+        modCallResultVcf<<"#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSAMPLE\n";
         
-        for(std::map<int , MethPosInfo>::iterator posinfoIter = chrMethMap->begin(); posinfoIter != chrMethMap->end(); posinfoIter++){
-            std::string infostr= "";
-            std::string eachpos;
-            std::string samplestr;
-            std::string strandinfo;
-            std::string ref;
-            
-            auto passPosIter =  passPosition.find((*posinfoIter).first);
-            auto prepassPosIter =  passPosition.find((*posinfoIter).first - 1);
-            auto nextpassPosIter =  passPosition.find((*posinfoIter).first + 1);
-            
-            // prevent variant coordinates from exceeding the reference.
-            if( int( chrString[chrName].length() ) < (*posinfoIter).first ){
-                continue;
-            }
-            
-            // prevent abnormal REF allele.
-            ref = chrString[chrName].substr((*posinfoIter).first,1);
-            if( ref != "A" && ref != "T" && ref != "C" && ref != "G" && 
-                ref != "a" && ref != "t" && ref != "c" && ref != "g"  ){
-                continue;
-            }
-            
-            // set variant strand
-            if( (*posinfoIter).second.strand == 1 ){
-                strandinfo = "RS=N;";
-            }
-            else if( (*posinfoIter).second.strand == 0 ){
-                strandinfo = "RS=P;";
-            }
-            else{
-                continue;
-            }
-            
-            //Output contains only consecutive methylation position (CpG)
-            if( (prepassPosIter == passPosition.end() && nextpassPosIter == passPosition.end()) || passPosIter ==  passPosition.end() ){
-                if( params->outputAllMod ){
-                    int nonmethcnt = (*posinfoIter).second.canonreadcnt;
-                    samplestr = (*posinfoIter).second.heterstatus + ":" + std::to_string((*posinfoIter).second.methreadcnt) + ":" + std::to_string(nonmethcnt) + ":" + std::to_string((*posinfoIter).second.depth);
-
-                    eachpos = chrName + "\t" + std::to_string((*posinfoIter).first + 1) + "\t" + "." + "\t" + ref + "\t" + "N" + "\t" + "." + "\t" + "." + "\t" + strandinfo + infostr + "\t" + "GT:MD:UD:DP" + "\t" + samplestr + "\n";
-                    ModResultVcf<<eachpos;
-                }         
-                continue;
-            }
-            
-            // append modification reads
-            if((*posinfoIter).second.modReadVec.size() > 0 ){
-                infostr += "MR=";
-                for(auto readName : (*posinfoIter).second.modReadVec ){
-                    infostr += readName + ",";
-                }
-                infostr.back() = ';';
-            }
-                
-            // append non modification reads
-            if((*posinfoIter).second.nonModReadVec.size() > 0 ){
-                infostr += "NR=";
-                for(auto readName : (*posinfoIter).second.nonModReadVec ){
-                    infostr += readName + ",";
-                }
-                infostr.back() = ';';
-            }
-
-            if((*posinfoIter).second.heterstatus == "0/1"){
-                int nonmethcnt = (*posinfoIter).second.canonreadcnt;
-                samplestr = (*posinfoIter).second.heterstatus + ":" + std::to_string((*posinfoIter).second.methreadcnt) + ":" + std::to_string(nonmethcnt) + ":" + std::to_string((*posinfoIter).second.depth);
-
-                eachpos = chrName + "\t" + std::to_string((*posinfoIter).first + 1) + "\t" + "." + "\t" + ref + "\t" + "N" + "\t" + "." + "\t" + "PASS" + "\t" + strandinfo + infostr + "\t" + "GT:MD:UD:DP" + "\t" + samplestr + "\n";
-
-                ModResultVcf<<eachpos;
-            }
-
+        // set vcf body
+        for(const auto& chrIter : chrInfo){
+            modCallResultVcf << chrModCallResult[chrIter.name].str();
         }
     }
 }

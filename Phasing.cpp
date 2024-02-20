@@ -28,15 +28,12 @@ static const char *CORRECT_USAGE_MESSAGE =
 "   -q, --mappingQuality=Num               filter alignment if mapping quality is lower than threshold. default:1\n\n"
 
 "phasing graph arguments:\n"
+"   -p, --baseQuality=[0~90]               change edge's weight to --edgeWeight if base quality is lower than the threshold. default:12\n"
+"   -e, --edgeWeight=[0~1]                 decide how much weight should we change if it has low base quality. default:0.1\n"
 "   -a, --connectAdjacent=Num              connect adjacent N SNPs. default:20\n"
 "   -d, --distance=Num                     phasing two variant if distance less than threshold. default:300000\n"
-"   -1, --readsThreshold=[0~1]             give up SNP-SNP phasing pair if the number of reads of the \n"
+"   -1, --edgeThreshold=[0~1]              give up SNP-SNP phasing pair if the number of reads of the \n"
 "                                          two combinations are similar. default:0.7\n"
-"   -v, --confidentHaplotype=[0~1]         the haplotype of the current SNP is judged by the haplotype of the previous N SNPs.\n"
-"                                          if the threshold is higher, the consistency of SNP needs to be higher. default:0.5\n"
-"   -j, --judgeInconsistent=[0~1]          the proportion of inconsistent haplotypes among the haplotypes of the previous N SNPs.\n"
-"                                          inconsistent SNPs are tagged if the proportion is below the threshold. default:0.4\n"
-"   -i, --inconsistentThreshold=Num        phased genotype correction is performed when a SNP is tagged multiple times. default:5\n\n"
 
 "haplotag read correction arguments:\n"
 "   -m, --readConfidence=[0.5~1]           The confidence of a read being assigned to any haplotype. default:0.65\n"
@@ -44,7 +41,7 @@ static const char *CORRECT_USAGE_MESSAGE =
 
 "\n";
 
-static const char* shortopts = "s:b:o:t:r:d:1:a:q:p:e:j:i:v:n:m:";
+static const char* shortopts = "s:b:o:t:r:d:1:a:q:p:e:n:m:";
 
 enum { OPT_HELP = 1 , DOT_FILE, SV_FILE, MOD_FILE, IS_ONT, IS_PB, PHASE_INDEL, VERSION};
 
@@ -63,14 +60,11 @@ static const struct option longopts[] = {
     { "out-prefix",           required_argument,  NULL, 'o' },
     { "threads",              required_argument,  NULL, 't' },
     { "distance",             required_argument,  NULL, 'd' },
-    { "readsThreshold",       required_argument,  NULL, '1' },
+    { "edgeThreshold",        required_argument,  NULL, '1' },
     { "connectAdjacent",      required_argument,  NULL, 'a' },
     { "mappingQuality",       required_argument,  NULL, 'q' },
-    { "baseQuality",          required_argument,  NULL, 'p' },
-    { "edgeWeight",          required_argument,  NULL, 'e' },
-    { "judgeInconsistent",    required_argument,  NULL, 'j' },
-    { "inconsistentThreshold",required_argument,  NULL, 'i' },
-    { "confidentHaplotype",   required_argument,  NULL, 'v' },
+    { "baseQuality",       required_argument,  NULL, 'p' },
+    { "edgeWeight",       required_argument,  NULL, 'e' },
     { "snpConfidence",        required_argument,  NULL, 'n' },
     { "readConfidence",       required_argument,  NULL, 'm' },
     { NULL, 0, NULL, 0 }
@@ -92,18 +86,15 @@ namespace opt
     static bool phaseIndel=false;
     
     static int connectAdjacent = 20;
-    static int mappingQuality =1;
-    static int baseQuality =12;
-   
-    static double edgeWeight = 0.1;
-    static double confidentHaplotype = 0.5;
-    static double judgeInconsistent  = 0.4 ;
-    static int inconsistentThreshold = 5 ;
-    
+    static int mappingQuality = 1;
+
+    static int baseQuality = 12;
+    static double edgeWeight = 0.1 ;
+
     static double snpConfidence  = 0.75;
     static double readConfidence = 0.65;
     
-    static double readsThreshold = 0.7;
+    static double edgeThreshold = 0.7;
 
     static std::string command;
 }
@@ -123,14 +114,11 @@ void PhasingOptions(int argc, char** argv)
         case 'o': arg >> opt::resultPrefix; break;
         case 'r': arg >> opt::fastaFile; break;  
         case 'd': arg >> opt::distance; break;  
-        case '1': arg >> opt::readsThreshold; break; 
+        case '1': arg >> opt::edgeThreshold; break; 
         case 'a': arg >> opt::connectAdjacent; break;
         case 'q': arg >> opt::mappingQuality; break;
-        case 'p': arg >> opt::baseQuality; break;
+	case 'p': arg >> opt::baseQuality; break;
 	case 'e': arg >> opt::edgeWeight; break;
-        case 'j': arg >> opt::judgeInconsistent; break;
-        case 'i': arg >> opt::inconsistentThreshold; break;
-        case 'v': arg >> opt::confidentHaplotype; break;
         case 'n': arg >> opt::snpConfidence; break;
         case 'm': arg >> opt::readConfidence; break;
         case 'b': {
@@ -229,23 +217,37 @@ void PhasingOptions(int argc, char** argv)
     }
 
     if ( opt::baseQuality < 0 ){
-        std::cerr << SUBPROGRAM " invalid mappingQuality. value: "
+        std::cerr << SUBPROGRAM " invalid baseQuality. value: "
                   << opt::baseQuality
-                  << "\n please check -p, --baseQuality=Num\n";
+                  << "\n please check -m, --mappingQuality=[0~90]\n";
         die = true;
     }
 
     if ( opt::edgeWeight < 0 ){
         std::cerr << SUBPROGRAM " invalid edgeWeight. value: "
                   << opt::edgeWeight
-                  << "\n please check -e, --edgeWeight=Num\n";
+                  << "\n please check -m, --edgeWeight=[0~1]\n";
         die = true;
     }
 
-    if ( opt::readsThreshold < 0 || opt::readsThreshold > 1 ){
-        std::cerr << SUBPROGRAM " invalid readsThreshold. value: " 
-                  << opt::readsThreshold 
-                  << "\n please check -1, --readsThreshold=[0~1]\n";
+    if ( opt::edgeThreshold < 0 || opt::edgeThreshold > 1 ){
+        std::cerr << SUBPROGRAM " invalid edgeThreshold. value: " 
+                  << opt::edgeThreshold 
+                  << "\n please check -1, --edgeThreshold=[0~1]\n";
+        die = true;
+    }
+    
+    if ( opt::readConfidence < 0.5 || opt::readConfidence > 1 ){
+        std::cerr << SUBPROGRAM " invalid readConfidence. value: " 
+                  << opt::readConfidence 
+                  << "\n please check -m, --readConfidence=[0.5~1]\n";
+        die = true;
+    }
+    
+    if ( opt::snpConfidence < 0.5 || opt::snpConfidence > 1 ){
+        std::cerr << SUBPROGRAM " invalid snpConfidence. value: " 
+                  << opt::snpConfidence 
+                  << "\n please check -n, --snpConfidence=[0.5~1]\n";
         die = true;
     }
 
@@ -279,14 +281,11 @@ int PhasingMain(int argc, char** argv, std::string in_version)
     
     ecParams.connectAdjacent=opt::connectAdjacent;
     ecParams.mappingQuality=opt::mappingQuality;
+
     ecParams.baseQuality=opt::baseQuality;
-    
     ecParams.edgeWeight=opt::edgeWeight;
-    ecParams.confidentHaplotype=opt::confidentHaplotype;
-    ecParams.judgeInconsistent=opt::judgeInconsistent;
-    ecParams.inconsistentThreshold=opt::inconsistentThreshold;
-    
-    ecParams.readsThreshold=opt::readsThreshold;
+
+    ecParams.edgeThreshold=opt::edgeThreshold;
     
     ecParams.snpConfidence=opt::snpConfidence;
     ecParams.readConfidence=opt::readConfidence;

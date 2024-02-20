@@ -21,18 +21,14 @@ struct PhasingParameters
     
     int connectAdjacent;
     int mappingQuality;
-    
-    double confidentHaplotype;
-    double judgeInconsistent;
-    int inconsistentThreshold;
-    
-    double snpConfidence;
-    double readConfidence;
-    
-    double readsThreshold;
 
     int baseQuality;
     double edgeWeight;
+
+    double snpConfidence;
+    double readConfidence;
+    
+    double edgeThreshold;
     
     std::string version;
     std::string command;
