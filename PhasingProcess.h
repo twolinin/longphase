@@ -22,6 +22,9 @@ struct PhasingParameters
     int connectAdjacent;
     int mappingQuality;
 
+    int baseQuality;
+    double edgeWeight;
+
     double snpConfidence;
     double readConfidence;
     
