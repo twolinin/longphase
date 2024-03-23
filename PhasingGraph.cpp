@@ -484,10 +484,10 @@ void VairiantGraph::addEdge(std::vector<ReadVariant> &in_readVariant){
             for(int nextNode = 0 ; nextNode < params->connectAdjacent; nextNode++){
                 // this allele support ref
                 if( (*variant1Iter).allele == 0 )
-                    (*edgeList)[(*variant1Iter).position]->ref->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).first);
+                    (*edgeList)[(*variant1Iter).position]->ref->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).first,params->baseQuality,params->edgeWeight);
                 // this allele support alt
                 if( (*variant1Iter).allele == 1 )
-                    (*edgeList)[(*variant1Iter).position]->alt->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).first);
+                    (*edgeList)[(*variant1Iter).position]->alt->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).first,params->baseQuality,params->edgeWeight);
                 
                 // next snp
                 variant2Iter++;
