@@ -365,13 +365,16 @@ void SnpParser::parserProcess(std::string &input){
 
 void SnpParser::writeLine(std::string &input, bool &ps_def, std::ofstream &resultVcf, PhasingResult &phasingResult){
     // header
-    if( input.find("#")!= std::string::npos){
+    if( input.substr(0, 2) == "##" ){
         // avoid double definition
-        if( input.find("ID=PS,")!= std::string::npos){
+        if( input.substr(0, 16) == "##FORMAT=<ID=PS," ){
             ps_def = true;
         }
+        resultVcf << input << "\n";
+    }
+    else if ( input.substr(0, 6) == "#CHROM" || input.substr(0, 6) == "#chrom" ){
         // format line 
-        if( input.find("##")== std::string::npos && commandLine == false){
+        if( commandLine == false ){
             if(ps_def == false){
                 resultVcf <<  "##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase set identifier\">\n";
                 ps_def = true;
@@ -382,7 +385,7 @@ void SnpParser::writeLine(std::string &input, bool &ps_def, std::ofstream &resul
         }
         resultVcf << input << "\n";
     }
-    else if( input.find("#")== std::string::npos ){
+    else{
         std::istringstream iss(input);
         std::vector<std::string> fields((std::istream_iterator<std::string>(iss)),std::istream_iterator<std::string>());
 
@@ -636,10 +639,13 @@ SVParser::~SVParser(){
 }
 
 void SVParser::parserProcess(std::string &input){
-    if( input.find("#")!= std::string::npos){
+    if( input.substr(0, 2) == "##" ){
 
     }
-    else if( input.find("#")== std::string::npos ){
+    else if ( input.substr(0, 1) == "#" ){
+        
+    }
+    else{
         std::istringstream iss(input);
         std::vector<std::string> fields((std::istream_iterator<std::string>(iss)),std::istream_iterator<std::string>());
 
@@ -732,13 +738,16 @@ void SVParser::writeResult(PhasingResult phasingResult){
 
 void SVParser::writeLine(std::string &input, bool &ps_def, std::ofstream &resultVcf, PhasingResult &phasingResult){
     // header
-    if( input.find("#")!= std::string::npos){
+    if( input.substr(0, 2) == "##" ){
         // avoid double definition
-        if( input.find("ID=PS,")!= std::string::npos){
+        if( input.substr(0, 16) == "##FORMAT=<ID=PS," ){
             ps_def = true;
         }
+        resultVcf << input << "\n";
+    }
+    else if ( input.substr(0, 6) == "#CHROM" || input.substr(0, 6) == "#chrom" ){
         // format line 
-        if( input.find("##")== std::string::npos && commandLine == false){
+        if( commandLine == false ){
             if(ps_def == false){
                 resultVcf <<  "##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase set identifier\">\n";
                 ps_def = true;
@@ -749,7 +758,7 @@ void SVParser::writeLine(std::string &input, bool &ps_def, std::ofstream &result
         }
         resultVcf << input << "\n";
     }
-    else if( input.find("#")== std::string::npos ){
+    else{
         std::istringstream iss(input);
         std::vector<std::string> fields((std::istream_iterator<std::string>(iss)),std::istream_iterator<std::string>());
 
@@ -1281,7 +1290,7 @@ METHParser::~METHParser(){
 
 void METHParser::parserProcess(std::string &input){
     // header
-    if( input.find("#")== std::string::npos ){
+    if( input.substr(0, 1) != "#" ){
         std::istringstream iss(input);
         std::vector<std::string> fields((std::istream_iterator<std::string>(iss)),std::istream_iterator<std::string>());
 
@@ -1384,13 +1393,16 @@ void METHParser::parserProcess(std::string &input){
 
 void METHParser::writeLine(std::string &input, bool &ps_def, std::ofstream &resultVcf, PhasingResult &phasingResult){
     // header
-    if( input.find("#")!= std::string::npos){
+    if( input.substr(0, 2) == "##" ){
         // avoid double definition
-        if( input.find("ID=PS,")!= std::string::npos){
+        if( input.substr(0, 16) == "##FORMAT=<ID=PS," ){
             ps_def = true;
         }
+        resultVcf << input << "\n";
+    }
+    else if ( input.substr(0, 6) == "#CHROM" || input.substr(0, 6) == "#chrom" ){
         // format line 
-        if( input.find("##")== std::string::npos && commandLine == false){
+        if( commandLine == false ){
             if(ps_def == false){
                 resultVcf <<  "##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase set identifier\">\n";
                 ps_def = true;
@@ -1401,7 +1413,7 @@ void METHParser::writeLine(std::string &input, bool &ps_def, std::ofstream &resu
         }
         resultVcf << input << "\n";
     }
-    else if( input.find("#")== std::string::npos ){
+    else{
         std::istringstream iss(input);
         std::vector<std::string> fields((std::istream_iterator<std::string>(iss)),std::istream_iterator<std::string>());
 
