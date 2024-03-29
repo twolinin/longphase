@@ -417,15 +417,45 @@ void VairiantGraph::destroy(){
 
 void VairiantGraph::addEdge(std::vector<ReadVariant> &in_readVariant){
     readVariant = &in_readVariant;
-    std::map<std::string,ReadVariant> tmpReadMap;
+    std::map<std::string,ReadVariant> mergeReadMap;
+    /*
+    // each read will record fist and list variant posistion
+    std::map<std::string, std::pair<int,int>> alignRange;
+    std::map<std::string, bool> alignmentOverlap;
     
-    // iter all read
+    // Check if different alignments of a read have overlap
+    for(std::vector<ReadVariant>::iterator readIter = in_readVariant.begin() ; readIter != in_readVariant.end() ; readIter++ ){
+        std::string readName = (*readIter).read_name;
+        int firstVariantPos = (*readIter).variantVec[0].position;
+        int lastVariantPos  = (*readIter).variantVec[(*readIter).variantVec.size()-1].position;
+        
+        auto rangeIter = alignRange.find(readName);
+        // this read name appears for the first time
+        if( rangeIter == alignRange.end() ){
+            alignRange[readName]=std::make_pair(firstVariantPos,lastVariantPos);
+            alignmentOverlap[readName]=false;
+        }
+        // the read appears more than once, check if the alignments overlap
+        else{
+            // overlap
+            if( alignRange[readName].first <= firstVariantPos && firstVariantPos <= alignRange[readName].second ){
+                alignmentOverlap[readName]=true;
+            }
+            // no verlap, update range
+            else{
+                alignRange[readName].second = lastVariantPos;
+            }
+        }
+    }
+    */
+    int readCount=0;
+    // merge alignment
     for(std::vector<ReadVariant>::iterator readIter = in_readVariant.begin() ; readIter != in_readVariant.end() ; readIter++ ){
         // Creating a pseudo read which allows filtering out variants that should not be phased
-        ReadVariant tmpRead;
+        //ReadVariant tmpRead;
         // Visiting all the variants on the read
         for( auto variant : (*readIter).variantVec ){
-            
+            readCount++;
             // modification
             if( variant.quality == -2 || variant.quality == -3 ){
                 (*variantType)[variant.position] = 2;
@@ -452,8 +482,14 @@ void VairiantGraph::addEdge(std::vector<ReadVariant> &in_readVariant){
             else{
                 (*variantType)[variant.position] = 0;
             }
-            
-            tmpReadMap[(*readIter).read_name].variantVec.push_back(variant);
+            mergeReadMap[(*readIter).read_name].variantVec.push_back(variant);
+            /*
+            if( !alignmentOverlap[(*readIter).read_name] ){
+                mergeReadMap[(*readIter).read_name].variantVec.push_back(variant);
+            }
+            else{
+                mergeReadMap[(*readIter).read_name+std::to_string(readCount)].variantVec.push_back(variant);
+            }*/
             //tmpRead.variantVec.push_back(variant);
             
             // Each position will record the included reads and their corresponding base qualities.
@@ -467,7 +503,7 @@ void VairiantGraph::addEdge(std::vector<ReadVariant> &in_readVariant){
         }
     }    
     
-    for(std::map<std::string,ReadVariant>::iterator readIter = tmpReadMap.begin() ; readIter != tmpReadMap.end() ; readIter++){
+    for(std::map<std::string,ReadVariant>::iterator readIter = mergeReadMap.begin() ; readIter != mergeReadMap.end() ; readIter++){
         (*readIter).second.sort();
         
         // iter all pair of snp and construct initial graph
@@ -598,13 +634,13 @@ void VairiantGraph::readCorrection(){
     for(std::vector<ReadVariant>::iterator readIter = (*readVariant).begin() ; readIter != (*readVariant).end() ; readIter++ ){
         double refCount = 0;
         double altCount = 0;
-        int block;
+        //int block;
         
         // loop all variant 
         for( auto variant : (*readIter).variantVec ){
             PosAllele refAllele = std::make_pair( variant.position , variant.allele+1);
             std::map<PosAllele,int>::iterator nodePS = bkResult->find(refAllele);
-            block = nodePS->second;
+            //block = nodePS->second;
             if( nodePS != bkResult->end() ){
                 if( (*bkResult)[refAllele] != 0 ){
                     if((*subNodeHP)[refAllele]==0)refCount++;
