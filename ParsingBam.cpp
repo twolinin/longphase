@@ -1047,7 +1047,7 @@ void BamParser::get_snp(const  bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<
         while( ( currentModIter != currentMod->end() && (*currentModIter).first < ref_pos + length )|| 
             (currentSVIter != currentSV->end() && (*currentSVIter).first < ref_pos + length ) || 
             (currentVariantIter != currentVariants->end() && (*currentVariantIter).first < ref_pos + length )){
-            /*甲基最小*/
+            //methylations
             if((currentVariantIter == currentVariants->end() || (*currentModIter).first < (*currentVariantIter).first) &&
                (currentSVIter == currentSV->end() || (*currentModIter).first < (*currentSVIter).first) &&
                 currentModIter != currentMod->end()){
@@ -1067,7 +1067,7 @@ void BamParser::get_snp(const  bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<
                 }
                 currentModIter++;
             }
-            /*SV最小*/
+            //SV
             else if((currentVariantIter == currentVariants->end() || (*currentSVIter).first < (*currentVariantIter).first) &&
                     (currentModIter == currentMod->end() || (*currentSVIter).first < (*currentModIter).first) &&
                      currentSVIter != currentSV->end()){
@@ -1089,7 +1089,7 @@ void BamParser::get_snp(const  bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<
                 currentSVIter++;
             }
 
-            /*SNP最小*/
+            //SNP
             else if((currentSVIter == currentSV->end() || (*currentVariantIter).first < (*currentSVIter).first) &&
                     (currentModIter == currentMod->end() || (*currentVariantIter).first < (*currentModIter).first) &&
                      currentVariantIter != currentVariants->end()){
