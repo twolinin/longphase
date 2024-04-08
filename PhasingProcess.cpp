@@ -48,7 +48,7 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
     //Parse mod vcf file
 	begin = time(NULL);
 	std::cerr<< "parsing Meth VCF ... ";
-	METHParser modFile(params, snpFile);
+    METHParser modFile(params, snpFile, svFile);
 	std::cerr<< difftime(time(NULL), begin) << "s\n";
  
     // parsing ref fasta 
