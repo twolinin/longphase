@@ -112,6 +112,8 @@ class SVParser : public BaseVairantParser{
         std::map<int, std::map<std::string ,bool> > getVariants(std::string chrName);  
 
         void writeResult(PhasingResult phasingResult);
+
+        bool findSV(std::string chr, int posistion);
 };
 
 class METHParser : public BaseVairantParser{
@@ -119,6 +121,7 @@ class METHParser : public BaseVairantParser{
     private:
         PhasingParameters *params;
         SnpParser *snpFile;
+        SVParser *svFile;
         
         int representativePos;
         int upMethPos;
@@ -141,7 +144,7 @@ class METHParser : public BaseVairantParser{
         
         std::map<int, std::map<std::string ,RefAlt> > getVariants(std::string chrName);  
         
-        METHParser(PhasingParameters &params, SnpParser &snpFile);
+        METHParser(PhasingParameters &params, SnpParser &snpFile, SVParser &svFile);
         ~METHParser();
 		
 		void writeResult(PhasingResult phasingResult);
