@@ -180,7 +180,7 @@ class BamParser{
         BamParser(std::string chrName, std::vector<std::string> inputBamFileVec, SnpParser &snpMap, SVParser &svFile, METHParser &modFile);
         ~BamParser();
         
-        void direct_detect_alleles(int lastSNPPos, int &numThreads, PhasingParameters params, std::vector<ReadVariant> &readVariantVec , const std::string &ref_string);
+        void direct_detect_alleles(int lastSNPPos, htsThreadPool &threadPool, PhasingParameters params, std::vector<ReadVariant> &readVariantVec , const std::string &ref_string);
 
 };
 

@@ -909,7 +909,7 @@ BamParser::~BamParser(){
     delete currentMod;
 }
 
-void BamParser::direct_detect_alleles(int lastSNPPos, int &numThreads, PhasingParameters params, std::vector<ReadVariant> &readVariantVec, const std::string &ref_string){
+void BamParser::direct_detect_alleles(int lastSNPPos, htsThreadPool &threadPool, PhasingParameters params, std::vector<ReadVariant> &readVariantVec, const std::string &ref_string){
     
     // record SNP start iter
     std::map<int, RefAlt>::iterator tmpFirstVariantIter = firstVariantIter;
@@ -924,8 +924,6 @@ void BamParser::direct_detect_alleles(int lastSNPPos, int &numThreads, PhasingPa
         firstSVIter = tmpFirstSVIter;
         firstModIter = tmpFirstModIter;
 
-// init data structure and get core n
-        htsThreadPool threadPool = {NULL, 0};
         // open bam file
         samFile *fp_in = hts_open(bamFile.c_str(),"r"); 
         // load reference file
@@ -945,14 +943,8 @@ void BamParser::direct_detect_alleles(int lastSNPPos, int &numThreads, PhasingPa
         hts_itr_t* iter = sam_itr_querys(idx, bamHdr, range.c_str());
 
         
-                int result;
-
-        // creat thread pool
-        if (!(threadPool.pool = hts_tpool_init(numThreads))) {
-            fprintf(stderr, "Error creating thread pool\n");
-        }
         hts_set_opt(fp_in, HTS_OPT_THREAD_POOL, &threadPool);
-        
+        int result;
         while ((result = sam_itr_multi_next(fp_in, iter, aln)) >= 0) { 
             int flag = aln->core.flag;
 
@@ -973,7 +965,6 @@ void BamParser::direct_detect_alleles(int lastSNPPos, int &numThreads, PhasingPa
         bam_hdr_destroy(bamHdr);
         bam_destroy1(aln);
         sam_close(fp_in);
-hts_tpool_destroy(threadPool.pool);
     }
     
 }

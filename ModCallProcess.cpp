@@ -18,14 +18,18 @@ ModCallProcess::ModCallProcess(ModCallParameters params){
         chrModCallResult[chrIter->name] = std::ostringstream();
     }
 
-    // set chrNumThreads and bamParserNumThreads based on parameters
-    int chrNumThreads,bamParserNumThreads;
-    setModcallNumThreads(params.numThreads, chrNumThreads, bamParserNumThreads);
-    // setNumThreads(chrInfo.size(), params.numThreads, chrNumThreads, bamParserNumThreads);
+    // init data structure and get core n
+    htsThreadPool threadPool = {NULL, 0};
+
+    // creat thread pool
+    if (!(threadPool.pool = hts_tpool_init(params.numThreads))) {
+        fprintf(stderr, "Error creating thread pool\n");
+    }
+
     begin = time(NULL);
 
     //loop all chromosomes
-    #pragma omp parallel for schedule(dynamic) num_threads(chrNumThreads)
+    #pragma omp parallel for schedule(dynamic) num_threads(params.numThreads)
     for(auto chrIter = chrInfo.begin(); chrIter != chrInfo.end(); ++chrIter) {
         std::time_t chrbegin = time(NULL);
 
@@ -42,7 +46,7 @@ ModCallProcess::ModCallProcess(ModCallParameters params){
         
         MethBamParser *methbamparser = new MethBamParser(params, chrSeq);
         
-        methbamparser->detectMeth(chrName, chrLen, bamParserNumThreads, readVariantVec);
+        methbamparser->detectMeth(chrName, chrLen, threadPool, readVariantVec);
 
         //new new calculate depth
         methbamparser->calculateDepth();
@@ -80,6 +84,7 @@ ModCallProcess::ModCallProcess(ModCallParameters params){
 
         std::cerr<< "(" << chrName << "," << difftime(time(NULL), chrbegin) << "s)";
     }
+    hts_tpool_destroy(threadPool.pool);
     std::cerr<< "\nmodcall total:  " << difftime(time(NULL), begin) << "s\n";
 
     begin= time(NULL);

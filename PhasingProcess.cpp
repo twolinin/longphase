@@ -32,13 +32,13 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
     std::cerr<< "\n";
     
     std::time_t processBegin = time(NULL);
-    
+        
     // load SNP vcf file
     std::time_t begin = time(NULL);
     std::cerr<< "parsing VCF ... ";
     SnpParser snpFile(params);
     std::cerr<< difftime(time(NULL), begin) << "s\n";
-    
+
     // load SV vcf file
     begin = time(NULL);
     std::cerr<< "parsing SV VCF ... ";
@@ -71,14 +71,19 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
     for (std::vector<std::string>::iterator chrIter = chrName.begin(); chrIter != chrName.end(); chrIter++)    {
         chrPhasingResult[*chrIter] = PhasingResult();
     }
-    
-    // set chrNumThreads and bamParserNumThreads based on parameters
-    int chrNumThreads,bamParserNumThreads;
-    setPhasingNumThreads(chrName.size(), params.numThreads, chrNumThreads, bamParserNumThreads);
+
+    // init data structure and get core n
+    htsThreadPool threadPool = {NULL, 0};
+
+    // creat thread pool
+    if (!(threadPool.pool = hts_tpool_init(params.numThreads))) {
+        fprintf(stderr, "Error creating thread pool\n");
+    }
+
     begin = time(NULL);
     
     // loop all chromosome
-    #pragma omp parallel for schedule(dynamic) num_threads(chrNumThreads)
+    #pragma omp parallel for schedule(dynamic) num_threads(params.numThreads)
     for(std::vector<std::string>::iterator chrIter = chrName.begin(); chrIter != chrName.end() ; chrIter++ ){
         
         std::time_t chrbegin = time(NULL);
@@ -97,7 +102,7 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
         // use to store variant
         std::vector<ReadVariant> readVariantVec;
         // run fetch variant process
-        bamParser->direct_detect_alleles(lastSNPpos, bamParserNumThreads, params, readVariantVec , chr_reference);
+        bamParser->direct_detect_alleles(lastSNPpos, threadPool, params, readVariantVec , chr_reference);
         // free memory
         delete bamParser;
         
@@ -134,7 +139,8 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
         
         std::cerr<< "(" << (*chrIter) << "," << difftime(time(NULL), chrbegin) << "s)";
     }
-    
+    hts_tpool_destroy(threadPool.pool);
+
     std::cerr<< "\nparsing total:  " << difftime(time(NULL), begin) << "s\n";
     
     begin = time(NULL);
