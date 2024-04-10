@@ -90,7 +90,7 @@ void HaplotagProcess::unCompressParser(std::string &variantFile){
 }
 
 void HaplotagProcess::parserProcess(std::string &input){
-    if( input.find("#")!= std::string::npos && parseSnpFile ){
+    if( input.substr(0, 2) == "##" && parseSnpFile){
         if( input.find("contig=")!= std::string::npos ){
             int id_start  = input.find("ID=")+3;
             int id_end    = input.find(",length=");
@@ -103,7 +103,7 @@ void HaplotagProcess::parserProcess(std::string &input){
             chrVec.push_back(chr);
             chrLength[chr]=chrLen;
         }
-        if( input.find("ID=PS")!= std::string::npos ){
+        if( input.substr(0, 16) == "##FORMAT=<ID=PS," ){
             if( input.find("Type=Integer")!= std::string::npos ){
                 integerPS = true;
             }
@@ -117,7 +117,10 @@ void HaplotagProcess::parserProcess(std::string &input){
             }
         }
     }
-    else if( input.find("#")== std::string::npos ){
+    else if ( input.substr(0, 1) == "#" ){
+
+    }
+    else{
         std::istringstream iss(input);
         std::vector<std::string> fields((std::istream_iterator<std::string>(iss)),std::istream_iterator<std::string>());
 
