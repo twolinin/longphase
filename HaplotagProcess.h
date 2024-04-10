@@ -18,6 +18,7 @@ struct HaplotagParameters
     std::string bamFile;
     std::string fastaFile;
     std::string resultPrefix;
+    std::string region;
     
     bool tagSupplementary;
     bool writeReadLog;
