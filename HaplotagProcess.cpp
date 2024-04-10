@@ -320,7 +320,7 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
     }
 
     // reference fasta parser
-    FastaParser fastaParser(params.fastaFile , chrVec, last_pos);
+    FastaParser fastaParser(params.fastaFile, chrVec, last_pos, params.numThreads);
 
     // write tag read detail information
     std::ofstream *tagResult=NULL;

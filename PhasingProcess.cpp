@@ -58,7 +58,7 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
     for(auto chr :snpFile.getChrVec()){
         last_pos.push_back(snpFile.getLastSNP(chr));
     }
-    FastaParser fastaParser(params.fastaFile , snpFile.getChrVec(), last_pos);
+    FastaParser fastaParser(params.fastaFile, snpFile.getChrVec(), last_pos, params.numThreads);
     std::cerr<< difftime(time(NULL), begin) << "s\n";
 
     // get all detected chromosome

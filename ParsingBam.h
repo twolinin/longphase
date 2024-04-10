@@ -27,7 +27,7 @@ class FastaParser{
         std::vector<std::string> chrName;
         std::vector<int> last_pos;
     public:
-        FastaParser(std::string fastaFile  , std::vector<std::string> chrName , std::vector<int> last_pos);
+        FastaParser(std::string fastaFile, std::vector<std::string> chrName, std::vector<int> last_pos, int numThreads);
         ~FastaParser();
         
         // chrName, chr string
