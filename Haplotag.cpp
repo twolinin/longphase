@@ -17,7 +17,7 @@ static const char *CORRECT_USAGE_MESSAGE =
 "      --tagSupplementary              tag supplementary alignment. default:false\n"
 "      --sv-file=NAME                  input phased SV vcf file.\n"
 "      --mod-file=NAME                 input a modified VCF file (produced by longphase modcall and processed by longphase phase).\n"
-"      -q, --qualityThreshold=Num      not tag alignment if the mapping quality less than threshold. default:0\n"
+"      -q, --qualityThreshold=Num      not tag alignment if the mapping quality less than threshold. default:1\n"
 "      -p, --percentageThreshold=Num   the alignment will be tagged according to the haplotype corresponding to most alleles.\n"
 "                                      if the alignment has no obvious corresponding haplotype, it will not be tagged. default:0.6\n"
 "      -t, --threads=Num               number of thread. default:1\n"
@@ -50,7 +50,7 @@ static const struct option longopts[] = {
 namespace opt
 {
     static int numThreads = 1;
-    static int qualityThreshold = 20;
+    static int qualityThreshold = 1;
     static double percentageThreshold = 0.6;
     static std::string snpFile="";
     static std::string svFile="";
