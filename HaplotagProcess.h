@@ -58,8 +58,8 @@ class HaplotagProcess
     int totalSupplementary;
     int totalSecondary;
     int totalUnmapped;
-    int totalTagCuonnt;
-    int totalUnTagCuonnt;
+    int totalTagCount;
+    int totalUnTagCount;
     
     std::time_t processBegin;
     bool integerPS;
