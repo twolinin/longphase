@@ -90,7 +90,7 @@ void HaplotagProcess::unCompressParser(std::string &variantFile){
 }
 
 void HaplotagProcess::parserProcess(std::string &input){
-    if( input.find("#")!= std::string::npos && parseSnpFile ){
+    if( input.substr(0, 2) == "##" && parseSnpFile){
         if( input.find("contig=")!= std::string::npos ){
             int id_start  = input.find("ID=")+3;
             int id_end    = input.find(",length=");
@@ -103,7 +103,7 @@ void HaplotagProcess::parserProcess(std::string &input){
             chrVec.push_back(chr);
             chrLength[chr]=chrLen;
         }
-        if( input.find("ID=PS")!= std::string::npos ){
+        if( input.substr(0, 16) == "##FORMAT=<ID=PS," ){
             if( input.find("Type=Integer")!= std::string::npos ){
                 integerPS = true;
             }
@@ -117,7 +117,10 @@ void HaplotagProcess::parserProcess(std::string &input){
             }
         }
     }
-    else if( input.find("#")== std::string::npos ){
+    else if ( input.substr(0, 1) == "#" ){
+        
+    }
+    else{
         std::istringstream iss(input);
         std::vector<std::string> fields((std::istream_iterator<std::string>(iss)),std::istream_iterator<std::string>());
 
@@ -276,6 +279,24 @@ void HaplotagProcess::parserProcess(std::string &input){
 
 void HaplotagProcess::tagRead(HaplotagParameters &params){
 
+    // update chromosome processing based on region
+    if (!params.region.empty()) {
+        auto colonPos = params.region.find(":");
+        std::string regionChr;
+        if (colonPos != std::string::npos) {
+            regionChr = params.region.substr(0, colonPos);
+        }
+        else {
+            regionChr = params.region;
+        }
+        auto chrVecIter = std::find(chrVec.begin(), chrVec.end(), regionChr);
+        if (chrVecIter != chrVec.end()) {
+            chrVec = std::vector<std::string>{regionChr};
+        } else {
+            std::cerr << "ERROR: Incorrect chromosome for input region\n" << std::endl;
+            exit(1);
+        }
+    }
     // input file management
     std::string openBamFile = params.bamFile;
     // open bam file
@@ -320,7 +341,7 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
     }
 
     // reference fasta parser
-    FastaParser fastaParser(params.fastaFile , chrVec, last_pos);
+    FastaParser fastaParser(params.fastaFile, chrVec, last_pos, params.numThreads);
 
     // write tag read detail information
     std::ofstream *tagResult=NULL;
@@ -336,6 +357,7 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
             (*tagResult) << "##bamFile:"             << params.bamFile             << "\n";
             (*tagResult) << "##resultPrefix:"        << params.resultPrefix        << "\n";
             (*tagResult) << "##numThreads:"          << params.numThreads          << "\n";
+            (*tagResult) << "##region:"              << params.region              << "\n";
             (*tagResult) << "##qualityThreshold:"    << params.qualityThreshold    << "\n";
             (*tagResult) << "##percentageThreshold:" << params.percentageThreshold << "\n";
             (*tagResult) << "#tagSupplementary:"     << params.tagSupplementary    << "\n";
@@ -382,9 +404,9 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
         // fetch chromosome string
         std::string chr_reference = fastaParser.chrString.at(chr);
         
-        // tagging will be attempted for reads within the specified coordinate range.
-        std::string range = chr + ":1-" + std::to_string(chrLength[chr]);
-        hts_itr_t* iter = sam_itr_querys(idx, bamHdr, range.c_str());
+        // tagging will be attempted for reads within the specified coordinate region.
+        std::string region = !params.region.empty() ? params.region : chr + ":1-" + std::to_string(chrLength[chr]);
+        hts_itr_t *iter = sam_itr_querys(idx, bamHdr, region.c_str());
         // iter all reads
         while ((result = sam_itr_multi_next(in, iter, aln)) >= 0) {
             totalAlignment++;
@@ -392,36 +414,22 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
 
             if ( aln->core.qual < params.qualityThreshold ){
                 // mapping quality is lower than threshold
-                // write this alignment to result bam file
-                result = sam_write1(out, bamHdr, aln);
-                continue;
             }
-
-            if( (flag & 0x4) != 0 ){
+            else if( (flag & 0x4) != 0 ){
                 // read unmapped
                 totalUnmapped++;
-                // write this alignment to result bam file
-                result = sam_write1(out, bamHdr, aln);
-                continue;
             }
-            if( (flag & 0x100) != 0 ){
+            else if( (flag & 0x100) != 0 ){
                 // secondary alignment. repeat.
                 // A secondary alignment occurs when a given read could align reasonably well to more than one place.
                 totalSecondary++;
-                // write this alignment to result bam file
-                result = sam_write1(out, bamHdr, aln);
-                continue;
             }
-            if( (flag & 0x800) != 0 && params.tagSupplementary == false ){
+            else if( (flag & 0x800) != 0 && params.tagSupplementary == false ){
                 // supplementary alignment
                 // A chimeric alignment is represented as a set of linear alignments that do not have large overlaps.
                 totalSupplementary++;
-                // write this alignment to result bam file
-                result = sam_write1(out, bamHdr, aln);
-                continue;
             }
-
-            if(last == currentChrVariants.rend()){
+            else if(last == currentChrVariants.rend()){
                 // skip 
                 totalUnTagCuonnt++;
             }
@@ -804,6 +812,7 @@ totalAlignment(0),totalSupplementary(0),totalSecondary(0),totalUnmapped(0),total
     std::cerr<< "write log file:    " << (params.writeReadLog ? "true" : "false") << "\n";
     std::cerr<< "log file:          " << (params.writeReadLog ? (params.resultPrefix+".out") : "") << "\n";
     std::cerr<< "-------------------------------------------\n";
+    std::cerr<< "tag region:                    " << (!params.region.empty() ? params.region : "all") << "\n";
     std::cerr<< "filter mapping quality below:  " << params.qualityThreshold    << "\n";
     std::cerr<< "percentage threshold:          " << params.percentageThreshold << "\n";
     std::cerr<< "tag supplementary:             " << (params.tagSupplementary ? "true" : "false") << "\n";

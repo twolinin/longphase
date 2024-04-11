@@ -27,7 +27,7 @@ class FastaParser{
         std::vector<std::string> chrName;
         std::vector<int> last_pos;
     public:
-        FastaParser(std::string fastaFile  , std::vector<std::string> chrName , std::vector<int> last_pos);
+        FastaParser(std::string fastaFile, std::vector<std::string> chrName, std::vector<int> last_pos, int numThreads);
         ~FastaParser();
         
         // chrName, chr string
@@ -183,7 +183,7 @@ class BamParser{
         BamParser(std::string chrName, std::vector<std::string> inputBamFileVec, SnpParser &snpMap, SVParser &svFile, METHParser &modFile);
         ~BamParser();
         
-        void direct_detect_alleles(int lastSNPPos, int &numThreads, PhasingParameters params, std::vector<ReadVariant> &readVariantVec , const std::string &ref_string);
+        void direct_detect_alleles(int lastSNPPos, htsThreadPool &threadPool, PhasingParameters params, std::vector<ReadVariant> &readVariantVec , const std::string &ref_string);
 
 };
 
