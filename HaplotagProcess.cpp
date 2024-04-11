@@ -458,11 +458,11 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
                     bam_aux_append(aln, "PQ", 'i', sizeof(pqValue), (uint8_t*) &pqValue);
                     totalTagCount++;
                 }
-                else {
+                else{
                     totalUnTagCount++;
                 }
             }
-	    else {
+	    else{
                 totalUnTagCount++;
 	    }
 
