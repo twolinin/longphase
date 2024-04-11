@@ -650,7 +650,7 @@ void VairiantGraph::readCorrection(){
         }
         
         // tag high confident reads
-        if( std::max(refCount,altCount)/(refCount+altCount) > params->readConfidence ){
+        if( std::max(refCount,altCount)/(refCount+altCount) > params->readConfidence && (refCount + altCount) > 1 ){
             // tag read with the corresponding haplotype
             int belongHP = ( refCount > altCount ? 0 : 1 );
             (*readHpMap)[(*readIter).read_name] = belongHP;
