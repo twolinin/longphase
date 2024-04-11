@@ -471,6 +471,9 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
         }
         std::cerr<< difftime(time(NULL), begin) << "s\n";
     }
+    if(tagResult!=NULL){
+        (*tagResult).close();
+    }
     hts_idx_destroy(idx);
     bam_hdr_destroy(bamHdr);
     bam_destroy1(aln);
@@ -763,6 +766,11 @@ int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, 
     else{
         pqValue=-10*(std::log10((double)min/double(max+min)));
     }
+    
+    // cross two block
+    if( countPS.size() > 1  ){
+        hpResult = 0;
+    }
 
     if(tagResult!=NULL){
         //write tag log file
@@ -773,14 +781,6 @@ int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, 
             auto psIter = countPS.begin();
             psResultStr = std::to_string((*psIter).first);
         }
-
-        // cross two block
-        if( countPS.size() > 1  ){
-            hpResultStr = ".";
-            psResultStr = ".";
-            hpResult = 0;
-        }
-
 
         (*tagResult)<< bam_get_qname(&aln)              << "\t"
                     << bamHdr.target_name[aln.core.tid] << "\t"
