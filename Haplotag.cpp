@@ -16,17 +16,19 @@ static const char *CORRECT_USAGE_MESSAGE =
 "optional arguments:\n"
 "      --tagSupplementary              tag supplementary alignment. default:false\n"
 "      --sv-file=NAME                  input phased SV vcf file.\n"
-"      -q, --qualityThreshold=Num      not tag alignment if the mapping quality less than threshold. default:0\n"
+"      --mod-file=NAME                 input a modified VCF file (produced by longphase modcall and processed by longphase phase).\n"
+"      -q, --qualityThreshold=Num      not tag alignment if the mapping quality less than threshold. default:1\n"
 "      -p, --percentageThreshold=Num   the alignment will be tagged according to the haplotype corresponding to most alleles.\n"
 "                                      if the alignment has no obvious corresponding haplotype, it will not be tagged. default:0.6\n"
 "      -t, --threads=Num               number of thread. default:1\n"
 "      -o, --out-prefix=NAME           prefix of phasing result. default:result\n"
+"      --region=REGION                 tagging include only reads/variants overlapping those regions. default:""(all regions)"
 "      --log                           an additional log file records the result of each read. default:false\n";
 
 
 static const char* shortopts = "s:b:o:t:q:p:r:";
 
-enum { OPT_HELP = 1, TAG_SUP, SV_FILE, LOG};
+enum { OPT_HELP = 1, TAG_SUP, SV_FILE, REGION, LOG, MOD_FILE};
 
 static const struct option longopts[] = { 
     { "help",                 no_argument,        NULL, OPT_HELP },
@@ -35,10 +37,12 @@ static const struct option longopts[] = {
     { "reference",            required_argument,  NULL, 'r' },
     { "tagSupplementary",     no_argument,        NULL, TAG_SUP },
     { "sv-file",              required_argument,  NULL, SV_FILE },
+    { "mod-file",             required_argument,  NULL, MOD_FILE },
     { "out-prefix",           required_argument,  NULL, 'o' },
     { "threads",              required_argument,  NULL, 't' },
     { "qualityThreshold",     required_argument,  NULL, 'q' },
     { "percentageThreshold",  required_argument,  NULL, 'p' },
+    { "region",               required_argument,  NULL, REGION },
     { "log",                  no_argument,        NULL, LOG },
     { NULL, 0, NULL, 0 }
 };
@@ -46,13 +50,15 @@ static const struct option longopts[] = {
 namespace opt
 {
     static int numThreads = 1;
-    static int qualityThreshold = 20;
+    static int qualityThreshold = 1;
     static double percentageThreshold = 0.6;
     static std::string snpFile="";
     static std::string svFile="";
+    static std::string modFile="";
     static std::string bamFile="";
     static std::string fastaFile="";
     static std::string resultPrefix="result";
+    static std::string region="";
     static bool tagSupplementary = false;
     static bool writeReadLog = false;
 }
@@ -75,7 +81,9 @@ void HaplotagOptions(int argc, char** argv)
         case 'q': arg >> opt::qualityThreshold; break;
         case 'p': arg >> opt::percentageThreshold; break;
         case SV_FILE: arg >> opt::svFile; break;
+        case MOD_FILE: arg >> opt::modFile; break;
         case TAG_SUP: opt::tagSupplementary = true; break;
+        case REGION: arg >> opt::region; break;
         case LOG: opt::writeReadLog = true; break;
         case OPT_HELP:
             std::cout << CORRECT_USAGE_MESSAGE;
@@ -109,6 +117,16 @@ void HaplotagOptions(int argc, char** argv)
         if( !openFile.is_open() )
         {
             std::cerr<< "File " << opt::svFile << " not exist.\n\n";
+            die = true;
+        }
+    }
+    
+    if( opt::modFile != "")
+    {
+        std::ifstream openFile( opt::modFile.c_str() );
+        if( !openFile.is_open() )
+        {
+            std::cerr<< "File " << opt::modFile << " not exist.\n\n";
             die = true;
         }
     }
@@ -173,11 +191,13 @@ int HaplotagMain(int argc, char** argv)
     ecParams.qualityThreshold=opt::qualityThreshold;
     ecParams.snpFile=opt::snpFile;
     ecParams.svFile=opt::svFile;
+    ecParams.modFile=opt::modFile;
     ecParams.bamFile=opt::bamFile;
     ecParams.fastaFile=opt::fastaFile;
     ecParams.resultPrefix=opt::resultPrefix;
     ecParams.tagSupplementary=opt::tagSupplementary;
     ecParams.percentageThreshold=opt::percentageThreshold;
+    ecParams.region=opt::region;
     ecParams.writeReadLog=opt::writeReadLog;
 
     HaplotagProcess processor(ecParams);

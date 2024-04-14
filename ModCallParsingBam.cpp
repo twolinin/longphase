@@ -46,9 +46,7 @@ MethBamParser::~MethBamParser(){
     delete readStartEndMap;
 }
 
-void MethBamParser::detectMeth(std::string chrName, int chr_len, int numThreads, std::vector<ReadVariant> &readVariantVec){
-    // init data structure and get core n
-    htsThreadPool threadPool = {NULL, 0};
+void MethBamParser::detectMeth(std::string chrName, int chr_len, htsThreadPool &threadPool, std::vector<ReadVariant> &readVariantVec){
 
     for( auto bamFile: params->bamFileVec ){
 
@@ -72,11 +70,7 @@ void MethBamParser::detectMeth(std::string chrName, int chr_len, int numThreads,
 
         
         int result;
-        
-        // creat thread pool
-        if (!(threadPool.pool = hts_tpool_init(numThreads))) {
-            fprintf(stderr, "Error creating thread pool\n");
-        }
+
         hts_set_opt(fp_in, HTS_OPT_THREAD_POOL, &threadPool);
 
         while ((result = sam_itr_multi_next(fp_in, iter, aln)) >= 0) { 
@@ -99,7 +93,6 @@ void MethBamParser::detectMeth(std::string chrName, int chr_len, int numThreads,
         bam_hdr_destroy(bamHdr);
         bam_destroy1(aln);
         sam_close(fp_in);
-        hts_tpool_destroy(threadPool.pool);
     }
 }
 
@@ -536,10 +529,10 @@ void MethylationGraph::addEdge(std::vector<ReadVariant> &in_readVariant){
 
                 // this allele support ref
                 if( (*variant1Iter).allele == 0 )
-                    (*edgeList)[(*variant1Iter).position]->ref->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).read_name);
+                    (*edgeList)[(*variant1Iter).position]->ref->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).read_name,0,1);
                 // this allele support alt
                 if( (*variant1Iter).allele == 1 )
-                    (*edgeList)[(*variant1Iter).position]->alt->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).read_name);
+                    (*edgeList)[(*variant1Iter).position]->alt->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).read_name,0,1);
                 
                 // next snp
                 variant2Iter++;

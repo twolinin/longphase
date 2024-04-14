@@ -1,5 +1,5 @@
 # LongPhase
-LongPhase is an ultra-fast program for simultaneously co-phasing SNPs, small indels, large SVs, and (5mC) modifications for Nanopore and PacBio platforms. It can produce nearly chromosome-scale haplotype blocks by using Nanpore ultra-long reads without the need for additional trios, chromosome conformation, and strand-seq data. On an 8-core machine, LongPhase can finish phasing a human genome in 10-20 minutes.
+LongPhase is an ultra-fast program for simultaneously co-phasing SNPs, small indels, large SVs, and (5mC) modifications for Nanopore and PacBio platforms. It can produce nearly chromosome-scale haplotype blocks by using Nanpore ultra-long reads without the need for additional trios, chromosome conformation, and strand-seq data. LongPhase can phase a 30x human genome in ~1 minute (see [Speed](#speed)).
 
 ---
 - [Installation](#installation)
@@ -27,10 +27,10 @@ LongPhase is an ultra-fast program for simultaneously co-phasing SNPs, small ind
 - [Contact](#contact)
 ---
 ## Installation
-You are recommended to download a [linux 64bit binary release](https://github.com/twolinin/longphase/releases/download/v1.6/longphase_linux-x64.tar.xz) without compilation. 
+You are recommended to download a [linux 64bit binary release](https://github.com/twolinin/longphase/releases/download/v1.7/longphase_linux-x64.tar.xz) without compilation. 
 
 ```
-wget https://github.com/twolinin/longphase/releases/download/v1.6/longphase_linux-x64.tar.xz
+wget https://github.com/twolinin/longphase/releases/download/v1.7/longphase_linux-x64.tar.xz
 tar -xJf longphase_linux-x64.tar.xz
 ```
 
@@ -309,7 +309,7 @@ e.g. [sniffles](https://github.com/fritzsedlazeck/Sniffles) or [CuteSV](https://
 ```
 # In sniffles1 please specofic --num_reads_report -1. For sniffles2 please specify --output-rnames instead.
 sniffles -t 10 --num_reads_report -1 -m alignment.bam -v SV.vcf # for sniffles1
-sniffles --threads 10 --output-rnames -1 --input alignment.bam --vcf SV.vcf # for sniffles2
+sniffles --threads 10 --output-rnames --input alignment.bam --vcf SV.vcf # for sniffles2
 
 # cuteSV command for PacBio CLR data:
 cuteSV alignment.bam reference.fasta SV.vcf work_dir --report_readid --genotype
@@ -336,8 +336,20 @@ minimap2 -ax map-ont -y reference.fasta methylcall.raw.fastq
 
 ---
 ## Comparison with other SNP-phasing programs
-LongPhase is 10x faster than WhatsHap and Margin and produces much larger blocks when tested on HG002, HG003,and HG004.
+LongPhase is >30x faster than WhatsHap and Margin and produces much larger blocks when tested on HG002, HG003,and HG004.
 ![btac058f3](https://github.com/twolinin/longphase/assets/6086073/af3a75a1-6268-4700-9dcc-4a6f34e86f7a)
+
+## Speed
+LongPhase can phase a human genome within 1-2 minutes.
+phase (-t 24) | v1.6 (Time) | v1.6 (Memory)
+-- | -- | -- 
+HG002 ONT R10.4.1 10x |  39s | 15.1G
+HG002 ONT R10.4.1 20x |  53s | 15.6G
+HG002 ONT R10.4.1 30x |  68s | 24.4G
+HG002 ONT R10.4.1 40x |  217s | 26.6G
+HG002 ONT R10.4.1 50x |  262s | 22.2G
+HG002 ONT R10.4.1 60x |  113s | 33.4G
+
 
 ---
 ## Citation
@@ -346,5 +358,3 @@ Jyun-Hong Lin, Liang-Chi Chen, Shu-Qi Yu and Yao-Ting Huang, [LongPhase: an ultr
 ---
 ## Contact
 Yao-Ting Huang, ythuang at cs.ccu.edu.tw
-
-
