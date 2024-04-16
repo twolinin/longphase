@@ -414,49 +414,65 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
 
             if ( aln->core.qual < params.qualityThreshold ){
                 // mapping quality is lower than threshold
+		totalUnTagCount++;
             }
             else if( (flag & 0x4) != 0 ){
                 // read unmapped
                 totalUnmapped++;
+		totalUnTagCount++;
             }
             else if( (flag & 0x100) != 0 ){
                 // secondary alignment. repeat.
                 // A secondary alignment occurs when a given read could align reasonably well to more than one place.
                 totalSecondary++;
+		totalUnTagCount++;
             }
             else if( (flag & 0x800) != 0 && params.tagSupplementary == false ){
                 // supplementary alignment
                 // A chimeric alignment is represented as a set of linear alignments that do not have large overlaps.
                 totalSupplementary++;
+		totalUnTagCount++;
             }
             else if(last == currentChrVariants.rend()){
                 // skip 
-                totalUnTagCuonnt++;
+                totalUnTagCount++;
             }
             else if(int(aln->core.pos) <= (*last).first){
-                int pqValue = 0;
+                
+		if( (flag & 0x800) != 0 ){
+		    totalSupplementary++;
+		}
+
+		int pqValue = 0;
                 int haplotype = judgeHaplotype(*bamHdr, *aln, chr, params.percentageThreshold, tagResult, pqValue, chr_reference);
 
                 initFlag(aln, "HP");
                 initFlag(aln, "PS");
                 initFlag(aln, "PQ");
 
-                if (haplotype != 0) {
+                if (haplotype != 0){
 
                     int psValue = chrVariantPS[chr][(*firstVariantIter).first];
                     bam_aux_append(aln, "HP", 'i', sizeof(haplotype), (uint8_t*) &haplotype);
                     bam_aux_append(aln, "PS", 'i', sizeof(psValue), (uint8_t*) &psValue);
                     bam_aux_append(aln, "PQ", 'i', sizeof(pqValue), (uint8_t*) &pqValue);
-                    totalTagCuonnt++;
+                    totalTagCount++;
                 }
                 else{
-                    totalUnTagCuonnt++;
+                    totalUnTagCount++;
                 }
             }
+	    else{
+                totalUnTagCount++;
+	    }
+
             // write this alignment to result bam file
             result = sam_write1(out, bamHdr, aln);
         }
         std::cerr<< difftime(time(NULL), begin) << "s\n";
+    }
+    if(tagResult!=NULL){
+        (*tagResult).close();
     }
     hts_idx_destroy(idx);
     bam_hdr_destroy(bamHdr);
@@ -750,6 +766,11 @@ int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, 
     else{
         pqValue=-10*(std::log10((double)min/double(max+min)));
     }
+    
+    // cross two block
+    if( countPS.size() > 1  ){
+        hpResult = 0;
+    }
 
     if(tagResult!=NULL){
         //write tag log file
@@ -760,14 +781,6 @@ int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, 
             auto psIter = countPS.begin();
             psResultStr = std::to_string((*psIter).first);
         }
-
-        // cross two block
-        if( countPS.size() > 1  ){
-            hpResultStr = ".";
-            psResultStr = ".";
-            hpResult = 0;
-        }
-
 
         (*tagResult)<< bam_get_qname(&aln)              << "\t"
                     << bamHdr.target_name[aln.core.tid] << "\t"
@@ -800,7 +813,7 @@ int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, 
 }
 
 HaplotagProcess::HaplotagProcess(HaplotagParameters params):
-totalAlignment(0),totalSupplementary(0),totalSecondary(0),totalUnmapped(0),totalTagCuonnt(0),totalUnTagCuonnt(0),processBegin(time(NULL)),integerPS(false)
+totalAlignment(0),totalSupplementary(0),totalSecondary(0),totalUnmapped(0),totalTagCount(0),totalUnTagCount(0),processBegin(time(NULL)),integerPS(false)
 {
     std::cerr<< "phased SNP file:   " << params.snpFile             << "\n";
     std::cerr<< "phased SV file:    " << params.svFile              << "\n";
@@ -862,7 +875,7 @@ HaplotagProcess::~HaplotagProcess(){
     std::cerr<< "total supplementary: " << totalSupplementary << "\n";
     std::cerr<< "total secondary:     " << totalSecondary     << "\n";
     std::cerr<< "total unmapped:      " << totalUnmapped      << "\n";
-    std::cerr<< "total tag alignment: " << totalTagCuonnt     << "\n";
-    std::cerr<< "total untagged:      " << totalUnTagCuonnt   << "\n";
+    std::cerr<< "total tag alignment: " << totalTagCount     << "\n";
+    std::cerr<< "total untagged:      " << totalUnTagCount   << "\n";
 };
 
