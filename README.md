@@ -122,8 +122,8 @@ parse alignment arguments:
 
 phasing graph arguments:
    -p, --baseQuality=[0~90]               change edge's weight to --edgeWeight if base quality is lower than the threshold. default:12
-   -e, --edgeWeight=[0~1]                 determine how much weight we should adjust if the quality of one
-                                          of the bases at the endpoint is lower than --baseQuality. default:0.1
+   -e, --edgeWeight=[0~1]                 if one of the bases connected by the edge has a quality lower than --baseQuality
+                                          its weight is reduced from the normal 1. default:0.1
    -a, --connectAdjacent=Num              connect adjacent N SNPs. default:20
    -d, --distance=Num                     phasing two variant if distance less than threshold. default:300000
    -1, --edgeThreshold=[0~1]              give up SNP-SNP phasing pair if the number of reads of the 
