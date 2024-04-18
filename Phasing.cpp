@@ -28,7 +28,8 @@ static const char *CORRECT_USAGE_MESSAGE =
 
 "phasing graph arguments:\n"
 "   -p, --baseQuality=[0~90]               change edge's weight to --edgeWeight if base quality is lower than the threshold. default:12\n"
-"   -e, --edgeWeight=[0~1]                 decide how much weight should we change if it has low base quality. default:0.1\n"
+"   -e, --edgeWeight=[0~1]                 determine how much weight we should adjust if the quality of one\n"
+"                                          of the bases at the endpoint is lower than --baseQuality. default:0.1\n"
 "   -a, --connectAdjacent=Num              connect adjacent N SNPs. default:20\n"
 "   -d, --distance=Num                     phasing two variant if distance less than threshold. default:300000\n"
 "   -1, --edgeThreshold=[0~1]              give up SNP-SNP phasing pair if the number of reads of the \n"

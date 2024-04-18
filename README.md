@@ -122,7 +122,8 @@ parse alignment arguments:
 
 phasing graph arguments:
    -p, --baseQuality=[0~90]               change edge's weight to --edgeWeight if base quality is lower than the threshold. default:12
-   -e, --edgeWeight=[0~1]                 decide how much weight should we change if it has low base quality. default:0.1
+   -e, --edgeWeight=[0~1]                 determine how much weight we should adjust if the quality of one
+                                          of the bases at the endpoint is lower than --baseQuality. default:0.1
    -a, --connectAdjacent=Num              connect adjacent N SNPs. default:20
    -d, --distance=Num                     phasing two variant if distance less than threshold. default:300000
    -1, --edgeThreshold=[0~1]              give up SNP-SNP phasing pair if the number of reads of the 
@@ -203,6 +204,9 @@ optional arguments:
       -t, --threads=Num               number of thread. default:1
       -o, --out-prefix=NAME           prefix of phasing result. default:result
       --region=REGION                 tagging include only reads/variants overlapping those regions. default:(all regions)
+                                      input format:chrom (consider entire chromosome)
+                                                   chrom:start (consider region from this start to end of chromosome)
+                                                   chrom:start-end
       --log                           an additional log file records the result of each read. default:false
 ```
 
