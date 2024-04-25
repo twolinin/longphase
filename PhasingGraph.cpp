@@ -422,13 +422,15 @@ void VairiantGraph::addEdge(std::vector<ReadVariant> &in_readVariant){
     // each read will record fist and list variant posistion
     std::map<std::string, std::pair<int,int>> alignRange;
     // record an iterator for all alignments of a read.
-    std::map<std::string, std::vector<std::vector<ReadVariant>::iterator>> readIterVec;
+    std::map<std::string, std::vector<int>> readIdxVec;
+    // record need del read index
+    std::vector<int> delReadIdx;
 
     // Check for overlaps among different alignments of a read and filter out the shorter overlapping alignments.
-    for(std::vector<ReadVariant>::iterator readIter = in_readVariant.begin() ; readIter != in_readVariant.end() ;  ){
-        std::string readName = (*readIter).read_name;
-        int firstVariantPos = (*readIter).variantVec[0].position;
-        int lastVariantPos  = (*readIter).variantVec[(*readIter).variantVec.size()-1].position;
+    for(int readIter = 0 ; readIter < (int)in_readVariant.size() ; readIter++ ){
+        std::string readName = in_readVariant[readIter].read_name;
+        int firstVariantPos = in_readVariant[readIter].variantVec[0].position;
+        int lastVariantPos  = in_readVariant[readIter].variantVec[in_readVariant[readIter].variantVec.size()-1].position;
         
         auto rangeIter = alignRange.find(readName);
         // this read name appears for the first time
@@ -455,26 +457,20 @@ void VairiantGraph::addEdge(std::vector<ReadVariant> &in_readVariant){
                     // filter shorter alignment
                     // current alignment is shorter
                     if( alignLen2 <= alignLen1 ){
-                        in_readVariant.erase(readIter);
+                        delReadIdx.push_back(readIter);
                     }
                     // previous alignment is shorter
                     else{
-                        // previous has more than one alignment
-                        if( readIterVec[readName].size() > 1 ){
-                            // iterate and erase all previous alignments
-                            for(int iter = readIterVec[readName].size()-1 ; iter >= 0 ; iter-- ){
-                                in_readVariant.erase(readIterVec[readName][iter]);
-                            }
+                        // iterate all previous alignments
+                        for(int iter = 0 ; iter < (int)readIdxVec[readName].size() ; iter++ ){
+                            delReadIdx.push_back(readIdxVec[readName][iter]);
                         }
-                        // previous has only one alignment
-                        else{
-                            in_readVariant.erase(readIterVec[readName][0]);
-                        }
+
                         // update range
                         alignRange[readName].first  = firstVariantPos;
                         alignRange[readName].second = lastVariantPos;
-                        readIterVec[readName].clear();
-                        readIterVec[readName][0] = readIter;
+                        readIdxVec[readName].clear();
+                        readIdxVec[readName].push_back(readIter);
                     }
                     continue;
                 }
@@ -482,9 +478,14 @@ void VairiantGraph::addEdge(std::vector<ReadVariant> &in_readVariant){
             // update range
             alignRange[readName].second = lastVariantPos;
         }
-        readIterVec[readName].push_back(readIter);
-        // iter next alignment
-        readIter++;
+        readIdxVec[readName].push_back(readIter);
+    }
+
+    // sort read index
+    std::sort(delReadIdx.begin(), delReadIdx.end());
+    // remove overlap alignment
+    for( int idx = delReadIdx.size() -1 ; idx > 0 ; idx-- ){
+        in_readVariant.erase( in_readVariant.begin() + delReadIdx[idx] );
     }
 
     int readCount=0;
