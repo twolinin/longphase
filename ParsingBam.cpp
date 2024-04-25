@@ -695,20 +695,25 @@ void SVParser::parserProcess(std::string &input){
         if(filter){
             return;
         }
-
+        
         // get read INFO
         int read_pos = fields[7].find("RNAMES=");
-        read_pos = fields[7].find("=",read_pos);
-        read_pos++;
-                
-        int next_field = fields[7].find(";",read_pos);
-        std::string totalRead = fields[7].substr(read_pos,next_field-read_pos);
-        std::stringstream totalReadStream(totalRead);
-                
-        std::string read;
-        while(std::getline(totalReadStream, read, ','))
-        {
-           (*chrVariant)[chr][pos][read]= true;
+        // detected RNAMES included in INFO
+        if( read_pos != -1 ){
+            // Extract the position of "=" in "RNAMES="
+            read_pos = fields[7].find("=",read_pos);
+            read_pos++;
+            // Capture the position of the ";" symbol at the end of the information in "RNAMES="
+            int next_field = fields[7].find(";",read_pos);
+            // Capture the range of read IDs included in the entire RNAMES
+            std::string totalRead = fields[7].substr(read_pos,next_field-read_pos);
+            std::stringstream totalReadStream(totalRead);
+            // Extract each read ID individually
+            std::string read;
+            while(std::getline(totalReadStream, read, ','))
+            {
+               (*chrVariant)[chr][pos][read]= true;
+            }
         }
     }
 }
