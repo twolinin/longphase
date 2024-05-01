@@ -154,7 +154,7 @@ VariantEdge::VariantEdge(int inCurrPos){
 }
 
 //VariantEdge
-std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool isONT, double edgeThreshold, bool debug){
+std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool isONT, double edgeThreshold, bool debug, int &weight){
     std::pair<float,float> refBestPair  = ref->BestPair(targetPos);
     std::pair<float,float> altBestPair  = alt->BestPair(targetPos);
     // get the weight of each pair
@@ -192,7 +192,12 @@ std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool
     if(debug){
         std::cout<< currPos << "\t->\t" << targetPos << "\t|rr aa | ra ar\t" << "\t" << rr << "\t" << aa << "\t" << ra << "\t" << ar  << "\n";
     }
-    
+   
+    //when the voting result is clear and voting reads are more than one, we make its weight twenty times bigger 
+    if ( (edgeSimilarRatio <= 0.1 && (rr + aa + ra + ar) >= 1)  || ((rr+aa)<1&&(ra+ar)>=1) || ((rr+aa)>=1&&(ra+ar)<1) ) {
+        weight = 20 ;
+    }
+
     // create edge pairs
     PosAllele refEdge = std::make_pair( targetPos, refAllele );
     PosAllele altEdge = std::make_pair( targetPos, altAllele );
@@ -222,6 +227,8 @@ void BlockRead::recordRead(std::string readName){
 
 //VairiantGraph
 void VairiantGraph::edgeConnectResult(){
+    // current snp, haplotype (1 or 2), previous snps voting result
+    std::map<int, std::map<int,int> > *hpCountMap2 = new std::map<int, std::map<int,int> > ;
     // current snp, haplotype (1 or 2), support snp
     std::map<int, std::map<int,std::vector<int> > > *hpCountMap = new std::map<int, std::map<int,std::vector<int> > >;
     // current snp, result haplotype (1 or 2)
@@ -254,8 +261,10 @@ void VairiantGraph::edgeConnectResult(){
         }
         
         // get the number of HP1 and HP2 supported reference allele
-        int h1 = (*hpCountMap)[currPos][1].size();
-        int h2 = (*hpCountMap)[currPos][2].size();
+        //int h1 = (*hpCountMap)[currPos][1].size();
+        //int h2 = (*hpCountMap)[currPos][2].size();
+	int h1 = (*hpCountMap2)[currPos][1] ;
+	int h2 = (*hpCountMap2)[currPos][2] ;
 
         // new block, set this position as block start 
         if( h1 == 0 && h2 == 0 ){
@@ -284,8 +293,9 @@ void VairiantGraph::edgeConnectResult(){
         
         // check connect between surrent SNP and next n SNPs
         for(int i = 0 ; i < params->connectAdjacent ; i++ ){
+	    int weight = 1 ; 
             // consider reads from the currnt SNP and the next (i+1)'s SNP
-            std::pair<PosAllele,PosAllele> tmp = edgeIter->second->findBestEdgePair(nextNodeIter->first, params->isONT, params->edgeThreshold, false);
+            std::pair<PosAllele,PosAllele> tmp = edgeIter->second->findBestEdgePair(nextNodeIter->first, params->isONT, params->edgeThreshold, false, weight);
             // -1 : no connect  
             //  1 : the haplotype of next (i+1)'s SNP are same as previous
             //  2 : the haplotype of next (i+1)'s SNP are different as previous
@@ -294,17 +304,21 @@ void VairiantGraph::edgeConnectResult(){
                 if( (*hpResult)[currPos] == 1 ){
                     if( tmp.first.second == 1 ){
                         (*hpCountMap)[nextNodeIter->first][1].push_back(currPos);
+			(*hpCountMap2)[nextNodeIter->first][1] += weight;
                     }
                     if( tmp.first.second == 2 ){
                         (*hpCountMap)[nextNodeIter->first][2].push_back(currPos);
+			(*hpCountMap2)[nextNodeIter->first][2] += weight;
                     }
                 }
                 if( (*hpResult)[currPos]==2 ){
                     if( tmp.first.second == 1 ){
                         (*hpCountMap)[nextNodeIter->first][2].push_back(currPos);
+			(*hpCountMap2)[nextNodeIter->first][2] += weight;
                     }
                     if( tmp.first.second == 2 ){
                         (*hpCountMap)[nextNodeIter->first][1].push_back(currPos);
+			(*hpCountMap2)[nextNodeIter->first][1] += weight;
                     }
                 }
                 if( params->generateDot ){
