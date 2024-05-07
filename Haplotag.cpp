@@ -22,7 +22,10 @@ static const char *CORRECT_USAGE_MESSAGE =
 "                                      if the alignment has no obvious corresponding haplotype, it will not be tagged. default:0.6\n"
 "      -t, --threads=Num               number of thread. default:1\n"
 "      -o, --out-prefix=NAME           prefix of phasing result. default:result\n"
-"      --region=REGION                 tagging include only reads/variants overlapping those regions. default:""(all regions)"
+"      --region=REGION                 tagging include only reads/variants overlapping those regions. default:\"\"(all regions)\n"
+"                                      input format:chrom (consider entire chromosome)\n"
+"                                                   chrom:start (consider region from this start to end of chromosome)\n"
+"                                                   chrom:start-end\n"
 "      --log                           an additional log file records the result of each read. default:false\n";
 
 

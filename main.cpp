@@ -8,6 +8,7 @@
 #define PROGRAM_BIN "main"
 #define VERSION "1.7.2dev"
 
+
 static std::string version = VERSION;
 
 static const char *STRIDE_USAGE_MESSAGE =
