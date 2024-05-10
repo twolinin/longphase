@@ -29,6 +29,7 @@ struct PhasingParameters
     double readConfidence;
     
     double edgeThreshold;
+    double overlapThreshold;
     
     std::string version;
     std::string command;

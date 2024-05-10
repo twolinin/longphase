@@ -21,6 +21,7 @@ struct HaplotagParameters
     std::string region;
     std::string command;
     std::string version;
+    std::string outputFormat;
     
     bool tagSupplementary;
     bool writeReadLog;
