@@ -317,9 +317,11 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
     }
 
     // output file mangement
-    std::string writeBamFile = params.resultPrefix + ".bam";
+    std::string writeBamFile = params.resultPrefix + "." + params.outputFormat;
     // open output bam file
-    samFile *out = hts_open(writeBamFile.c_str(), "wb");
+    samFile *out = hts_open(writeBamFile.c_str(), (params.outputFormat == "bam" ? "wb" : "wc" ));
+    // load reference file
+    hts_set_fai_filename(out, params.fastaFile.c_str() );
     // output writer
     int result = sam_hdr_write(out, bamHdr);
     // check index file
@@ -817,10 +819,10 @@ totalAlignment(0),totalSupplementary(0),totalSecondary(0),totalUnmapped(0),total
 {
     std::cerr<< "phased SNP file:   " << params.snpFile             << "\n";
     std::cerr<< "phased SV file:    " << params.svFile              << "\n";
-    std::cerr<< "phased MOD file:   " << params.modFile              << "\n";
+    std::cerr<< "phased MOD file:   " << params.modFile             << "\n";
     std::cerr<< "input bam file:    " << params.bamFile             << "\n";
     std::cerr<< "input ref file:    " << params.fastaFile           << "\n";
-    std::cerr<< "output bam file:   " << params.resultPrefix+".bam" << "\n";
+    std::cerr<< "output bam file:   " << params.resultPrefix + "." + params.outputFormat << "\n";
     std::cerr<< "number of threads: " << params.numThreads          << "\n";
     std::cerr<< "write log file:    " << (params.writeReadLog ? "true" : "false") << "\n";
     std::cerr<< "log file:          " << (params.writeReadLog ? (params.resultPrefix+".out") : "") << "\n";
