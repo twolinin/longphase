@@ -418,24 +418,24 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
 
             if ( aln->core.qual < params.qualityThreshold ){
                 // mapping quality is lower than threshold
-		        totalUnTagCount++;
+                totalUnTagCount++;
             }
             else if( (flag & 0x4) != 0 ){
                 // read unmapped
                 totalUnmapped++;
-		        totalUnTagCount++;
+                totalUnTagCount++;
             }
             else if( (flag & 0x100) != 0 ){
                 // secondary alignment. repeat.
                 // A secondary alignment occurs when a given read could align reasonably well to more than one place.
                 totalSecondary++;
-		        totalUnTagCount++;
+                totalUnTagCount++;
             }
             else if( (flag & 0x800) != 0 && params.tagSupplementary == false ){
                 // supplementary alignment
                 // A chimeric alignment is represented as a set of linear alignments that do not have large overlaps.
                 totalSupplementary++;
-		        totalUnTagCount++;
+                totalUnTagCount++;
             }
             else if(last == currentChrVariants.rend()){
                 // skip 
@@ -447,7 +447,7 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
                     totalSupplementary++;
                 }
 
-		        int pqValue = 0;
+                int pqValue = 0;
                 int haplotype = judgeHaplotype(*bamHdr, *aln, chr, params.percentageThreshold, tagResult, pqValue, chr_reference);
 
                 initFlag(aln, "HP");
