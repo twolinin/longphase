@@ -64,6 +64,7 @@ namespace opt
     static std::string region="";
     static bool tagSupplementary = false;
     static bool writeReadLog = false;
+    static std::string command="longphase ";
 }
 
 void HaplotagOptions(int argc, char** argv)
@@ -92,6 +93,11 @@ void HaplotagOptions(int argc, char** argv)
             std::cout << CORRECT_USAGE_MESSAGE;
             exit(EXIT_SUCCESS);
         }
+    }
+
+    for(int i = 0; i < argc; ++i){
+        opt::command.append(argv[i]);
+        opt::command.append(" ");
     }
 
     if (argc - optind < 0 )
@@ -184,7 +190,7 @@ void HaplotagOptions(int argc, char** argv)
 
 }
 
-int HaplotagMain(int argc, char** argv)
+int HaplotagMain(int argc, char** argv, std::string in_version)
 {
     HaplotagParameters ecParams;
     // set parameters
@@ -202,6 +208,8 @@ int HaplotagMain(int argc, char** argv)
     ecParams.percentageThreshold=opt::percentageThreshold;
     ecParams.region=opt::region;
     ecParams.writeReadLog=opt::writeReadLog;
+    ecParams.version=in_version;
+    ecParams.command=opt::command;
 
     HaplotagProcess processor(ecParams);
 
