@@ -6,7 +6,8 @@
 
 
 #define PROGRAM_BIN "main"
-#define VERSION "1.7.1"
+#define VERSION "1.7.2"
+
 
 static std::string version = VERSION;
 
@@ -35,7 +36,7 @@ int main(int argc, char** argv)
     }
     else if(command=="haplotag")
     {
-        HaplotagMain(argc - 1, argv + 1);
+        HaplotagMain(argc - 1, argv + 1, version);
     }
     else if(command=="modcall")
     {

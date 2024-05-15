@@ -34,6 +34,7 @@ static const char *CORRECT_USAGE_MESSAGE =
 "   -d, --distance=Num                     phasing two variant if distance less than threshold. default:300000\n"
 "   -1, --edgeThreshold=[0~1]              give up SNP-SNP phasing pair if the number of reads of the \n"
 "                                          two combinations are similar. default:0.7\n"
+"   -L, --overlapThreshold=[0~1]           filtering different alignments of the same read if there is overlap. default:0.2 \n"
 
 "haplotag read correction arguments:\n"
 "   -m, --readConfidence=[0.5~1]           The confidence of a read being assigned to any haplotype. default:0.65\n"
@@ -41,7 +42,7 @@ static const char *CORRECT_USAGE_MESSAGE =
 
 "\n";
 
-static const char* shortopts = "s:b:o:t:r:d:1:a:q:p:e:n:m:";
+static const char* shortopts = "s:b:o:t:r:d:1:a:q:p:e:n:m:L:";
 
 enum { OPT_HELP = 1 , DOT_FILE, SV_FILE, MOD_FILE, IS_ONT, IS_PB, PHASE_INDEL, VERSION};
 
@@ -63,10 +64,11 @@ static const struct option longopts[] = {
     { "edgeThreshold",        required_argument,  NULL, '1' },
     { "connectAdjacent",      required_argument,  NULL, 'a' },
     { "mappingQuality",       required_argument,  NULL, 'q' },
-    { "baseQuality",       required_argument,  NULL, 'p' },
-    { "edgeWeight",       required_argument,  NULL, 'e' },
+    { "baseQuality",          required_argument,  NULL, 'p' },
+    { "edgeWeight",           required_argument,  NULL, 'e' },
     { "snpConfidence",        required_argument,  NULL, 'n' },
     { "readConfidence",       required_argument,  NULL, 'm' },
+    { "overlapThreshold",     required_argument,  NULL, 'L' },
     { NULL, 0, NULL, 0 }
 };
 
@@ -95,6 +97,7 @@ namespace opt
     static double readConfidence = 0.65;
     
     static double edgeThreshold = 0.7;
+    static double overlapThreshold = 0.2;
 
     static std::string command;
 }
@@ -117,10 +120,11 @@ void PhasingOptions(int argc, char** argv)
         case '1': arg >> opt::edgeThreshold; break; 
         case 'a': arg >> opt::connectAdjacent; break;
         case 'q': arg >> opt::mappingQuality; break;
-	case 'p': arg >> opt::baseQuality; break;
-	case 'e': arg >> opt::edgeWeight; break;
+        case 'p': arg >> opt::baseQuality; break;
+        case 'e': arg >> opt::edgeWeight; break;
         case 'n': arg >> opt::snpConfidence; break;
         case 'm': arg >> opt::readConfidence; break;
+        case 'L': arg >> opt::overlapThreshold; break;
         case 'b': {
             std::string bamFile;
             arg >> bamFile;
@@ -237,6 +241,13 @@ void PhasingOptions(int argc, char** argv)
         die = true;
     }
     
+    if ( opt::overlapThreshold < 0 || opt::overlapThreshold > 1 ){
+        std::cerr << SUBPROGRAM " invalid overlapThreshold. value: " 
+                  << opt::overlapThreshold 
+                  << "\n please check -L, --overlapThreshold=[0~1]\n";
+        die = true;
+    }
+    
     if ( opt::readConfidence < 0.5 || opt::readConfidence > 1 ){
         std::cerr << SUBPROGRAM " invalid readConfidence. value: " 
                   << opt::readConfidence 
@@ -286,6 +297,7 @@ int PhasingMain(int argc, char** argv, std::string in_version)
     ecParams.edgeWeight=opt::edgeWeight;
 
     ecParams.edgeThreshold=opt::edgeThreshold;
+    ecParams.overlapThreshold=opt::overlapThreshold;
     
     ecParams.snpConfidence=opt::snpConfidence;
     ecParams.readConfidence=opt::readConfidence;

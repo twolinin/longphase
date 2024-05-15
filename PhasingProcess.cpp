@@ -26,6 +26,7 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
     std::cerr<< "Distance Threshold : " << params.distance        << "\n";
     std::cerr<< "Connect Adjacent   : " << params.connectAdjacent << "\n";
     std::cerr<< "Edge Threshold     : " << params.edgeThreshold   << "\n";
+    std::cerr<< "Overlap Threshold  : " << params.overlapThreshold   << "\n";
     std::cerr<< "Mapping Quality    : " << params.mappingQuality  << "\n";
     std::cerr<< "Variant Confidence : " << params.snpConfidence   << "\n";
     std::cerr<< "ReadTag Confidence : " << params.readConfidence  << "\n";

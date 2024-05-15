@@ -305,6 +305,8 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
     hts_set_fai_filename(in, params.fastaFile.c_str() );
     // input reader
     bam_hdr_t *bamHdr = sam_hdr_read(in);
+    // header add pg tag
+    sam_hdr_add_pg(bamHdr, "longphase", "VN", params.version.c_str(), "CL", params.command.c_str(), NULL);
     // bam file index
     hts_idx_t *idx = NULL;
     // check input bam file
@@ -317,9 +319,11 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
     }
 
     // output file mangement
-    std::string writeBamFile = params.resultPrefix + ".bam";
+    std::string writeBamFile = params.resultPrefix + "." + params.outputFormat;
     // open output bam file
-    samFile *out = hts_open(writeBamFile.c_str(), "wb");
+    samFile *out = hts_open(writeBamFile.c_str(), (params.outputFormat == "bam" ? "wb" : "wc" ));
+    // load reference file
+    hts_set_fai_filename(out, params.fastaFile.c_str() );
     // output writer
     int result = sam_hdr_write(out, bamHdr);
     // check index file
@@ -414,24 +418,24 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
 
             if ( aln->core.qual < params.qualityThreshold ){
                 // mapping quality is lower than threshold
-		totalUnTagCount++;
+                totalUnTagCount++;
             }
             else if( (flag & 0x4) != 0 ){
                 // read unmapped
                 totalUnmapped++;
-		totalUnTagCount++;
+                totalUnTagCount++;
             }
             else if( (flag & 0x100) != 0 ){
                 // secondary alignment. repeat.
                 // A secondary alignment occurs when a given read could align reasonably well to more than one place.
                 totalSecondary++;
-		totalUnTagCount++;
+                totalUnTagCount++;
             }
             else if( (flag & 0x800) != 0 && params.tagSupplementary == false ){
                 // supplementary alignment
                 // A chimeric alignment is represented as a set of linear alignments that do not have large overlaps.
                 totalSupplementary++;
-		totalUnTagCount++;
+                totalUnTagCount++;
             }
             else if(last == currentChrVariants.rend()){
                 // skip 
@@ -439,11 +443,11 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
             }
             else if(int(aln->core.pos) <= (*last).first){
                 
-		if( (flag & 0x800) != 0 ){
-		    totalSupplementary++;
-		}
+                if( (flag & 0x800) != 0 ){
+                    totalSupplementary++;
+                }
 
-		int pqValue = 0;
+                int pqValue = 0;
                 int haplotype = judgeHaplotype(*bamHdr, *aln, chr, params.percentageThreshold, tagResult, pqValue, chr_reference);
 
                 initFlag(aln, "HP");
@@ -462,9 +466,9 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
                     totalUnTagCount++;
                 }
             }
-	    else{
+            else{
                 totalUnTagCount++;
-	    }
+            }
 
             // write this alignment to result bam file
             result = sam_write1(out, bamHdr, aln);
@@ -817,10 +821,10 @@ totalAlignment(0),totalSupplementary(0),totalSecondary(0),totalUnmapped(0),total
 {
     std::cerr<< "phased SNP file:   " << params.snpFile             << "\n";
     std::cerr<< "phased SV file:    " << params.svFile              << "\n";
-    std::cerr<< "phased MOD file:   " << params.modFile              << "\n";
+    std::cerr<< "phased MOD file:   " << params.modFile             << "\n";
     std::cerr<< "input bam file:    " << params.bamFile             << "\n";
     std::cerr<< "input ref file:    " << params.fastaFile           << "\n";
-    std::cerr<< "output bam file:   " << params.resultPrefix+".bam" << "\n";
+    std::cerr<< "output bam file:   " << params.resultPrefix + "." + params.outputFormat << "\n";
     std::cerr<< "number of threads: " << params.numThreads          << "\n";
     std::cerr<< "write log file:    " << (params.writeReadLog ? "true" : "false") << "\n";
     std::cerr<< "log file:          " << (params.writeReadLog ? (params.resultPrefix+".out") : "") << "\n";
