@@ -154,7 +154,7 @@ VariantEdge::VariantEdge(int inCurrPos){
 }
 
 //VariantEdge
-std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool isONT, double edgeThreshold, bool debug, int &weight){
+std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool isONT, double edgeThreshold, bool debug, float &weight, VoteResult &vote){
     std::pair<float,float> refBestPair  = ref->BestPair(targetPos);
     std::pair<float,float> altBestPair  = alt->BestPair(targetPos);
     // get the weight of each pair
@@ -198,6 +198,10 @@ std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool
         weight = 20 ;
     }
 
+    vote.para = rr + aa ;
+    vote.cross = ra + ar ;
+    vote.ESR = edgeSimilarRatio ;
+
     // create edge pairs
     PosAllele refEdge = std::make_pair( targetPos, refAllele );
     PosAllele altEdge = std::make_pair( targetPos, altAllele );
@@ -225,10 +229,44 @@ void BlockRead::recordRead(std::string readName){
         readVec[readName]++;
 }
 
+std::pair<float,float> VairiantGraph::Onelongcase( std::vector<VoteResult> vote ){
+
+    int counter = 0 ;
+    float h1 = 0 ;
+    float h2 = 0 ;
+    for ( int i = 0 ; i < vote.size() ; i++ ) {
+        double edgeSimilarRatio = (double)std::min(vote[i].para,vote[i].cross) / (double)std::max(vote[i].para,vote[i].cross);
+        if ( (vote[i].para+vote[i].cross) <= 1 ) {
+            counter++ ;
+        }
+        else if ( vote[i].ESR < 0.2 /*&& vote[i].weight >= 1 && (*variantType)[vote[i].Pos] != 3*/ ) {
+            if ( vote[i].hap == 1 ) {
+                h1+=vote[i].weight ;
+            }
+            else if ( vote[i].hap == 2 ) {
+                h2+=vote[i].weight ;
+            }
+        }
+        //std::cout << vote[i].para << ":" << vote[i].cross << "\t" ;
+    }
+
+    //std::cout << counter << "\n" ;
+
+    if ( counter <= 3 || (h1==0&&h2==0) ) {
+        return std::make_pair( -1 , -1 ) ;
+    }
+    else {
+        return std::make_pair( h1 , h2 ) ;
+    }
+
+}
+
 //VairiantGraph
 void VairiantGraph::edgeConnectResult(){
+    //current snp, haplotype (1 or 2), previous snps voting information 
+    std::map<int, std::vector<VoteResult> > *hpCountMap3 = new std::map<int, std::vector<VoteResult> > ;
     // current snp, haplotype (1 or 2), previous snps voting result
-    std::map<int, std::map<int,int> > *hpCountMap2 = new std::map<int, std::map<int,int> > ;
+    std::map<int, std::map<int,float> > *hpCountMap2 = new std::map<int, std::map<int,float> > ;
     // current snp, haplotype (1 or 2), support snp
     std::map<int, std::map<int,std::vector<int> > > *hpCountMap = new std::map<int, std::map<int,std::vector<int> > >;
     // current snp, result haplotype (1 or 2)
@@ -263,8 +301,15 @@ void VairiantGraph::edgeConnectResult(){
         // get the number of HP1 and HP2 supported reference allele
         //int h1 = (*hpCountMap)[currPos][1].size();
         //int h2 = (*hpCountMap)[currPos][2].size();
-	int h1 = (*hpCountMap2)[currPos][1] ;
-	int h2 = (*hpCountMap2)[currPos][2] ;
+	float h1 = (*hpCountMap2)[currPos][1] ;
+	float h2 = (*hpCountMap2)[currPos][2] ;
+
+	//Handle the special case which One Long Read provides wrong info repeatedly
+        std::pair<float, float> special = Onelongcase( (*hpCountMap3)[currPos] ) ;
+	if ( special.first != -1 ) {
+           h1 = special.first ;
+           h2 = special.second ;
+        }
 
         // new block, set this position as block start 
         if( h1 == 0 && h2 == 0 ){
@@ -293,9 +338,16 @@ void VairiantGraph::edgeConnectResult(){
         
         // check connect between surrent SNP and next n SNPs
         for(int i = 0 ; i < params->connectAdjacent ; i++ ){
-	    int weight = 1 ; 
+	    float weight = 1 ; 
+	    VoteResult vote ;
+	    vote.Pos = currPos ;
             // consider reads from the currnt SNP and the next (i+1)'s SNP
-            std::pair<PosAllele,PosAllele> tmp = edgeIter->second->findBestEdgePair(nextNodeIter->first, params->isONT, params->edgeThreshold, false, weight);
+            std::pair<PosAllele,PosAllele> tmp = edgeIter->second->findBestEdgePair(nextNodeIter->first, params->isONT, params->edgeThreshold, false, weight, vote);
+	    /*if ( (*variantType)[currPos] == 4 ) {
+                weight = 0.1 ;
+            }*/
+	    vote.weight = weight ;
+
             // -1 : no connect  
             //  1 : the haplotype of next (i+1)'s SNP are same as previous
             //  2 : the haplotype of next (i+1)'s SNP are different as previous
@@ -305,22 +357,29 @@ void VairiantGraph::edgeConnectResult(){
                     if( tmp.first.second == 1 ){
                         (*hpCountMap)[nextNodeIter->first][1].push_back(currPos);
 			(*hpCountMap2)[nextNodeIter->first][1] += weight;
+			vote.hap = 1 ;
                     }
                     if( tmp.first.second == 2 ){
                         (*hpCountMap)[nextNodeIter->first][2].push_back(currPos);
 			(*hpCountMap2)[nextNodeIter->first][2] += weight;
+			vote.hap = 2 ;
                     }
                 }
                 if( (*hpResult)[currPos]==2 ){
                     if( tmp.first.second == 1 ){
                         (*hpCountMap)[nextNodeIter->first][2].push_back(currPos);
 			(*hpCountMap2)[nextNodeIter->first][2] += weight;
+			vote.hap = 2 ;
                     }
                     if( tmp.first.second == 2 ){
                         (*hpCountMap)[nextNodeIter->first][1].push_back(currPos);
 			(*hpCountMap2)[nextNodeIter->first][1] += weight;
+			vote.hap = 1 ;
                     }
                 }
+
+		(*hpCountMap3)[nextNodeIter->first].push_back( vote );
+
                 if( params->generateDot ){
                     std::string e1 = std::to_string(currPos+1) + ".1\t->\t" + std::to_string(tmp.first.first+1) + "." + std::to_string(tmp.first.second);
                     std::string e2 = std::to_string(currPos+1) + ".2\t->\t" + std::to_string(tmp.second.first+1) + "." + std::to_string(tmp.second.second);
