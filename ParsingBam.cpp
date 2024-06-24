@@ -19,25 +19,33 @@ FastaParser::FastaParser(std::string fastaFile,  std::vector<std::string> chrNam
     // init map
     for(std::vector<std::string>::iterator iter = chrName.begin() ; iter != chrName.end() ; iter++)
         chrString.insert(std::make_pair( (*iter) , ""));
-
+    
+    // load reference index
+    faidx_t *fai = NULL;
+    fai = fai_load(fastaFile.c_str());
+    
     // iterating all chr
-    #pragma omp parallel for schedule(dynamic) num_threads(numThreads)
+    #pragma omp parallfel for schedule(dynamic) num_threads(numThreads)
     for(std::vector<std::string>::iterator iter = chrName.begin() ; iter != chrName.end() ; iter++){
-        
-        faidx_t *fai = NULL;
-        fai = fai_load(fastaFile.c_str());
         int index = iter - chrName.begin();
-
+        
+        // Do not extract references without SNP coverage.
+        if( last_pos.at(index) == -1){
+            chrString[(*iter)]="";
+            continue;
+        }
+        
         // ref_len is a return value that is length of retrun string
         int ref_len = 0;
+
         // read file
-        std::string chr_info(faidx_fetch_seq(fai , (*iter).c_str() , 0 ,last_pos.at(index)+5 , &ref_len));
+        std::string chr_info(faidx_fetch_seq(fai , (*iter).c_str() , 0 , last_pos.at(index)+5 , &ref_len));
         if(ref_len == 0){
             std::cout<<"nothing in reference file \n";
         }
+
         // update map
         chrString[(*iter)] = chr_info;
-
     }
 }
 
