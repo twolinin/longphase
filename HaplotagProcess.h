@@ -19,6 +19,8 @@ struct HaplotagParameters
     std::string fastaFile;
     std::string resultPrefix;
     std::string region;
+    std::string command;
+    std::string version;
     std::string outputFormat;
     
     bool tagSupplementary;
