@@ -8,12 +8,6 @@
 
 typedef std::pair<int, int> PosAllele;
 typedef std::map<std::string, int> ReadBaseMap;
-/*struct ReadBaseInfo{
-    std::string readName;
-    int quality;
-    // 0=SNP 1=SV 2=MOD 3=INDEL
-    int type;
-};*/
 
 class SubEdge{
     
@@ -90,7 +84,7 @@ class VairiantGraph{
         // position, edge
         std::map<int,VariantEdge*> *edgeList;
         // Each position will record the included reads and their corresponding base qualities.
-        // position, < read name, ReadBaseInfo>
+        // position, < read name, quality>
         std::map<int,ReadBaseMap*> *totalVariantInfo;
         // position, type < 0=SNP 1=SV 2=MOD 3=INDEL >
         std::map<int,int> *variantType;
