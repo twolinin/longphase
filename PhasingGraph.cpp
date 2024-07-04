@@ -209,14 +209,14 @@ std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool
     return std::make_pair( refEdge, altEdge );
 }
 
-std::pair<int,int> VariantEdge::findNumberOfRead(int targetPos){
-    std::pair<int,int> refBestPair  = ref->BestPair(targetPos);
-    std::pair<int,int> altBestPair  = alt->BestPair(targetPos);
+std::pair<float,float> VariantEdge::findNumberOfRead(int targetPos){
+    std::pair<float,float> refBestPair  = ref->BestPair(targetPos);
+    std::pair<float,float> altBestPair  = alt->BestPair(targetPos);
     // get the weight of each pair
-    int rr = refBestPair.first;
-    int ra = refBestPair.second;
-    int ar = altBestPair.first;
-    int aa = altBestPair.second;
+    float rr = refBestPair.first;
+    float ra = refBestPair.second;
+    float ar = altBestPair.first;
+    float aa = altBestPair.second;
     return std::make_pair( rr + aa , ra +ar );
 }
 
@@ -229,17 +229,20 @@ void BlockRead::recordRead(std::string readName){
         readVec[readName]++;
 }
 
+//Handle the special case which One Long Read provides wrong info repeatedly
 std::pair<float,float> VairiantGraph::Onelongcase( std::vector<VoteResult> vote ){
 
     int counter = 0 ;
     float h1 = 0 ;
     float h2 = 0 ;
+
     for ( int i = 0 ; i < vote.size() ; i++ ) {
-        double edgeSimilarRatio = (double)std::min(vote[i].para,vote[i].cross) / (double)std::max(vote[i].para,vote[i].cross);
+
         if ( (vote[i].para+vote[i].cross) <= 1 ) {
             counter++ ;
         }
-        else if ( vote[i].ESR < 0.2 /*&& vote[i].weight >= 1 && (*variantType)[vote[i].Pos] != 3*/ ) {
+	//the vote we trust its edge similar ratio can't be too low and can't be indel
+        else if ( vote[i].ESR < 0.2 && vote[i].weight >= 1 && (*variantType)[vote[i].Pos] != 3 ) {
             if ( vote[i].hap == 1 ) {
                 h1+=vote[i].weight ;
             }
@@ -247,10 +250,7 @@ std::pair<float,float> VairiantGraph::Onelongcase( std::vector<VoteResult> vote 
                 h2+=vote[i].weight ;
             }
         }
-        //std::cout << vote[i].para << ":" << vote[i].cross << "\t" ;
     }
-
-    //std::cout << counter << "\n" ;
 
     if ( counter <= 3 || (h1==0&&h2==0) ) {
         return std::make_pair( -1 , -1 ) ;
@@ -341,11 +341,15 @@ void VairiantGraph::edgeConnectResult(){
 	    float weight = 1 ; 
 	    VoteResult vote ;
 	    vote.Pos = currPos ;
+
             // consider reads from the currnt SNP and the next (i+1)'s SNP
             std::pair<PosAllele,PosAllele> tmp = edgeIter->second->findBestEdgePair(nextNodeIter->first, params->isONT, params->edgeThreshold, false, weight, vote);
-	    /*if ( (*variantType)[currPos] == 4 ) {
+	    std::pair<float,float> paracross = edgeIter->second->findNumberOfRead(nextNodeIter->first) ;
+
+	    // if the target is a danger indel change its weight to 0.1
+	    if ( (*variantType)[currPos] == 4 ) {
                 weight = 0.1 ;
-            }*/
+            }
 	    vote.weight = weight ;
 
             // -1 : no connect  
@@ -549,6 +553,11 @@ void VairiantGraph::addEdge(std::vector<ReadVariant> &in_readVariant){
             // indel
             else if( variant.quality == -4 ){
                 (*variantType)[variant.position] = 3;
+                variant.quality = 60;
+            }
+	    //danger indel
+	    else if( variant.quality == -5 ){
+                (*variantType)[variant.position] = 4;
                 variant.quality = 60;
             }
             // The remaining variants will be labeled as SNPs
