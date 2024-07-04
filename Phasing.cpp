@@ -18,8 +18,7 @@ static const char *CORRECT_USAGE_MESSAGE =
 "optional arguments:\n"
 "   --sv-file=NAME                         input SV vcf file.\n"
 "   --mod-file=NAME                        input modified vcf file.(produce by longphase modcall)\n"
-"   -t, --threads=Num                      number of thread. default:0\n"
-"                                          If set to 0, use all available threads.\n"
+"   -t, --threads=Num                      number of thread. default:1\n"
 "   -o, --out-prefix=NAME                  prefix of phasing result. default: result\n"
 "   --indels                               phase small indel. default: False\n"
 "   --dot                                  each contig/chromosome will generate dot file. \n\n"
@@ -29,7 +28,8 @@ static const char *CORRECT_USAGE_MESSAGE =
 
 "phasing graph arguments:\n"
 "   -p, --baseQuality=[0~90]               change edge's weight to --edgeWeight if base quality is lower than the threshold. default:12\n"
-"   -e, --edgeWeight=[0~1]                 decide how much weight should we change if it has low base quality. default:0.1\n"
+"   -e, --edgeWeight=[0~1]                 if one of the bases connected by the edge has a quality lower than --baseQuality\n"
+"                                          its weight is reduced from the normal 1. default:0.1\n"
 "   -a, --connectAdjacent=Num              connect adjacent N SNPs. default:20\n"
 "   -d, --distance=Num                     phasing two variant if distance less than threshold. default:300000\n"
 "   -1, --edgeThreshold=[0~1]              give up SNP-SNP phasing pair if the number of reads of the \n"
@@ -72,7 +72,7 @@ static const struct option longopts[] = {
 
 namespace opt
 {
-    static int numThreads = 0;
+    static int numThreads = 1;
     static int distance = 300000;
     static std::string snpFile="";
     static std::string svFile="";
@@ -188,7 +188,7 @@ void PhasingOptions(int argc, char** argv)
         die = true;
     }  
     
-    if ( opt::numThreads < 0 ){
+    if ( opt::numThreads < 1 ){
         std::cerr << SUBPROGRAM " invalid threads. value: " 
                   << opt::numThreads 
                   << "\n please check -t, --threads=Num\n";

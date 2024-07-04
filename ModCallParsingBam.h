@@ -87,7 +87,7 @@ class MethBamParser{
     public:
         MethBamParser(ModCallParameters &params, std::string &refString);
         ~MethBamParser();
-        void detectMeth(std::string chrName, int chr_len, int numThreads, std::vector<ReadVariant> &readVariantVec);
+        void detectMeth(std::string chrName, int chr_len, htsThreadPool &threadPool, std::vector<ReadVariant> &readVariantVec);
         void exportResult(std::string chrName, std::string chrSquence, int chrLen , std::map<int,std::vector<int>> &passPosition, std::ostringstream &methResult);
         void judgeMethGenotype(std::string chrName, std::vector<ReadVariant> &readVariantVec, std::vector<ReadVariant> &fReadVariantVec, std::vector<ReadVariant> &rReadVariantVec );
         void calculateDepth();

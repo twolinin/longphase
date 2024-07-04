@@ -427,36 +427,76 @@ void VairiantGraph::destroy(){
 void VairiantGraph::addEdge(std::vector<ReadVariant> &in_readVariant){
     readVariant = &in_readVariant;
     std::map<std::string,ReadVariant> mergeReadMap;
-    /*
+
     // each read will record fist and list variant posistion
     std::map<std::string, std::pair<int,int>> alignRange;
-    std::map<std::string, bool> alignmentOverlap;
-    
-    // Check if different alignments of a read have overlap
-    for(std::vector<ReadVariant>::iterator readIter = in_readVariant.begin() ; readIter != in_readVariant.end() ; readIter++ ){
-        std::string readName = (*readIter).read_name;
-        int firstVariantPos = (*readIter).variantVec[0].position;
-        int lastVariantPos  = (*readIter).variantVec[(*readIter).variantVec.size()-1].position;
+    // record an iterator for all alignments of a read.
+    std::map<std::string, std::vector<int>> readIdxVec;
+    // record need del read index
+    std::vector<int> delReadIdx;
+
+    // Check for overlaps among different alignments of a read and filter out the shorter overlapping alignments.
+    for(int readIter = 0 ; readIter < (int)in_readVariant.size() ; readIter++ ){
+        std::string readName = in_readVariant[readIter].read_name;
+        int firstVariantPos = in_readVariant[readIter].variantVec[0].position;
+        int lastVariantPos  = in_readVariant[readIter].variantVec[in_readVariant[readIter].variantVec.size()-1].position;
         
         auto rangeIter = alignRange.find(readName);
         // this read name appears for the first time
         if( rangeIter == alignRange.end() ){
             alignRange[readName]=std::make_pair(firstVariantPos,lastVariantPos);
-            alignmentOverlap[readName]=false;
         }
         // the read appears more than once, check if the alignments overlap
         else{
             // overlap
             if( alignRange[readName].first <= firstVariantPos && firstVariantPos <= alignRange[readName].second ){
-                alignmentOverlap[readName]=true;
+                double alignStart   = std::min(alignRange[readName].first, firstVariantPos);
+                double alignEnd     = std::max(alignRange[readName].second, lastVariantPos);
+                double alignSpan    = alignEnd - alignStart + 1;
+                double overlapStart = std::max(alignRange[readName].first, firstVariantPos);
+                double overlapEnd   = std::min(alignRange[readName].second, lastVariantPos);
+                double overlapLen   = overlapEnd - overlapStart + 1;
+                double overlapRatio = overlapLen / alignSpan;
+                
+                //filtering highly overlapping alignments.
+                if( overlapRatio >= params->overlapThreshold ){
+                    int alignLen1 = alignRange[readName].second - alignRange[readName].first + 1;
+                    int alignLen2 = lastVariantPos - firstVariantPos + 1;
+                    
+                    // filter shorter alignment
+                    // current alignment is shorter
+                    if( alignLen2 <= alignLen1 ){
+                        delReadIdx.push_back(readIter);
+                    }
+                    // previous alignment is shorter
+                    else{
+                        // iterate all previous alignments
+                        for(int iter = 0 ; iter < (int)readIdxVec[readName].size() ; iter++ ){
+                            delReadIdx.push_back(readIdxVec[readName][iter]);
+                        }
+
+                        // update range
+                        alignRange[readName].first  = firstVariantPos;
+                        alignRange[readName].second = lastVariantPos;
+                        readIdxVec[readName].clear();
+                        readIdxVec[readName].push_back(readIter);
+                    }
+                    continue;
+                }
             }
-            // no verlap, update range
-            else{
-                alignRange[readName].second = lastVariantPos;
-            }
+            // update range
+            alignRange[readName].second = lastVariantPos;
         }
+        readIdxVec[readName].push_back(readIter);
     }
-    */
+
+    // sort read index
+    std::sort(delReadIdx.begin(), delReadIdx.end());
+    // remove overlap alignment
+    for( int idx = delReadIdx.size() -1 ; idx > 0 ; idx-- ){
+        in_readVariant.erase( in_readVariant.begin() + delReadIdx[idx] );
+    }
+
     int readCount=0;
     // merge alignment
     for(std::vector<ReadVariant>::iterator readIter = in_readVariant.begin() ; readIter != in_readVariant.end() ; readIter++ ){
@@ -492,13 +532,7 @@ void VairiantGraph::addEdge(std::vector<ReadVariant> &in_readVariant){
                 (*variantType)[variant.position] = 0;
             }
             mergeReadMap[(*readIter).read_name].variantVec.push_back(variant);
-            /*
-            if( !alignmentOverlap[(*readIter).read_name] ){
-                mergeReadMap[(*readIter).read_name].variantVec.push_back(variant);
-            }
-            else{
-                mergeReadMap[(*readIter).read_name+std::to_string(readCount)].variantVec.push_back(variant);
-            }*/
+
             //tmpRead.variantVec.push_back(variant);
             
             // Each position will record the included reads and their corresponding base qualities.
@@ -521,7 +555,6 @@ void VairiantGraph::addEdge(std::vector<ReadVariant> &in_readVariant){
         
         while(variant1Iter != (*readIter).second.variantVec.end() && variant2Iter != (*readIter).second.variantVec.end() ){
             // create new edge if not exist
-            //if((*variantType)[(*variant1Iter).position] == 2){}
             std::map<int,VariantEdge*>::iterator posIter = edgeList->find((*variant1Iter).position);
             if( posIter == edgeList->end() )
                 (*edgeList)[(*variant1Iter).position] = new VariantEdge((*variant1Iter).position);
@@ -547,88 +580,16 @@ void VairiantGraph::addEdge(std::vector<ReadVariant> &in_readVariant){
         }
     }
 
-    
-    
-    
-    readVariant = &in_readVariant;
-    // iter all read
-    for(std::vector<ReadVariant>::iterator readIter = in_readVariant.begin() ; readIter != in_readVariant.end() ; readIter++ ){
-        // Creating a pseudo read which allows filtering out variants that should not be phased
-        ReadVariant tmpRead;
-        // Visiting all the variants on the read
-        for( auto variant : (*readIter).variantVec ){
-            
-            // modification
-            if( variant.quality == -2 || variant.quality == -3 ){
-                (*variantType)[variant.position] = 2;
-                variant.quality = 60;
-            }
-            // structure variation
-            else if( variant.quality == -1 ){
-                (*variantType)[variant.position] = 1;
-                if( variant.allele == 1 ){
-                    // SVcaller calling
-                    variant.quality = 60; 
-                }
-                else{
-                    // In SVcaller, unmarked reads are assumed to be REF
-                    variant.quality = 30;
-                }
-            }
-            // indel
-            else if( variant.quality == -4 ){
-                (*variantType)[variant.position] = 3;
-                variant.quality = 60;
-            }
-            // The remaining variants will be labeled as SNPs
-            else{
-                (*variantType)[variant.position] = 0;
-            }
-            
-            tmpRead.variantVec.push_back(variant);
-            
-            // Each position will record the included reads and their corresponding base qualities.
-            auto variantIter = totalVariantInfo->find(variant.position);
-            
-            if( variantIter == totalVariantInfo->end() ){
-                (*totalVariantInfo)[variant.position] = new ReadBaseMap();
-            }
-            
-            (*(*totalVariantInfo)[variant.position])[(*readIter).read_name] = variant.quality;
-        }
-        
-        // iter all pair of snp and construct initial graph
-        std::vector<Variant>::iterator variant1Iter = tmpRead.variantVec.begin();
-        std::vector<Variant>::iterator variant2Iter = std::next(variant1Iter,1);
-        while(variant1Iter != tmpRead.variantVec.end() && variant2Iter != tmpRead.variantVec.end() ){
-            // create new edge if not exist
-            std::map<int,VariantEdge*>::iterator posIter = edgeList->find((*variant1Iter).position);
-            if( posIter == edgeList->end() )
-                (*edgeList)[(*variant1Iter).position] = new VariantEdge((*variant1Iter).position);
-
-            // add edge process
-            for(int nextNode = 0 ; nextNode < params->connectAdjacent; nextNode++){
-                // this allele support ref
-                if( (*variant1Iter).allele == 0 )
-                    (*edgeList)[(*variant1Iter).position]->ref->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).read_name,params->baseQuality,params->edgeWeight);
-                // this allele support alt
-                if( (*variant1Iter).allele == 1 )
-                    (*edgeList)[(*variant1Iter).position]->alt->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).read_name,params->baseQuality,params->edgeWeight);
-                
-                // next snp
-                variant2Iter++;
-                if( variant2Iter == tmpRead.variantVec.end() ){
-                    break;
-                }
-            }
-
-            variant1Iter++;
-            variant2Iter = std::next(variant1Iter,1);
-        }
-    }
 } 
 
 void VairiantGraph::readCorrection(){
+    
+    
+    std::map<std::string,std::map<int,std::map<int,int>>> readBlockHP;
+    //
+    std::map<std::string,std::map<int,std::map<int,int>>> readBlockHPcount;
+    
+    
     // haplotype, <position <allele, base count>>
     std::map<int,std::map<int,std::map<int,int>>> *hpAlleleCountMap = new std::map<int,std::map<int,std::map<int,int>>>;
 
@@ -636,6 +597,7 @@ void VairiantGraph::readCorrection(){
     for(std::vector<ReadVariant>::iterator readIter = (*readVariant).begin() ; readIter != (*readVariant).end() ; readIter++ ){
         double refCount = 0;
         double altCount = 0;
+        //int block;
         
         // loop all variant 
         for( auto variant : (*readIter).variantVec ){
@@ -673,6 +635,9 @@ void VairiantGraph::readCorrection(){
             int belongHP = ( refCount > altCount ? 0 : 1 );
             (*readHpMap)[(*readIter).read_name] = belongHP;
             
+            //readBlockHP[(*readIter).read_name][(*readIter).reference_start][block]=belongHP;
+            //readBlockHPcount[(*readIter).read_name][block][belongHP]++;
+            
             for(auto variantIter = (*readIter).variantVec.begin() ; variantIter != (*readIter).variantVec.end() ; variantIter++ ){
                 if( (*variantIter).allele == 0 || (*variantIter).allele == 1){
                     (*hpAlleleCountMap)[belongHP][(*variantIter).position][(*variantIter).allele]++;
@@ -683,7 +648,29 @@ void VairiantGraph::readCorrection(){
             (*readHpMap)[(*readIter).read_name] = -1;
         }
     }
+    
+    /*
+    for(auto readIter = readBlockHP.begin() ; readIter != readBlockHP.end() ; readIter++ ){
         
+        int max = 0;
+        for(auto blockIter = readBlockHPcount[readIter->first].begin() ; blockIter != readBlockHPcount[readIter->first].end() ; blockIter++ ){
+            if( (*blockIter).second.size() > max ){
+                max = (*blockIter).second.size();
+            }
+        }
+
+        std::cout<< readIter->first << "\t" << max;
+        
+        for(auto startIter = readIter->second.begin() ; startIter != readIter->second.end() ; startIter++ ){
+            std::cout<< "\t" << startIter->first << ",";
+            for(auto blockIter = startIter->second.begin() ; blockIter != startIter->second.end() ; blockIter++ ){
+                std::cout<< blockIter->first << "," <<  blockIter->second;
+            }
+        }
+        std::cout<< "\n";
+    }
+    */
+    
     double snpConfidenceThreshold = params->snpConfidence;
 
     subNodeHP->clear();

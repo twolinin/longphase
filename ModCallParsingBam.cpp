@@ -46,9 +46,8 @@ MethBamParser::~MethBamParser(){
     delete readStartEndMap;
 }
 
-void MethBamParser::detectMeth(std::string chrName, int chr_len, int numThreads, std::vector<ReadVariant> &readVariantVec){
-    // init data structure and get core n
-    htsThreadPool threadPool = {NULL, 0};
+void MethBamParser::detectMeth(std::string chrName, int chr_len, htsThreadPool &threadPool, std::vector<ReadVariant> &readVariantVec){
+
 
     for( auto bamFile: params->bamFileVec ){
 
@@ -72,11 +71,6 @@ void MethBamParser::detectMeth(std::string chrName, int chr_len, int numThreads,
 
         
         int result;
-        
-        // creat thread pool
-        if (!(threadPool.pool = hts_tpool_init(numThreads))) {
-            fprintf(stderr, "Error creating thread pool\n");
-        }
         hts_set_opt(fp_in, HTS_OPT_THREAD_POOL, &threadPool);
 
         while ((result = sam_itr_multi_next(fp_in, iter, aln)) >= 0) { 

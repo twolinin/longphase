@@ -18,6 +18,7 @@ struct HaplotagParameters
     std::string bamFile;
     std::string fastaFile;
     std::string resultPrefix;
+    std::string region;
     
     bool tagSupplementary;
     bool writeReadLog;
@@ -57,8 +58,8 @@ class HaplotagProcess
     int totalSupplementary;
     int totalSecondary;
     int totalUnmapped;
-    int totalTagCuonnt;
-    int totalUnTagCuonnt;
+    int totalTagCount;
+    int totalUnTagCount;
     
     std::time_t processBegin;
     bool integerPS;
