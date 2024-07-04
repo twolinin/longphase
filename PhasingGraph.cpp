@@ -186,24 +186,10 @@ std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool
 
     if((variantType[currPos] == 0 && variantType[targetPos] == 2)||(variantType[currPos] == 2 && variantType[targetPos] == 0)){
         edgeThreshold = 0.3;
-        /*if(targetPos - currPos > 30000){
-            edgeThreshold = 0.1;
-            if((rr+ra+ar+aa) < 1){
-                edgeThreshold = -1;
-            }
-        }*/
         if((rr+ra+ar+aa) < 1){
             edgeThreshold = -1;
         }
     }
-
-
-    /*if(variantType[currPos] == 2 && variantType[targetPos] == 2){
-        edgeThreshold = 0.6;
-        if((rr+ra+ar+aa) < 1){
-            edgeThreshold = -1;
-        }
-    }*/
 
     if( edgeSimilarRatio > edgeThreshold ){
         refAllele = -1;
@@ -254,10 +240,6 @@ void VairiantGraph::edgeConnectResult(){
     int currPos = -1;
     int nextPos = -1;
     int lastConnectPos = -1;
-    
-    // std::ostringstream fileName;
-    // fileName << "/bip8_disk/pochung112/modphase-output/"<< chr << ".log";
-    // std::ofstream outFile(fileName.str(), std::ios::app);
 
     // Visit all position and assign SNPs to haplotype.
     // Avoid recording duplicate information,
