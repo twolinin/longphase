@@ -8,6 +8,12 @@
 
 typedef std::pair<int, int> PosAllele;
 typedef std::map<std::string, int> ReadBaseMap;
+/*struct ReadBaseInfo{
+    std::string readName;
+    int quality;
+    // 0=SNP 1=SV 2=MOD 3=INDEL
+    int type;
+};*/
 
 class SubEdge{
     
@@ -53,7 +59,7 @@ struct VariantEdge{
 
     VariantEdge(int currPos);
     // node pair 
-    std::pair<PosAllele,PosAllele> findBestEdgePair(int targetPos, bool isONT, double diffRatioThreshold, bool debug);
+    std::pair<PosAllele,PosAllele> findBestEdgePair(int targetPos, bool isONT, double diffRatioThreshold, bool debug, std::map<int,int> &variantType/*, std::ofstream& outFile*/);
     // number of read of two node. AA and AB combination
     std::pair<int,int> findNumberOfRead(int targetPos);
 };
@@ -84,7 +90,7 @@ class VairiantGraph{
         // position, edge
         std::map<int,VariantEdge*> *edgeList;
         // Each position will record the included reads and their corresponding base qualities.
-        // position, < read name, quality>
+        // position, < read name, ReadBaseInfo>
         std::map<int,ReadBaseMap*> *totalVariantInfo;
         // position, type < 0=SNP 1=SV 2=MOD 3=INDEL >
         std::map<int,int> *variantType;
