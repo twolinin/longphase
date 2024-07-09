@@ -197,7 +197,7 @@ std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool
     }
     
     if(debug){
-        std::cout << currPos+1 << "\t->\t" << targetPos+1 << "\t|rr aa | ra ar\t" << "\t" << rr << "\t" << aa << "\t" << ra << "\t" << ar  << "\n";
+        std::cout << currPos << "\t->\t" << targetPos << "\t|rr aa | ra ar\t" << "\t" << rr << "\t" << aa << "\t" << ra << "\t" << ar  << "\n";
     }
     
     // create edge pairs
@@ -264,7 +264,7 @@ void VairiantGraph::edgeConnectResult(){
         int h1 = (*hpCountMap)[currPos][1].size();
         int h2 = (*hpCountMap)[currPos][2].size();
 
-        std::cout << currPos+1 << "\t" << h1 << "\t" << h2 << "\n"; 
+        std::cout << currPos << "\t" << h1 << "\t" << h2 << "\n"; 
         // new block, set this position as block start 
         if( h1 == 0 && h2 == 0 ){
             // No new blocks should be created if the next SNP has already been picked up
@@ -293,7 +293,7 @@ void VairiantGraph::edgeConnectResult(){
         // check connect between surrent SNP and next n SNPs
         for(int i = 0 ; i < params->connectAdjacent ; i++ ){
             // consider reads from the currnt SNP and the next (i+1)'s SNP
-            std::pair<PosAllele,PosAllele> tmp = edgeIter->second->findBestEdgePair(nextNodeIter->first, params->isONT, params->edgeThreshold, true, *variantType);
+            std::pair<PosAllele,PosAllele> tmp = edgeIter->second->findBestEdgePair(nextNodeIter->first, params->isONT, params->edgeThreshold, false, *variantType);
             // -1 : no connect  
             //  1 : the haplotype of next (i+1)'s SNP are same as previous
             //  2 : the haplotype of next (i+1)'s SNP are different as previous
