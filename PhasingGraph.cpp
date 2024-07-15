@@ -184,6 +184,7 @@ std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool
         // not sure which is better
     }
 
+    //VarintType < 0=SNP 1=SV 2=MOD 3=INDEL 4=tandem repeat INDEL >
     if((variantType[currPos] == 0 && variantType[targetPos] == 2)||(variantType[currPos] == 2 && variantType[targetPos] == 0)){
         edgeThreshold = 0.3;
         if((rr+ra+ar+aa) < 1){
@@ -606,6 +607,7 @@ void VairiantGraph::readCorrection(){
             //block = nodePS->second;
             if( nodePS != bkResult->end() ){
                 if((*bkResult)[refAllele] != 0 ){
+                    //VarintType < 0=SNP 1=SV 2=MOD 3=INDEL 4=tandem repeat INDEL >
                     if((*variantType)[variant.position] == 0){
                         if((*subNodeHP)[refAllele]==0)refCount++;
                         else altCount++;

@@ -268,6 +268,7 @@ void MethBamParser::exportResult(std::string chrName, std::string chrSquence, in
         auto prepassPosIter =  passPosition.find((*posinfoIter).first - 1);
         auto nextpassPosIter =  passPosition.find((*posinfoIter).first + 1);
         
+        // Determine continuous methylation position (CpG) that can be output
         if(!passPosition[passPosIter->first].empty() && !passPosition[prepassPosIter->first].empty()){
             for(std::vector<int>::iterator posIter = passPosition[passPosIter->first].begin(); posIter != passPosition[passPosIter->first].end(); posIter++){
                 for(std::vector<int>::iterator posIter2 = passPosition[prepassPosIter->first].begin(); posIter2 != passPosition[prepassPosIter->first].end(); posIter2++){
