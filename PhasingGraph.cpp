@@ -265,7 +265,6 @@ void VairiantGraph::edgeConnectResult(){
         int h1 = (*hpCountMap)[currPos][1].size();
         int h2 = (*hpCountMap)[currPos][2].size();
 
-        std::cout << currPos << "\t" << h1 << "\t" << h2 << "\n"; 
         // new block, set this position as block start 
         if( h1 == 0 && h2 == 0 ){
             // No new blocks should be created if the next SNP has already been picked up
