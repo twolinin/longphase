@@ -55,7 +55,7 @@ void SubEdge::addSubEdge(int currentQuality, Variant connectNode, std::string re
         else{
             (*altQuality)[connectNode.position] += currentQuality + connectNode.quality;
         }*/
-	if ( currentQuality >= baseQuality && connectNode.quality >= baseQuality )
+	    if ( currentQuality >= baseQuality && connectNode.quality >= baseQuality )
             (*altReadCount)[connectNode.position]++;
         else {
             (*altReadCount)[connectNode.position] = (*altReadCount)[connectNode.position] + edgeWeight ;
