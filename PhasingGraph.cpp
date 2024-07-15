@@ -36,7 +36,7 @@ void SubEdge::addSubEdge(int currentQuality, Variant connectNode, std::string re
         else{
             (*refQuality)[connectNode.position] += currentQuality + connectNode.quality;
         }*/
-	if ( currentQuality >= baseQuality && connectNode.quality >= baseQuality )
+	    if ( currentQuality >= baseQuality && connectNode.quality >= baseQuality )
             (*refReadCount)[connectNode.position]++;
         else {
             (*refReadCount)[connectNode.position] = (*refReadCount)[connectNode.position] + edgeWeight ;
@@ -55,7 +55,7 @@ void SubEdge::addSubEdge(int currentQuality, Variant connectNode, std::string re
         else{
             (*altQuality)[connectNode.position] += currentQuality + connectNode.quality;
         }*/
-	if ( currentQuality >= baseQuality && connectNode.quality >= baseQuality )
+	    if ( currentQuality >= baseQuality && connectNode.quality >= baseQuality )
             (*altReadCount)[connectNode.position]++;
         else {
             (*altReadCount)[connectNode.position] = (*altReadCount)[connectNode.position] + edgeWeight ;
@@ -154,7 +154,7 @@ VariantEdge::VariantEdge(int inCurrPos){
 }
 
 //VariantEdge
-std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool isONT, double edgeThreshold, bool debug){
+std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool isONT, double edgeThreshold, bool debug, std::map<int,int> &variantType){
     std::pair<float,float> refBestPair  = ref->BestPair(targetPos);
     std::pair<float,float> altBestPair  = alt->BestPair(targetPos);
     // get the weight of each pair
@@ -183,14 +183,22 @@ std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool
         // no connect 
         // not sure which is better
     }
-    
+
+    //VarintType < 0=SNP 1=SV 2=MOD 3=INDEL 4=tandem repeat INDEL >
+    if((variantType[currPos] == 0 && variantType[targetPos] == 2)||(variantType[currPos] == 2 && variantType[targetPos] == 0)){
+        edgeThreshold = 0.3;
+        if((rr+ra+ar+aa) < 1){
+            edgeThreshold = -1;
+        }
+    }
+
     if( edgeSimilarRatio > edgeThreshold ){
         refAllele = -1;
         altAllele = -1;
     }
     
     if(debug){
-        std::cout<< currPos << "\t->\t" << targetPos << "\t|rr aa | ra ar\t" << "\t" << rr << "\t" << aa << "\t" << ra << "\t" << ar  << "\n";
+        std::cout << currPos << "\t->\t" << targetPos << "\t|rr aa | ra ar\t" << "\t" << rr << "\t" << aa << "\t" << ra << "\t" << ar  << "\n";
     }
     
     // create edge pairs
@@ -233,7 +241,7 @@ void VairiantGraph::edgeConnectResult(){
     int currPos = -1;
     int nextPos = -1;
     int lastConnectPos = -1;
-    
+
     // Visit all position and assign SNPs to haplotype.
     // Avoid recording duplicate information,
     // only one of the two alleles needs to be used for each SNP
@@ -285,7 +293,7 @@ void VairiantGraph::edgeConnectResult(){
         // check connect between surrent SNP and next n SNPs
         for(int i = 0 ; i < params->connectAdjacent ; i++ ){
             // consider reads from the currnt SNP and the next (i+1)'s SNP
-            std::pair<PosAllele,PosAllele> tmp = edgeIter->second->findBestEdgePair(nextNodeIter->first, params->isONT, params->edgeThreshold, false);
+            std::pair<PosAllele,PosAllele> tmp = edgeIter->second->findBestEdgePair(nextNodeIter->first, params->isONT, params->edgeThreshold, false, *variantType);
             // -1 : no connect  
             //  1 : the haplotype of next (i+1)'s SNP are same as previous
             //  2 : the haplotype of next (i+1)'s SNP are different as previous
@@ -324,6 +332,7 @@ void VairiantGraph::edgeConnectResult(){
         }
     }
 
+    // outFile.close();
     // loop all block and construct graph
     // Record the phase set(PS) for each variant on the graph and record the haplotype to each variant's allele belongs.
     for(auto blockIter = phasedBlocks->begin() ; blockIter != phasedBlocks->end() ; blockIter++ ){
@@ -596,9 +605,27 @@ void VairiantGraph::readCorrection(){
             std::map<PosAllele,int>::iterator nodePS = bkResult->find(refAllele);
             //block = nodePS->second;
             if( nodePS != bkResult->end() ){
-                if( (*bkResult)[refAllele] != 0 ){
-                    if((*subNodeHP)[refAllele]==0)refCount++;
-                    else altCount++;
+                if((*bkResult)[refAllele] != 0 ){
+                    //VarintType < 0=SNP 1=SV 2=MOD 3=INDEL 4=tandem repeat INDEL >
+                    if((*variantType)[variant.position] == 0){
+                        if((*subNodeHP)[refAllele]==0)refCount++;
+                        else altCount++;
+                    }
+                    else if((*variantType)[variant.position] == 1){
+                        if((*subNodeHP)[refAllele]==0)refCount++;
+                        else altCount++;
+                    }
+                    else if((*variantType)[variant.position] == 2){
+                        continue;
+                    }
+                    else if((*variantType)[variant.position] == 3){
+                        if((*subNodeHP)[refAllele]==0)refCount+=0.1;
+                        else altCount+=0.1;
+                    }
+                    else if((*variantType)[variant.position] == 4){
+                        if((*subNodeHP)[refAllele]==0)refCount+=0.1;
+                        else altCount+=0.1;
+                    }
                 }
             }
         }

@@ -27,7 +27,6 @@ ModCallProcess::ModCallProcess(ModCallParameters params){
     }
 
     begin = time(NULL);
-
     //loop all chromosomes
     #pragma omp parallel for schedule(dynamic) num_threads(params.numThreads)
     for(auto chrIter = chrInfo.begin(); chrIter != chrInfo.end(); ++chrIter) {
@@ -38,7 +37,7 @@ ModCallProcess::ModCallProcess(ModCallParameters params){
         std::vector<ReadVariant> rReadVariantVec;
         std::vector<ReadVariant> readVariantVec;
         // record hetero metyhl position
-        std::map<int,int> *passPosition = new std::map<int,int>;
+        std::map<int,std::vector<int>> *passPosition = new std::map<int,std::vector<int>>;
 
         std::string chrName = chrIter->name;
         std::string chrSeq = chrIter->sequence;
@@ -50,10 +49,8 @@ ModCallProcess::ModCallProcess(ModCallParameters params){
 
         //new new calculate depth
         methbamparser->calculateDepth();
-        
         //judge methylation genotype
         methbamparser->judgeMethGenotype(chrName, readVariantVec, fReadVariantVec, rReadVariantVec);
-
         MethylationGraph *fGraph = new MethylationGraph(params);
         MethylationGraph *rGraph = new MethylationGraph(params);
         fGraph->addEdge(fReadVariantVec);
@@ -69,7 +66,6 @@ ModCallProcess::ModCallProcess(ModCallParameters params){
         
         //push result to ModCallResult
         methbamparser->exportResult(chrName, chrSeq, chrLen, (*passPosition), chrModCallResult[chrName]);
-        
         passPosition->clear();
         
         delete methbamparser;
