@@ -22,6 +22,7 @@ static const char *CORRECT_USAGE_MESSAGE =
 "                                      if the alignment has no obvious corresponding haplotype, it will not be tagged. default:0.6\n"
 "      -t, --threads=Num               number of thread. default:1\n"
 "      -o, --out-prefix=NAME           prefix of phasing result. default:result\n"
+"      --cram                          the output file will be in the cram format. default:bam\n"
 "      --region=REGION                 tagging include only reads/variants overlapping those regions. default:\"\"(all regions)\n"
 "                                      input format:chrom (consider entire chromosome)\n"
 "                                                   chrom:start (consider region from this start to end of chromosome)\n"
@@ -31,7 +32,7 @@ static const char *CORRECT_USAGE_MESSAGE =
 
 static const char* shortopts = "s:b:o:t:q:p:r:";
 
-enum { OPT_HELP = 1, TAG_SUP, SV_FILE, REGION, LOG, MOD_FILE};
+enum { OPT_HELP = 1, TAG_SUP, SV_FILE, REGION, LOG, MOD_FILE, CRAM};
 
 static const struct option longopts[] = { 
     { "help",                 no_argument,        NULL, OPT_HELP },
@@ -42,6 +43,7 @@ static const struct option longopts[] = {
     { "sv-file",              required_argument,  NULL, SV_FILE },
     { "mod-file",             required_argument,  NULL, MOD_FILE },
     { "out-prefix",           required_argument,  NULL, 'o' },
+    { "cram",                 no_argument,        NULL, CRAM },
     { "threads",              required_argument,  NULL, 't' },
     { "qualityThreshold",     required_argument,  NULL, 'q' },
     { "percentageThreshold",  required_argument,  NULL, 'p' },
@@ -62,8 +64,10 @@ namespace opt
     static std::string fastaFile="";
     static std::string resultPrefix="result";
     static std::string region="";
+    static std::string outputFormat="bam";
     static bool tagSupplementary = false;
     static bool writeReadLog = false;
+    static std::string command="longphase ";
 }
 
 void HaplotagOptions(int argc, char** argv)
@@ -76,22 +80,29 @@ void HaplotagOptions(int argc, char** argv)
         std::istringstream arg(optarg != NULL ? optarg : "");
         switch (c)
         {
-        case 's': arg >> opt::snpFile; break;
-        case 't': arg >> opt::numThreads; break;
-        case 'b': arg >> opt::bamFile; break;
-        case 'r': arg >> opt::fastaFile; break; 
-        case 'o': arg >> opt::resultPrefix; break;
-        case 'q': arg >> opt::qualityThreshold; break;
-        case 'p': arg >> opt::percentageThreshold; break;
-        case SV_FILE: arg >> opt::svFile; break;
-        case MOD_FILE: arg >> opt::modFile; break;
-        case TAG_SUP: opt::tagSupplementary = true; break;
-        case REGION: arg >> opt::region; break;
-        case LOG: opt::writeReadLog = true; break;
-        case OPT_HELP:
-            std::cout << CORRECT_USAGE_MESSAGE;
-            exit(EXIT_SUCCESS);
+            case 's': arg >> opt::snpFile; break;
+            case 't': arg >> opt::numThreads; break;
+            case 'b': arg >> opt::bamFile; break;
+            case 'r': arg >> opt::fastaFile; break; 
+            case 'o': arg >> opt::resultPrefix; break;
+            case 'q': arg >> opt::qualityThreshold; break;
+            case 'p': arg >> opt::percentageThreshold; break;
+            case SV_FILE:  arg >> opt::svFile; break;
+            case MOD_FILE: arg >> opt::modFile; break;     
+            case REGION:   arg >> opt::region; break;        
+            case TAG_SUP:  opt::tagSupplementary = true; break;
+            case CRAM:     opt::outputFormat = "cram"; break;
+            case LOG:      opt::writeReadLog = true; break;
+            case OPT_HELP:
+                std::cout << CORRECT_USAGE_MESSAGE;
+                exit(EXIT_SUCCESS);
+            default: die = true; break;
         }
+    }
+
+    for(int i = 0; i < argc; ++i){
+        opt::command.append(argv[i]);
+        opt::command.append(" ");
     }
 
     if (argc - optind < 0 )
@@ -184,7 +195,7 @@ void HaplotagOptions(int argc, char** argv)
 
 }
 
-int HaplotagMain(int argc, char** argv)
+int HaplotagMain(int argc, char** argv, std::string in_version)
 {
     HaplotagParameters ecParams;
     // set parameters
@@ -202,6 +213,9 @@ int HaplotagMain(int argc, char** argv)
     ecParams.percentageThreshold=opt::percentageThreshold;
     ecParams.region=opt::region;
     ecParams.writeReadLog=opt::writeReadLog;
+    ecParams.version=in_version;
+    ecParams.command=opt::command;
+    ecParams.outputFormat=opt::outputFormat;
 
     HaplotagProcess processor(ecParams);
 

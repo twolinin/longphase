@@ -36,7 +36,7 @@ void SubEdge::addSubEdge(int currentQuality, Variant connectNode, std::string re
         else{
             (*refQuality)[connectNode.position] += currentQuality + connectNode.quality;
         }*/
-	if ( currentQuality >= baseQuality && connectNode.quality >= baseQuality )
+	    if ( currentQuality >= baseQuality && connectNode.quality >= baseQuality )
             (*refReadCount)[connectNode.position]++;
         else {
             (*refReadCount)[connectNode.position] = (*refReadCount)[connectNode.position] + edgeWeight ;
@@ -55,7 +55,7 @@ void SubEdge::addSubEdge(int currentQuality, Variant connectNode, std::string re
         else{
             (*altQuality)[connectNode.position] += currentQuality + connectNode.quality;
         }*/
-	if ( currentQuality >= baseQuality && connectNode.quality >= baseQuality )
+	    if ( currentQuality >= baseQuality && connectNode.quality >= baseQuality )
             (*altReadCount)[connectNode.position]++;
         else {
             (*altReadCount)[connectNode.position] = (*altReadCount)[connectNode.position] + edgeWeight ;
@@ -154,7 +154,7 @@ VariantEdge::VariantEdge(int inCurrPos){
 }
 
 //VariantEdge
-std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool isONT, double edgeThreshold, bool debug, float &weight, VoteResult &vote){
+std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool isONT, double edgeThreshold, bool debug, std::map<int,int> &variantType, float &weight, VoteResult &vote){
     std::pair<float,float> refBestPair  = ref->BestPair(targetPos);
     std::pair<float,float> altBestPair  = alt->BestPair(targetPos);
     // get the weight of each pair
@@ -183,14 +183,22 @@ std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool
         // no connect 
         // not sure which is better
     }
-    
+
+    //VarintType < 0=SNP 1=SV 2=MOD 3=INDEL 4=tandem repeat INDEL >
+    if((variantType[currPos] == 0 && variantType[targetPos] == 2)||(variantType[currPos] == 2 && variantType[targetPos] == 0)){
+        edgeThreshold = 0.3;
+        if((rr+ra+ar+aa) < 1){
+            edgeThreshold = -1;
+        }
+    }
+
     if( edgeSimilarRatio > edgeThreshold ){
         refAllele = -1;
         altAllele = -1;
     }
     
     if(debug){
-        std::cout<< currPos << "\t->\t" << targetPos << "\t|rr aa | ra ar\t" << "\t" << rr << "\t" << aa << "\t" << ra << "\t" << ar  << "\n";
+        std::cout << currPos << "\t->\t" << targetPos << "\t|rr aa | ra ar\t" << "\t" << rr << "\t" << aa << "\t" << ra << "\t" << ar  << "\n";
     }
    
     //when the voting result is clear and voting reads are more than one, we make its weight twenty times bigger 
@@ -279,7 +287,7 @@ void VairiantGraph::edgeConnectResult(){
     int currPos = -1;
     int nextPos = -1;
     int lastConnectPos = -1;
-    
+
     // Visit all position and assign SNPs to haplotype.
     // Avoid recording duplicate information,
     // only one of the two alleles needs to be used for each SNP
@@ -344,7 +352,7 @@ void VairiantGraph::edgeConnectResult(){
 	    vote.Pos = currPos ;
 
             // consider reads from the currnt SNP and the next (i+1)'s SNP
-            std::pair<PosAllele,PosAllele> tmp = edgeIter->second->findBestEdgePair(nextNodeIter->first, params->isONT, params->edgeThreshold, false, weight, vote);
+            std::pair<PosAllele,PosAllele> tmp = edgeIter->second->findBestEdgePair(nextNodeIter->first, params->isONT, params->edgeThreshold, false, *variantType, weight, vote);
 	    std::pair<float,float> paracross = edgeIter->second->findNumberOfRead(nextNodeIter->first) ;
 
 	    // if the target is a danger indel change its weight to 0.1
@@ -402,6 +410,7 @@ void VairiantGraph::edgeConnectResult(){
         }
     }
 
+    // outFile.close();
     // loop all block and construct graph
     // Record the phase set(PS) for each variant on the graph and record the haplotype to each variant's allele belongs.
     for(auto blockIter = phasedBlocks->begin() ; blockIter != phasedBlocks->end() ; blockIter++ ){
@@ -496,36 +505,76 @@ void VairiantGraph::destroy(){
 void VairiantGraph::addEdge(std::vector<ReadVariant> &in_readVariant){
     readVariant = &in_readVariant;
     std::map<std::string,ReadVariant> mergeReadMap;
-    /*
+
     // each read will record fist and list variant posistion
     std::map<std::string, std::pair<int,int>> alignRange;
-    std::map<std::string, bool> alignmentOverlap;
-    
-    // Check if different alignments of a read have overlap
-    for(std::vector<ReadVariant>::iterator readIter = in_readVariant.begin() ; readIter != in_readVariant.end() ; readIter++ ){
-        std::string readName = (*readIter).read_name;
-        int firstVariantPos = (*readIter).variantVec[0].position;
-        int lastVariantPos  = (*readIter).variantVec[(*readIter).variantVec.size()-1].position;
+    // record an iterator for all alignments of a read.
+    std::map<std::string, std::vector<int>> readIdxVec;
+    // record need del read index
+    std::vector<int> delReadIdx;
+
+    // Check for overlaps among different alignments of a read and filter out the shorter overlapping alignments.
+    for(int readIter = 0 ; readIter < (int)in_readVariant.size() ; readIter++ ){
+        std::string readName = in_readVariant[readIter].read_name;
+        int firstVariantPos = in_readVariant[readIter].variantVec[0].position;
+        int lastVariantPos  = in_readVariant[readIter].variantVec[in_readVariant[readIter].variantVec.size()-1].position;
         
         auto rangeIter = alignRange.find(readName);
         // this read name appears for the first time
         if( rangeIter == alignRange.end() ){
             alignRange[readName]=std::make_pair(firstVariantPos,lastVariantPos);
-            alignmentOverlap[readName]=false;
         }
         // the read appears more than once, check if the alignments overlap
         else{
             // overlap
             if( alignRange[readName].first <= firstVariantPos && firstVariantPos <= alignRange[readName].second ){
-                alignmentOverlap[readName]=true;
+                double alignStart   = std::min(alignRange[readName].first, firstVariantPos);
+                double alignEnd     = std::max(alignRange[readName].second, lastVariantPos);
+                double alignSpan    = alignEnd - alignStart + 1;
+                double overlapStart = std::max(alignRange[readName].first, firstVariantPos);
+                double overlapEnd   = std::min(alignRange[readName].second, lastVariantPos);
+                double overlapLen   = overlapEnd - overlapStart + 1;
+                double overlapRatio = overlapLen / alignSpan;
+                
+                //filtering highly overlapping alignments.
+                if( overlapRatio >= params->overlapThreshold ){
+                    int alignLen1 = alignRange[readName].second - alignRange[readName].first + 1;
+                    int alignLen2 = lastVariantPos - firstVariantPos + 1;
+                    
+                    // filter shorter alignment
+                    // current alignment is shorter
+                    if( alignLen2 <= alignLen1 ){
+                        delReadIdx.push_back(readIter);
+                    }
+                    // previous alignment is shorter
+                    else{
+                        // iterate all previous alignments
+                        for(int iter = 0 ; iter < (int)readIdxVec[readName].size() ; iter++ ){
+                            delReadIdx.push_back(readIdxVec[readName][iter]);
+                        }
+
+                        // update range
+                        alignRange[readName].first  = firstVariantPos;
+                        alignRange[readName].second = lastVariantPos;
+                        readIdxVec[readName].clear();
+                        readIdxVec[readName].push_back(readIter);
+                    }
+                    continue;
+                }
             }
-            // no verlap, update range
-            else{
-                alignRange[readName].second = lastVariantPos;
-            }
+            // update range
+            alignRange[readName].second = lastVariantPos;
         }
+        readIdxVec[readName].push_back(readIter);
     }
-    */
+
+    // sort read index
+    std::sort(delReadIdx.begin(), delReadIdx.end());
+    // remove overlap alignment
+    for( int idx = delReadIdx.size() -1 ; idx > 0 ; idx-- ){
+        in_readVariant.erase( in_readVariant.begin() + delReadIdx[idx] );
+    }
+
     int readCount=0;
     // merge alignment
     for(std::vector<ReadVariant>::iterator readIter = in_readVariant.begin() ; readIter != in_readVariant.end() ; readIter++ ){
@@ -566,13 +615,7 @@ void VairiantGraph::addEdge(std::vector<ReadVariant> &in_readVariant){
                 (*variantType)[variant.position] = 0;
             }
             mergeReadMap[(*readIter).read_name].variantVec.push_back(variant);
-            /*
-            if( !alignmentOverlap[(*readIter).read_name] ){
-                mergeReadMap[(*readIter).read_name].variantVec.push_back(variant);
-            }
-            else{
-                mergeReadMap[(*readIter).read_name+std::to_string(readCount)].variantVec.push_back(variant);
-            }*/
+
             //tmpRead.variantVec.push_back(variant);
             
             // Each position will record the included reads and their corresponding base qualities.
@@ -620,86 +663,6 @@ void VairiantGraph::addEdge(std::vector<ReadVariant> &in_readVariant){
         }
     }
 
-    
-    
-    /*
-    readVariant = &in_readVariant;
-    // iter all read
-    for(std::vector<ReadVariant>::iterator readIter = in_readVariant.begin() ; readIter != in_readVariant.end() ; readIter++ ){
-        // Creating a pseudo read which allows filtering out variants that should not be phased
-        ReadVariant tmpRead;
-        // Visiting all the variants on the read
-        for( auto variant : (*readIter).variantVec ){
-            
-            // modification
-            if( variant.quality == -2 || variant.quality == -3 ){
-                (*variantType)[variant.position] = 2;
-                variant.quality = 60;
-            }
-            // structure variation
-            else if( variant.quality == -1 ){
-                (*variantType)[variant.position] = 1;
-                if( variant.allele == 1 ){
-                    // SVcaller calling
-                    variant.quality = 60; 
-                }
-                else{
-                    // In SVcaller, unmarked reads are assumed to be REF
-                    variant.quality = 30;
-                }
-            }
-            // indel
-            else if( variant.quality == -4 ){
-                (*variantType)[variant.position] = 3;
-                variant.quality = 60;
-            }
-            // The remaining variants will be labeled as SNPs
-            else{
-                (*variantType)[variant.position] = 0;
-            }
-            
-            tmpRead.variantVec.push_back(variant);
-            
-            // Each position will record the included reads and their corresponding base qualities.
-            auto variantIter = totalVariantInfo->find(variant.position);
-            
-            if( variantIter == totalVariantInfo->end() ){
-                (*totalVariantInfo)[variant.position] = new ReadBaseMap();
-            }
-            
-            (*(*totalVariantInfo)[variant.position])[(*readIter).read_name] = variant.quality;
-        }
-        
-        // iter all pair of snp and construct initial graph
-        std::vector<Variant>::iterator variant1Iter = tmpRead.variantVec.begin();
-        std::vector<Variant>::iterator variant2Iter = std::next(variant1Iter,1);
-        while(variant1Iter != tmpRead.variantVec.end() && variant2Iter != tmpRead.variantVec.end() ){
-            // create new edge if not exist
-            std::map<int,VariantEdge*>::iterator posIter = edgeList->find((*variant1Iter).position);
-            if( posIter == edgeList->end() )
-                (*edgeList)[(*variant1Iter).position] = new VariantEdge((*variant1Iter).position);
-
-            // add edge process
-            for(int nextNode = 0 ; nextNode < params->connectAdjacent; nextNode++){
-                // this allele support ref
-                if( (*variant1Iter).allele == 0 )
-                    (*edgeList)[(*variant1Iter).position]->ref->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).read_name,params->baseQuality,params->edgeWeight);
-                // this allele support alt
-                if( (*variant1Iter).allele == 1 )
-                    (*edgeList)[(*variant1Iter).position]->alt->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).read_name,params->baseQuality,params->edgeWeight);
-                
-                // next snp
-                variant2Iter++;
-                if( variant2Iter == tmpRead.variantVec.end() ){
-                    break;
-                }
-            }
-
-            variant1Iter++;
-            variant2Iter = std::next(variant1Iter,1);
-        }
-    }
-    */
 } 
 
 void VairiantGraph::readCorrection(){
@@ -725,9 +688,27 @@ void VairiantGraph::readCorrection(){
             std::map<PosAllele,int>::iterator nodePS = bkResult->find(refAllele);
             //block = nodePS->second;
             if( nodePS != bkResult->end() ){
-                if( (*bkResult)[refAllele] != 0 ){
-                    if((*subNodeHP)[refAllele]==0)refCount++;
-                    else altCount++;
+                if((*bkResult)[refAllele] != 0 ){
+                    //VarintType < 0=SNP 1=SV 2=MOD 3=INDEL 4=tandem repeat INDEL >
+                    if((*variantType)[variant.position] == 0){
+                        if((*subNodeHP)[refAllele]==0)refCount++;
+                        else altCount++;
+                    }
+                    else if((*variantType)[variant.position] == 1){
+                        if((*subNodeHP)[refAllele]==0)refCount++;
+                        else altCount++;
+                    }
+                    else if((*variantType)[variant.position] == 2){
+                        continue;
+                    }
+                    else if((*variantType)[variant.position] == 3){
+                        if((*subNodeHP)[refAllele]==0)refCount+=0.1;
+                        else altCount+=0.1;
+                    }
+                    else if((*variantType)[variant.position] == 4){
+                        if((*subNodeHP)[refAllele]==0)refCount+=0.1;
+                        else altCount+=0.1;
+                    }
                 }
             }
         }
