@@ -333,19 +333,21 @@ std::map<int, RefAlt> SnpParser::getVariants_markindel(std::string chrName, cons
             int variant_pos = innerIter->first;      // Accessing the variant_pos of the inner map
             RefAlt variant_info = innerIter->second; // Accessing the variant_info of the inner map
             int ref_pos = variant_pos ;
-            std::string repeat = ref.substr(ref_pos + 1, 2) ;
+	    bool danger = false ;
 
+            std::string repeat = ref.substr(ref_pos + 1, 2) ;
             int i = 0 ;
             while ( i < 5 && (variant_info.Ref.length()>1 ||variant_info.Alt.length()>1) /*&& repeat[0]!=repeat[1]*/ ) {
-                if ( repeat[0] != ref[ref_pos+1] || repeat[1] != ref[ref_pos+2]) {
+                if ( repeat[0] != ref[ref_pos+1] || repeat[1] != ref[ref_pos+2] ) {
                     break ;
                 }
 
                 ref_pos = ref_pos + 2 ;
                 i++ ;
             }
+	    if ( i == 5 ) danger = true ;
 
-            if ( i == 5 ) {
+            if ( danger ) {
                 innerIter->second.is_danger = true ;
                 //std::cout << "danger pos:\t" << variant_pos+1 << "\n" ;
             }

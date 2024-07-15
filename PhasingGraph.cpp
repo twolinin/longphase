@@ -252,6 +252,7 @@ std::pair<float,float> VairiantGraph::Onelongcase( std::vector<VoteResult> vote 
         }
     }
 
+    //if there has less than three variants use one read to vote we cncel the mechanism
     if ( counter <= 3 || (h1==0&&h2==0) ) {
         return std::make_pair( -1 , -1 ) ;
     }
@@ -339,7 +340,7 @@ void VairiantGraph::edgeConnectResult(){
         // check connect between surrent SNP and next n SNPs
         for(int i = 0 ; i < params->connectAdjacent ; i++ ){
 	    float weight = 1 ; 
-	    VoteResult vote ;
+	    VoteResult vote ; //used to store previous 20 variants' voting information
 	    vote.Pos = currPos ;
 
             // consider reads from the currnt SNP and the next (i+1)'s SNP
