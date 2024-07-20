@@ -147,6 +147,11 @@ int SubEdge::getAvgQuality(PosAllele targetPos){
     return 0;
 }
 
+VoteResult::VoteResult( int currPos, float variantweight ) {
+    Pos = currPos ;
+    weight = variantweight ;
+}
+
 VariantEdge::VariantEdge(int inCurrPos){
     currPos = inCurrPos;
     alt = new SubEdge();
@@ -154,7 +159,7 @@ VariantEdge::VariantEdge(int inCurrPos){
 }
 
 //VariantEdge
-std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool isONT, double edgeThreshold, bool debug, std::map<int,int> &variantType, float &weight, VoteResult &vote){
+std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool isONT, double edgeThreshold, bool debug, std::map<int,int> &variantType, VoteResult &vote){
     std::pair<float,float> refBestPair  = ref->BestPair(targetPos);
     std::pair<float,float> altBestPair  = alt->BestPair(targetPos);
     // get the weight of each pair
@@ -201,9 +206,9 @@ std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool
         std::cout << currPos << "\t->\t" << targetPos << "\t|rr aa | ra ar\t" << "\t" << rr << "\t" << aa << "\t" << ra << "\t" << ar  << "\n";
     }
    
-    //when the voting result is clear and voting reads are more than one, we make its weight twenty times bigger 
+    // the lower the edgeSimilarRatio means the higher reads consistency, and we will make the weight bigger if the reads consistency is high enough
     if ( (edgeSimilarRatio <= 0.1 && (rr + aa + ra + ar) >= 1)  || ((rr+aa)<1&&(ra+ar)>=1) || ((rr+aa)>=1&&(ra+ar)<1) ) {
-        weight = 20 ;
+        vote.weight = 20 ;
     }
 
     vote.para = rr + aa ;
@@ -244,12 +249,14 @@ std::pair<float,float> VairiantGraph::Onelongcase( std::vector<VoteResult> vote 
     float h1 = 0 ;
     float h2 = 0 ;
 
+    // iterate all the voting that previous variants provide
     for ( int i = 0 ; i < vote.size() ; i++ ) {
 
+	// count the votes that refer to only one read
         if ( (vote[i].para+vote[i].cross) <= 1 ) {
             counter++ ;
         }
-	//the vote we trust its edge similar ratio can't be too low and can't be indel
+	// we will only count the votes that is not INDEL and have lower ESR beacause the INDEL is the variant has higher error rate and the lower ESR means higher reads consistency,
         else if ( vote[i].ESR < 0.2 && vote[i].weight >= 1 && (*variantType)[vote[i].Pos] != 3 ) {
             if ( vote[i].hap == 1 ) {
                 h1+=vote[i].weight ;
@@ -260,7 +267,7 @@ std::pair<float,float> VairiantGraph::Onelongcase( std::vector<VoteResult> vote 
         }
     }
 
-    //if there has less than three variants use one read to vote we cncel the mechanism
+    //if there has less than three variants use one read to vote we cancel the mechanism
     if ( counter <= 3 || (h1==0&&h2==0) ) {
         return std::make_pair( -1 , -1 ) ;
     }
@@ -272,9 +279,9 @@ std::pair<float,float> VairiantGraph::Onelongcase( std::vector<VoteResult> vote 
 
 //VairiantGraph
 void VairiantGraph::edgeConnectResult(){
-    //current snp, haplotype (1 or 2), previous snps voting information 
+    //current variant position, haplotype (1 or 2), previous variants' voting information 
     std::map<int, std::vector<VoteResult> > *hpCountMap3 = new std::map<int, std::vector<VoteResult> > ;
-    // current snp, haplotype (1 or 2), previous snps voting result
+    // current variant position, haplotype (1 or 2), previous variants' voting result
     std::map<int, std::map<int,float> > *hpCountMap2 = new std::map<int, std::map<int,float> > ;
     // current snp, haplotype (1 or 2), support snp
     std::map<int, std::map<int,std::vector<int> > > *hpCountMap = new std::map<int, std::map<int,std::vector<int> > >;
@@ -347,19 +354,15 @@ void VairiantGraph::edgeConnectResult(){
         
         // check connect between surrent SNP and next n SNPs
         for(int i = 0 ; i < params->connectAdjacent ; i++ ){
-	    float weight = 1 ; 
-	    VoteResult vote ; //used to store previous 20 variants' voting information
-	    vote.Pos = currPos ;
+	    VoteResult vote(currPos, 1); //used to store previous 20 variants' voting information
 
             // consider reads from the currnt SNP and the next (i+1)'s SNP
-            std::pair<PosAllele,PosAllele> tmp = edgeIter->second->findBestEdgePair(nextNodeIter->first, params->isONT, params->edgeThreshold, false, *variantType, weight, vote);
-	    std::pair<float,float> paracross = edgeIter->second->findNumberOfRead(nextNodeIter->first) ;
+            std::pair<PosAllele,PosAllele> tmp = edgeIter->second->findBestEdgePair(nextNodeIter->first, params->isONT, params->edgeThreshold, false, *variantType, vote);
 
 	    // if the target is a danger indel change its weight to 0.1
 	    if ( (*variantType)[currPos] == 4 ) {
-                weight = 0.1 ;
+                vote.weight = 0.1 ;
             }
-	    vote.weight = weight ;
 
             // -1 : no connect  
             //  1 : the haplotype of next (i+1)'s SNP are same as previous
@@ -369,24 +372,24 @@ void VairiantGraph::edgeConnectResult(){
                 if( (*hpResult)[currPos] == 1 ){
                     if( tmp.first.second == 1 ){
                         (*hpCountMap)[nextNodeIter->first][1].push_back(currPos);
-			(*hpCountMap2)[nextNodeIter->first][1] += weight;
+			(*hpCountMap2)[nextNodeIter->first][1] += vote.weight;
 			vote.hap = 1 ;
                     }
                     if( tmp.first.second == 2 ){
                         (*hpCountMap)[nextNodeIter->first][2].push_back(currPos);
-			(*hpCountMap2)[nextNodeIter->first][2] += weight;
+			(*hpCountMap2)[nextNodeIter->first][2] += vote.weight;
 			vote.hap = 2 ;
                     }
                 }
                 if( (*hpResult)[currPos]==2 ){
                     if( tmp.first.second == 1 ){
                         (*hpCountMap)[nextNodeIter->first][2].push_back(currPos);
-			(*hpCountMap2)[nextNodeIter->first][2] += weight;
+			(*hpCountMap2)[nextNodeIter->first][2] += vote.weight;
 			vote.hap = 2 ;
                     }
                     if( tmp.first.second == 2 ){
                         (*hpCountMap)[nextNodeIter->first][1].push_back(currPos);
-			(*hpCountMap2)[nextNodeIter->first][1] += weight;
+			(*hpCountMap2)[nextNodeIter->first][1] += vote.weight;
 			vote.hap = 1 ;
                     }
                 }
@@ -460,6 +463,8 @@ void VairiantGraph::edgeConnectResult(){
     }
     
     delete hpCountMap;
+    delete hpCountMap2;
+    delete hpCountMap3;
     delete hpResult;
     delete phasedBlocks;
 }

@@ -343,8 +343,9 @@ std::map<int, RefAlt> SnpParser::getVariants_markindel(std::string chrName, cons
             int ref_pos = variant_pos ;
 	    bool danger = false ;
 
-            std::string repeat = ref.substr(ref_pos + 1, 2) ;
+            std::string repeat = ref.substr(ref_pos + 1, 2) ; // get the 2 words string in the reference which behind the indel position
             int i = 0 ;
+	    //check if there has 2 words tandem repeat in the reference
             while ( i < 5 && (variant_info.Ref.length()>1 ||variant_info.Alt.length()>1) /*&& repeat[0]!=repeat[1]*/ ) {
                 if ( repeat[0] != ref[ref_pos+1] || repeat[1] != ref[ref_pos+2] ) {
                     break ;
@@ -353,15 +354,11 @@ std::map<int, RefAlt> SnpParser::getVariants_markindel(std::string chrName, cons
                 ref_pos = ref_pos + 2 ;
                 i++ ;
             }
+
+	    // set the dnager to true if the repeat word repeats at least five times
 	    if ( i == 5 ) danger = true ;
 
-            if ( danger ) {
-                innerIter->second.is_danger = true ;
-                //std::cout << "danger pos:\t" << variant_pos+1 << "\n" ;
-            }
-            else {
-                innerIter->second.is_danger = false ;
-            }
+            innerIter->second.is_danger = danger ;
 
         }
 
