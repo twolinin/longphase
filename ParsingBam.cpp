@@ -330,6 +330,47 @@ std::map<int, RefAlt> SnpParser::getVariants(std::string chrName){
     return targetVariants;
 }
 
+std::map<int, RefAlt> SnpParser::getVariants_markindel(std::string chrName, const std::string &ref){
+    std::map<int, RefAlt> targetVariants;
+    std::map<std::string, std::map<int, RefAlt> >::iterator chrIter = chrVariant->find(chrName);
+
+    //Mark the indel which lies in the tandem repeat
+    if (chrIter != chrVariant->end()) {
+    // Accessing the inner map using chrIter->second and iterating over it
+        for ( auto innerIter = chrIter->second.begin(); innerIter != chrIter->second.end(); innerIter++ ) {
+            int variant_pos = innerIter->first;      // Accessing the variant_pos of the inner map
+            RefAlt variant_info = innerIter->second; // Accessing the variant_info of the inner map
+            int ref_pos = variant_pos ;
+	    bool danger = false ;
+
+            std::string repeat = ref.substr(ref_pos + 1, 2) ; // get the 2 words string in the reference which behind the indel position
+            int i = 0 ;
+	    //check if there has 2 words tandem repeat in the reference
+            while ( i < 5 && (variant_info.Ref.length()>1 ||variant_info.Alt.length()>1) /*&& repeat[0]!=repeat[1]*/ ) {
+                if ( repeat[0] != ref[ref_pos+1] || repeat[1] != ref[ref_pos+2] ) {
+                    break ;
+                }
+
+                ref_pos = ref_pos + 2 ;
+                i++ ;
+            }
+
+	    // set the dnager to true if the repeat word repeats at least five times
+	    if ( i == 5 ) danger = true ;
+
+            innerIter->second.is_danger = danger ;
+
+        }
+
+        targetVariants = (*chrIter).second;
+    }
+    else {
+        // Handle the case where chrName doesn't exist in chrVariant
+    }
+
+    return targetVariants;
+}
+
 std::vector<std::string> SnpParser::getChrVec(){
     return chrName;
 }
@@ -914,14 +955,15 @@ bool SVParser::findSV(std::string chr, int position){
         
     return true;
 }
-BamParser::BamParser(std::string inputChrName, std::vector<std::string> inputBamFileVec, SnpParser &snpMap, SVParser &svFile, METHParser &modFile):chrName(inputChrName),BamFileVec(inputBamFileVec){
+BamParser::BamParser(std::string inputChrName, std::vector<std::string> inputBamFileVec, SnpParser &snpMap, SVParser &svFile, METHParser &modFile, const std::string &ref_string):chrName(inputChrName),BamFileVec(inputBamFileVec){
     
     currentVariants = new std::map<int, RefAlt>;
     currentSV = new std::map<int, std::map<std::string ,bool> >;
     currentMod = new std::map<int, std::map<std::string ,RefAlt> >;
     
     // use chromosome to find recorded snp map
-    (*currentVariants) = snpMap.getVariants(chrName);
+    //(*currentVariants) = snpMap.getVariants(chrName);
+    (*currentVariants) = snpMap.getVariants_markindel(chrName, ref_string);
     // set skip variant start iterator
     firstVariantIter = currentVariants->begin();
     if( firstVariantIter == currentVariants->end() ){
@@ -1163,6 +1205,11 @@ void BamParser::get_snp(const  bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<
                         }
                         // using this quality to identify indel
                         base_q = -4;
+                        
+			// using this quality to identify danger indel
+			if ( (*currentVariantIter).second.is_danger ) {
+                            base_q = -5 ;
+                        }
                     } 
             
                     // deletion
@@ -1177,6 +1224,11 @@ void BamParser::get_snp(const  bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<
                         }
                         // using this quality to identify indel
                         base_q = -4;
+
+			// using this quality to identify danger indel
+			if ( (*currentVariantIter).second.is_danger ) {
+                            base_q = -5 ;
+                        }
                     } 
             
                     if( allele != -1 ){

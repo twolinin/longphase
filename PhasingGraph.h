@@ -45,6 +45,17 @@ class SubEdge{
 
 };
 
+//use to store the voting info from the previous variants
+struct VoteResult{
+    int Pos;		//who votes
+    float para;		//rr+aa
+    float cross;	//ra+ar
+    float weight;	//how much weight
+    int hap;		//which haplotype 
+    double ESR;		//similarity of para and cross
+
+    VoteResult( int currPos, float weight ) ;
+};
 
 struct VariantEdge{
     int currPos;
@@ -53,9 +64,9 @@ struct VariantEdge{
 
     VariantEdge(int currPos);
     // node pair 
-    std::pair<PosAllele,PosAllele> findBestEdgePair(int targetPos, bool isONT, double diffRatioThreshold, bool debug, std::map<int,int> &variantType);
+    std::pair<PosAllele,PosAllele> findBestEdgePair(int targetPos, bool isONT, double diffRatioThreshold, bool debug, std::map<int,int> &variantType, VoteResult &vote);
     // number of read of two node. AA and AB combination
-    std::pair<int,int> findNumberOfRead(int targetPos);
+    std::pair<float,float> findNumberOfRead(int targetPos);
 };
 
 
@@ -88,7 +99,9 @@ class VairiantGraph{
         std::map<int,ReadBaseMap*> *totalVariantInfo;
         // position, type < 0=SNP 1=SV 2=MOD 3=INDEL >
         std::map<int,int> *variantType;
-        
+ 
+        std::pair<float,float> Onelongcase( std::vector<VoteResult> vote ) ;
+
         // phasing result     
         // PosAllele , block_start    
         std::map<PosAllele,int> *bkResult;
