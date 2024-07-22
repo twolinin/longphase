@@ -576,9 +576,15 @@ void VairiantGraph::addEdge(std::vector<ReadVariant> &in_readVariant){
     // sort read index
     std::sort(delReadIdx.begin(), delReadIdx.end());
     // remove overlap alignment
-    for( int idx = delReadIdx.size() -1 ; idx > 0 ; idx-- ){
-        in_readVariant.erase( in_readVariant.begin() + delReadIdx[idx] );
+    delReadIdx.push_back((int)in_readVariant.size());
+    int saveIter = *(delReadIdx.begin());
+    for (auto delIter = delReadIdx.begin(), nextdelIter = std::next(delReadIdx.begin(), 1); nextdelIter != delReadIdx.end(); delIter++ , nextdelIter++) {
+        auto nowDelIter = *delIter+1;
+        while (nowDelIter<*nextdelIter){
+            in_readVariant[saveIter++]=in_readVariant[nowDelIter++];
+        }
     }
+    in_readVariant.erase( std::next(in_readVariant.begin(), saveIter), in_readVariant.end());
 
     int readCount=0;
     // merge alignment
