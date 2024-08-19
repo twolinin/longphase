@@ -18,20 +18,23 @@ static const char *CORRECT_USAGE_MESSAGE =
 "optional arguments:\n"
 "   --sv-file=NAME                         input SV vcf file.\n"
 "   --mod-file=NAME                        input modified vcf file.(produce by longphase modcall)\n"
-"   -t, --threads=Num                      number of thread. default:0\n"
-"                                          If set to 0, use all available threads.\n"
+"   -t, --threads=Num                      number of thread. default:1\n"
 "   -o, --out-prefix=NAME                  prefix of phasing result. default: result\n"
 "   --indels                               phase small indel. default: False\n"
 "   --dot                                  each contig/chromosome will generate dot file. \n\n"
 
 "parse alignment arguments:\n"
-"   -q, --mappingQuality=Num               filter alignment if mapping quality is lower than threshold. default:1\n\n"
+"   -q, --mappingQuality=Num               filter alignment if mapping quality is lower than threshold. default:1\n"
+"   -x, --mismatchRate=Num                 mark reads as false if mismatchRate of them are lower than threshold. default:3\n\n"
 
 "phasing graph arguments:\n"
+"   -p, --baseQuality=[0~90]               change edge's weight to --edgeWeight if base quality is lower than the threshold. default:12\n"
+"   -e, --edgeWeight=[0~1]                 decide how much weight should we change if it has low base quality. default:0.1\n"
 "   -a, --connectAdjacent=Num              connect adjacent N SNPs. default:20\n"
 "   -d, --distance=Num                     phasing two variant if distance less than threshold. default:300000\n"
 "   -1, --edgeThreshold=[0~1]              give up SNP-SNP phasing pair if the number of reads of the \n"
 "                                          two combinations are similar. default:0.7\n"
+
 
 "haplotag read correction arguments:\n"
 "   -m, --readConfidence=[0.5~1]           The confidence of a read being assigned to any haplotype. default:0.65\n"
@@ -39,7 +42,7 @@ static const char *CORRECT_USAGE_MESSAGE =
 
 "\n";
 
-static const char* shortopts = "s:b:o:t:r:d:1:a:q:n:m:";
+static const char* shortopts = "s:b:o:t:r:d:1:a:q:x:p:e:n:m:";
 
 enum { OPT_HELP = 1 , DOT_FILE, SV_FILE, MOD_FILE, IS_ONT, IS_PB, PHASE_INDEL, VERSION};
 
@@ -61,6 +64,9 @@ static const struct option longopts[] = {
     { "edgeThreshold",        required_argument,  NULL, '1' },
     { "connectAdjacent",      required_argument,  NULL, 'a' },
     { "mappingQuality",       required_argument,  NULL, 'q' },
+    { "mismatchRate",       required_argument,  NULL, 'x' },
+    { "baseQuality",       required_argument,  NULL, 'p' },
+    { "edgeWeight",       required_argument,  NULL, 'e' },
     { "snpConfidence",        required_argument,  NULL, 'n' },
     { "readConfidence",       required_argument,  NULL, 'm' },
     { NULL, 0, NULL, 0 }
@@ -68,7 +74,7 @@ static const struct option longopts[] = {
 
 namespace opt
 {
-    static int numThreads = 0;
+    static int numThreads = 1;
     static int distance = 300000;
     static std::string snpFile="";
     static std::string svFile="";
@@ -82,13 +88,17 @@ namespace opt
     static bool phaseIndel=false;
     
     static int connectAdjacent = 20;
-    static int mappingQuality =1;
-
+    static int mappingQuality = 1;
+    static double mismatchRate = 3;
+    
+    static int baseQuality = 12;
+    static double edgeWeight = 0.1 ;
+    
     static double snpConfidence  = 0.75;
     static double readConfidence = 0.65;
     
     static double edgeThreshold = 0.7;
-
+    
     static std::string command;
 }
 
@@ -110,6 +120,9 @@ void PhasingOptions(int argc, char** argv)
         case '1': arg >> opt::edgeThreshold; break; 
         case 'a': arg >> opt::connectAdjacent; break;
         case 'q': arg >> opt::mappingQuality; break;
+        case 'x': arg >> opt::mismatchRate; break;
+	      case 'p': arg >> opt::baseQuality; break;
+	      case 'e': arg >> opt::edgeWeight; break;
         case 'n': arg >> opt::snpConfidence; break;
         case 'm': arg >> opt::readConfidence; break;
         case 'b': {
@@ -179,7 +192,7 @@ void PhasingOptions(int argc, char** argv)
         die = true;
     }  
     
-    if ( opt::numThreads < 0 ){
+    if ( opt::numThreads < 1 ){
         std::cerr << SUBPROGRAM " invalid threads. value: " 
                   << opt::numThreads 
                   << "\n please check -t, --threads=Num\n";
@@ -206,6 +219,27 @@ void PhasingOptions(int argc, char** argv)
                   << "\n please check -m, --mappingQuality=Num\n";
         die = true;
     }
+    
+    if ( opt::mismatchRate < 0 ){
+        std::cerr << SUBPROGRAM " invalid mismatchRate. value: " 
+                  << opt::mismatchRate 
+                  << "\n please check -x, --mismatchRate=Num\n";
+        die = true;
+    }
+    
+    if ( opt::baseQuality < 0 ){
+        std::cerr << SUBPROGRAM " invalid baseQuality. value: "
+                  << opt::baseQuality
+                  << "\n please check -m, --mappingQuality=[0~90]\n";
+        die = true;
+    }
+
+    if ( opt::edgeWeight < 0 ){
+        std::cerr << SUBPROGRAM " invalid edgeWeight. value: "
+                  << opt::edgeWeight
+                  << "\n please check -e, --edgeWeight=[0~1]\n";
+        die = true;
+    }
 
     if ( opt::edgeThreshold < 0 || opt::edgeThreshold > 1 ){
         std::cerr << SUBPROGRAM " invalid edgeThreshold. value: " 
@@ -227,7 +261,8 @@ void PhasingOptions(int argc, char** argv)
                   << "\n please check -n, --snpConfidence=[0.5~1]\n";
         die = true;
     }
-
+    
+    
     if (die)
     {
         std::cerr << "\n" << CORRECT_USAGE_MESSAGE;
@@ -258,7 +293,10 @@ int PhasingMain(int argc, char** argv, std::string in_version)
     
     ecParams.connectAdjacent=opt::connectAdjacent;
     ecParams.mappingQuality=opt::mappingQuality;
-
+    ecParams.mismatchRate=opt::mismatchRate;
+    
+    ecParams.baseQuality=opt::baseQuality;
+    ecParams.edgeWeight=opt::edgeWeight;
     ecParams.edgeThreshold=opt::edgeThreshold;
     
     ecParams.snpConfidence=opt::snpConfidence;

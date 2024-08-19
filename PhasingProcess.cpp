@@ -27,18 +27,19 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
     std::cerr<< "Connect Adjacent   : " << params.connectAdjacent << "\n";
     std::cerr<< "Edge Threshold     : " << params.edgeThreshold   << "\n";
     std::cerr<< "Mapping Quality    : " << params.mappingQuality  << "\n";
+    std::cerr<< "Mismatch Rate      : " << params.mismatchRate  << "\n";
     std::cerr<< "Variant Confidence : " << params.snpConfidence   << "\n";
     std::cerr<< "ReadTag Confidence : " << params.readConfidence  << "\n";
     std::cerr<< "\n";
     
     std::time_t processBegin = time(NULL);
-    
+        
     // load SNP vcf file
     std::time_t begin = time(NULL);
     std::cerr<< "parsing VCF ... ";
     SnpParser snpFile(params);
     std::cerr<< difftime(time(NULL), begin) << "s\n";
-    
+
     // load SV vcf file
     begin = time(NULL);
     std::cerr<< "parsing SV VCF ... ";
@@ -48,7 +49,7 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
     //Parse mod vcf file
 	begin = time(NULL);
 	std::cerr<< "parsing Meth VCF ... ";
-	METHParser modFile(params, snpFile);
+    METHParser modFile(params, snpFile, svFile);
 	std::cerr<< difftime(time(NULL), begin) << "s\n";
  
     // parsing ref fasta 
@@ -58,7 +59,7 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
     for(auto chr :snpFile.getChrVec()){
         last_pos.push_back(snpFile.getLastSNP(chr));
     }
-    FastaParser fastaParser(params.fastaFile , snpFile.getChrVec(), last_pos);
+    FastaParser fastaParser(params.fastaFile, snpFile.getChrVec(), last_pos, params.numThreads);
     std::cerr<< difftime(time(NULL), begin) << "s\n";
 
     // get all detected chromosome
@@ -71,14 +72,19 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
     for (std::vector<std::string>::iterator chrIter = chrName.begin(); chrIter != chrName.end(); chrIter++)    {
         chrPhasingResult[*chrIter] = PhasingResult();
     }
-    
-    // set chrNumThreads and bamParserNumThreads based on parameters
-    int chrNumThreads,bamParserNumThreads;
-    setPhasingNumThreads(chrName.size(), params.numThreads, chrNumThreads, bamParserNumThreads);
+
+    // init data structure and get core n
+    htsThreadPool threadPool = {NULL, 0};
+
+    // creat thread pool
+    if (!(threadPool.pool = hts_tpool_init(params.numThreads))) {
+        fprintf(stderr, "Error creating thread pool\n");
+    }
+
     begin = time(NULL);
     
     // loop all chromosome
-    #pragma omp parallel for schedule(dynamic) num_threads(chrNumThreads)
+    #pragma omp parallel for schedule(dynamic) num_threads(params.numThreads)
     for(std::vector<std::string>::iterator chrIter = chrName.begin(); chrIter != chrName.end() ; chrIter++ ){
         
         std::time_t chrbegin = time(NULL);
@@ -97,7 +103,7 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
         // use to store variant
         std::vector<ReadVariant> readVariantVec;
         // run fetch variant process
-        bamParser->direct_detect_alleles(lastSNPpos, bamParserNumThreads, params, readVariantVec ,chr_reference);
+        bamParser->direct_detect_alleles(lastSNPpos, threadPool, params, readVariantVec , chr_reference);
         // free memory
         delete bamParser;
         
@@ -112,9 +118,9 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
         }
         
         // create a graph object and prepare to phasing.
-        VairiantGraph *vGraph = new VairiantGraph(chr_reference, params);
+        VairiantGraph *vGraph = new VairiantGraph(chr_reference, params, snpFile, (*chrIter));
         // trans read-snp info to edge info
-        vGraph->addEdge(readVariantVec);
+        vGraph->addEdge(readVariantVec, snpFile, (*chrIter));
         // run main algorithm
         vGraph->phasingProcess();
         // push result to phasingResult
@@ -134,7 +140,8 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
         
         std::cerr<< "(" << (*chrIter) << "," << difftime(time(NULL), chrbegin) << "s)";
     }
-    
+    hts_tpool_destroy(threadPool.pool);
+
     std::cerr<< "\nparsing total:  " << difftime(time(NULL), begin) << "s\n";
     
     begin = time(NULL);

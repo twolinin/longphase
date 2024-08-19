@@ -32,7 +32,7 @@ class SubEdge{
         
         void destroy();
         
-        void addSubEdge(int currentQuality, Variant connectNode, std::string readName);
+        void addSubEdge(int currentQuality, Variant connectNode, std::string readName, int baseQuality, double edgeWeight,bool fakeRead);
         std::pair<float,float> BestPair(int targetPos);
         float getRefReadCount(int targetPos);
         float getAltReadCount(int targetPos);        
@@ -50,12 +50,19 @@ struct VariantEdge{
     int currPos;
     SubEdge* alt;
     SubEdge* ref;
-
+    int refcnt ;
+    int altcnt ;
+    double vaf ;
+    int coverage ;
+    int vaf_fake_count ;
+    
     VariantEdge(int currPos);
     // node pair 
     std::pair<PosAllele,PosAllele> findBestEdgePair(int targetPos, bool isONT, double diffRatioThreshold, bool debug);
     // number of read of two node. AA and AB combination
     std::pair<int,int> findNumberOfRead(int targetPos);
+    bool get_fakeSnp();
+    
 };
 
 
@@ -107,10 +114,10 @@ class VairiantGraph{
 
     public:
     
-        VairiantGraph(std::string &ref, PhasingParameters &params);
+        VairiantGraph(std::string &ref, PhasingParameters &params, SnpParser &snpFile, std::string chrName);
         ~VairiantGraph();
     
-        void addEdge(std::vector<ReadVariant> &in_readVariant);
+        void addEdge(std::vector<ReadVariant> &in_readVariant, SnpParser &snpFile, std::string chrName);
         
         void phasingProcess();
         void writingDotFile(std::string dotPrefix);

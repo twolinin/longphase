@@ -27,7 +27,7 @@ class FastaParser{
         std::vector<std::string> chrName;
         std::vector<int> last_pos;
     public:
-        FastaParser(std::string fastaFile  , std::vector<std::string> chrName , std::vector<int> last_pos);
+        FastaParser(std::string fastaFile, std::vector<std::string> chrName, std::vector<int> last_pos, int numThreads);
         ~FastaParser();
         
         // chrName, chr string
@@ -112,6 +112,8 @@ class SVParser : public BaseVairantParser{
         std::map<int, std::map<std::string ,bool> > getVariants(std::string chrName);  
 
         void writeResult(PhasingResult phasingResult);
+
+        bool findSV(std::string chr, int posistion);
 };
 
 class METHParser : public BaseVairantParser{
@@ -119,6 +121,7 @@ class METHParser : public BaseVairantParser{
     private:
         PhasingParameters *params;
         SnpParser *snpFile;
+        SVParser *svFile;
         
         int representativePos;
         int upMethPos;
@@ -141,7 +144,7 @@ class METHParser : public BaseVairantParser{
         
         std::map<int, std::map<std::string ,RefAlt> > getVariants(std::string chrName);  
         
-        METHParser(PhasingParameters &params, SnpParser &snpFile);
+        METHParser(PhasingParameters &params, SnpParser &snpFile, SVParser &svFile);
         ~METHParser();
 		
 		void writeResult(PhasingResult phasingResult);
@@ -174,13 +177,13 @@ class BamParser{
         // mod map and iter
         std::map<int, std::map<std::string ,RefAlt> > *currentMod;
         std::map<int, std::map<std::string ,RefAlt> >::iterator firstModIter;
-        void get_snp(const  bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<ReadVariant> &readVariantVec, const std::string &ref_string, bool isONT);
+        void get_snp(const bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<ReadVariant> &readVariantVec, const std::string &ref_string, bool isONT, double mismatchRate);
    
     public:
         BamParser(std::string chrName, std::vector<std::string> inputBamFileVec, SnpParser &snpMap, SVParser &svFile, METHParser &modFile);
         ~BamParser();
         
-        void direct_detect_alleles(int lastSNPPos, int &numThreads, PhasingParameters params, std::vector<ReadVariant> &readVariantVec , const std::string &ref_string);
+        void direct_detect_alleles(int lastSNPPos, htsThreadPool &threadPool, PhasingParameters params, std::vector<ReadVariant> &readVariantVec , const std::string &ref_string);
 
 };
 

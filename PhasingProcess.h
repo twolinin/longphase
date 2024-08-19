@@ -21,7 +21,13 @@ struct PhasingParameters
     
     int connectAdjacent;
     int mappingQuality;
-
+    double mismatchRate;
+    
+    int baseQuality;
+    double edgeWeight;
+    //double falseWeight;
+    //int coverageThreshold;
+    
     double snpConfidence;
     double readConfidence;
     
