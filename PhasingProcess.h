@@ -25,13 +25,12 @@ struct PhasingParameters
     
     int baseQuality;
     double edgeWeight;
-    //double falseWeight;
-    //int coverageThreshold;
     
     double snpConfidence;
     double readConfidence;
     
     double edgeThreshold;
+    double overlapThreshold;
     
     std::string version;
     std::string command;

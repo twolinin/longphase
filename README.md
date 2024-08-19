@@ -1,5 +1,5 @@
 # LongPhase
-LongPhase is an ultra-fast program for simultaneously co-phasing SNPs, small indels, large SVs, and (5mC) modifications for Nanopore and PacBio platforms. It can produce nearly chromosome-scale haplotype blocks by using Nanpore ultra-long reads without the need for additional trios, chromosome conformation, and strand-seq data. On an 8-core machine, LongPhase can finish phasing a human genome in 10-20 minutes.
+LongPhase is an ultra-fast program for simultaneously co-phasing SNPs, small indels, large SVs, and (5mC) modifications for Nanopore and PacBio platforms. It can produce nearly chromosome-scale haplotype blocks by using Nanpore ultra-long reads without the need for additional trios, chromosome conformation, and strand-seq data. LongPhase can phase a 30x human genome in ~1 minute (see [Speed](#speed)).
 
 ---
 - [Installation](#installation)
@@ -27,10 +27,10 @@ LongPhase is an ultra-fast program for simultaneously co-phasing SNPs, small ind
 - [Contact](#contact)
 ---
 ## Installation
-You are recommended to download a [linux 64bit binary release](https://github.com/twolinin/longphase/releases/download/v1.6/longphase_linux-x64.tar.xz) without compilation. 
+You are recommended to download a [linux 64bit binary release](https://github.com/twolinin/longphase/releases/download/v1.7.3/longphase_linux-x64.tar.xz) without compilation. 
 
 ```
-wget https://github.com/twolinin/longphase/releases/download/v1.6/longphase_linux-x64.tar.xz
+wget https://github.com/twolinin/longphase/releases/download/v1.7.3/longphase_linux-x64.tar.xz
 tar -xJf longphase_linux-x64.tar.xz
 ```
 
@@ -112,8 +112,7 @@ require arguments:
 optional arguments:
    --sv-file=NAME                         input SV vcf file.
    --mod-file=NAME                        input modified vcf file.(produce by longphase modcall)
-   -t, --threads=Num                      number of thread. default:0
-                                          If set to 0, use all available threads.
+   -t, --threads=Num                      number of thread. default:1
    -o, --out-prefix=NAME                  prefix of phasing result. default: result
    --indels                               phase small indel. default: False
    --dot                                  each contig/chromosome will generate dot file.
@@ -122,16 +121,13 @@ parse alignment arguments:
    -q, --mappingQuality=Num               filter alignment if mapping quality is lower than threshold. default:1
 
 phasing graph arguments:
+   -p, --baseQuality=[0~90]               change edge's weight to --edgeWeight if base quality is lower than the threshold. default:12
+   -e, --edgeWeight=[0~1]                 if one of the bases connected by the edge has a quality lower than --baseQuality
+                                          its weight is reduced from the normal 1. default:0.1
    -a, --connectAdjacent=Num              connect adjacent N SNPs. default:20
    -d, --distance=Num                     phasing two variant if distance less than threshold. default:300000
-   -1, --readsThreshold=[0~1]             give up SNP-SNP phasing pair if the number of reads of the
+   -1, --edgeThreshold=[0~1]              give up SNP-SNP phasing pair if the number of reads of the 
                                           two combinations are similar. default:0.7
-   -v, --confidentHaplotype=[0~1]         the haplotype of the current SNP is judged by the haplotype of the previous N SNPs.
-                                          if the threshold is higher, the consistency of SNP needs to be higher. default:0.5
-   -j, --judgeInconsistent=[0~1]          the proportion of inconsistent haplotypes among the haplotypes of the previous N SNPs.
-                                          inconsistent SNPs are tagged if the proportion is below the threshold. default:0.4
-   -i, --inconsistentThreshold=Num        phased genotype correction is performed when a SNP is tagged multiple times. default:5
-
 haplotag read correction arguments:
    -m, --readConfidence=[0.5~1]           The confidence of a read being assigned to any haplotype. default:0.65
    -n, --snpConfidence=[0.5~1]            The confidence of assigning two alleles of a SNP to different haplotypes. default:0.75
@@ -201,11 +197,16 @@ require arguments:
 optional arguments:
       --tagSupplementary              tag supplementary alignment. default:false
       --sv-file=NAME                  input phased SV vcf file.
-      -q, --qualityThreshold=Num      not tag alignment if the mapping quality less than threshold. default:0
+      --mod-file=NAME                 input a modified VCF file (produced by longphase modcall and processed by longphase phase).
+      -q, --qualityThreshold=Num      not tag alignment if the mapping quality less than threshold. default:1
       -p, --percentageThreshold=Num   the alignment will be tagged according to the haplotype corresponding to most alleles.
                                       if the alignment has no obvious corresponding haplotype, it will not be tagged. default:0.6
       -t, --threads=Num               number of thread. default:1
       -o, --out-prefix=NAME           prefix of phasing result. default:result
+      --region=REGION                 tagging include only reads/variants overlapping those regions. default:(all regions)
+                                      input format:chrom (consider entire chromosome)
+                                                   chrom:start (consider region from this start to end of chromosome)
+                                                   chrom:start-end
       --log                           an additional log file records the result of each read. default:false
 ```
 
@@ -309,7 +310,7 @@ e.g. [sniffles](https://github.com/fritzsedlazeck/Sniffles) or [CuteSV](https://
 ```
 # In sniffles1 please specofic --num_reads_report -1. For sniffles2 please specify --output-rnames instead.
 sniffles -t 10 --num_reads_report -1 -m alignment.bam -v SV.vcf # for sniffles1
-sniffles --threads 10 --output-rnames -1 --input alignment.bam --vcf SV.vcf # for sniffles2
+sniffles --threads 10 --output-rnames --input alignment.bam --vcf SV.vcf # for sniffles2
 
 # cuteSV command for PacBio CLR data:
 cuteSV alignment.bam reference.fasta SV.vcf work_dir --report_readid --genotype
@@ -336,8 +337,20 @@ minimap2 -ax map-ont -y reference.fasta methylcall.raw.fastq
 
 ---
 ## Comparison with other SNP-phasing programs
-LongPhase is 10x faster than WhatsHap and Margin and produces much larger blocks when tested on HG002, HG003,and HG004.
+LongPhase is >30x faster than WhatsHap and Margin and produces much larger blocks when tested on HG002, HG003,and HG004.
 ![btac058f3](https://github.com/twolinin/longphase/assets/6086073/af3a75a1-6268-4700-9dcc-4a6f34e86f7a)
+
+## Speed
+LongPhase can phase a human genome within 1-2 minutes.
+phase (-t 24) | v1.6 (Time) | v1.6 (Memory)
+-- | -- | -- 
+HG002 ONT R10.4.1 10x |  39s | 15.1G
+HG002 ONT R10.4.1 20x |  53s | 15.6G
+HG002 ONT R10.4.1 30x |  68s | 24.4G
+HG002 ONT R10.4.1 40x |  217s | 26.6G
+HG002 ONT R10.4.1 50x |  262s | 22.2G
+HG002 ONT R10.4.1 60x |  113s | 33.4G
+
 
 ---
 ## Citation
@@ -346,5 +359,3 @@ Jyun-Hong Lin, Liang-Chi Chen, Shu-Qi Yu and Yao-Ting Huang, [LongPhase: an ultr
 ---
 ## Contact
 Yao-Ting Huang, ythuang at cs.ccu.edu.tw
-
-

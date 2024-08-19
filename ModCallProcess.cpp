@@ -18,14 +18,17 @@ ModCallProcess::ModCallProcess(ModCallParameters params){
         chrModCallResult[chrIter->name] = std::ostringstream();
     }
 
-    // set chrNumThreads and bamParserNumThreads based on parameters
-    int chrNumThreads,bamParserNumThreads;
-    setModcallNumThreads(params.numThreads, chrNumThreads, bamParserNumThreads);
-    // setNumThreads(chrInfo.size(), params.numThreads, chrNumThreads, bamParserNumThreads);
-    begin = time(NULL);
+    // init data structure and get core n
+    htsThreadPool threadPool = {NULL, 0};
 
+    // creat thread pool
+    if (!(threadPool.pool = hts_tpool_init(params.numThreads))) {
+        fprintf(stderr, "Error creating thread pool\n");
+    }
+
+    begin = time(NULL);
     //loop all chromosomes
-    #pragma omp parallel for schedule(dynamic) num_threads(chrNumThreads)
+    #pragma omp parallel for schedule(dynamic) num_threads(params.numThreads)
     for(auto chrIter = chrInfo.begin(); chrIter != chrInfo.end(); ++chrIter) {
         std::time_t chrbegin = time(NULL);
 
@@ -34,7 +37,7 @@ ModCallProcess::ModCallProcess(ModCallParameters params){
         std::vector<ReadVariant> rReadVariantVec;
         std::vector<ReadVariant> readVariantVec;
         // record hetero metyhl position
-        std::map<int,int> *passPosition = new std::map<int,int>;
+        std::map<int,std::vector<int>> *passPosition = new std::map<int,std::vector<int>>;
 
         std::string chrName = chrIter->name;
         std::string chrSeq = chrIter->sequence;
@@ -42,14 +45,12 @@ ModCallProcess::ModCallProcess(ModCallParameters params){
         
         MethBamParser *methbamparser = new MethBamParser(params, chrSeq);
         
-        methbamparser->detectMeth(chrName, chrLen, bamParserNumThreads, readVariantVec);
+        methbamparser->detectMeth(chrName, chrLen, threadPool, readVariantVec);
 
         //new new calculate depth
         methbamparser->calculateDepth();
-        
         //judge methylation genotype
         methbamparser->judgeMethGenotype(chrName, readVariantVec, fReadVariantVec, rReadVariantVec);
-
         MethylationGraph *fGraph = new MethylationGraph(params);
         MethylationGraph *rGraph = new MethylationGraph(params);
         fGraph->addEdge(fReadVariantVec);
@@ -65,7 +66,6 @@ ModCallProcess::ModCallProcess(ModCallParameters params){
         
         //push result to ModCallResult
         methbamparser->exportResult(chrName, chrSeq, chrLen, (*passPosition), chrModCallResult[chrName]);
-        
         passPosition->clear();
         
         delete methbamparser;
@@ -80,6 +80,7 @@ ModCallProcess::ModCallProcess(ModCallParameters params){
 
         std::cerr<< "(" << chrName << "," << difftime(time(NULL), chrbegin) << "s)";
     }
+    hts_tpool_destroy(threadPool.pool);
     std::cerr<< "\nmodcall total:  " << difftime(time(NULL), begin) << "s\n";
 
     begin= time(NULL);

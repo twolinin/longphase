@@ -90,7 +90,7 @@ void HaplotagProcess::unCompressParser(std::string &variantFile){
 }
 
 void HaplotagProcess::parserProcess(std::string &input){
-    if( input.find("#")!= std::string::npos && !parseSVFile ){
+    if( input.substr(0, 2) == "##" && parseSnpFile){
         if( input.find("contig=")!= std::string::npos ){
             int id_start  = input.find("ID=")+3;
             int id_end    = input.find(",length=");
@@ -103,7 +103,7 @@ void HaplotagProcess::parserProcess(std::string &input){
             chrVec.push_back(chr);
             chrLength[chr]=chrLen;
         }
-        if( input.find("ID=PS")!= std::string::npos ){
+        if( input.substr(0, 16) == "##FORMAT=<ID=PS," ){
             if( input.find("Type=Integer")!= std::string::npos ){
                 integerPS = true;
             }
@@ -117,7 +117,10 @@ void HaplotagProcess::parserProcess(std::string &input){
             }
         }
     }
-    else if( input.find("#")== std::string::npos ){
+    else if ( input.substr(0, 1) == "#" ){
+        
+    }
+    else{
         std::istringstream iss(input);
         std::vector<std::string> fields((std::istream_iterator<std::string>(iss)),std::istream_iterator<std::string>());
 
@@ -178,7 +181,7 @@ void HaplotagProcess::parserProcess(std::string &input){
             }
             
             // snp file
-            if( !parseSVFile ){
+            if( parseSnpFile ){
                 RefAlt tmp;
                 tmp.Ref = fields[3]; 
                 tmp.Alt = fields[4];
@@ -239,12 +242,61 @@ void HaplotagProcess::parserProcess(std::string &input){
                 }
                 
             }
+            // mod file
+            if( parseMODFile ){
+                // get read INFO
+                int read_pos = fields[7].find("MR=");
+                read_pos = fields[7].find("=",read_pos);
+                read_pos++;
+                        
+                int next_field = fields[7].find(";",read_pos);
+                std::string totalRead = fields[7].substr(read_pos,next_field-read_pos);
+                std::stringstream totalReadStream(totalRead);
+                
+                int modHaplotype;
+                // In which haplotype does SV occur
+                if( fields[9][modifu_start] == '0' && fields[9][modifu_start+2] == '1' ){
+                    modHaplotype = 1;
+                }
+                else if( fields[9][modifu_start] == '1' && fields[9][modifu_start+2] == '0' ){
+                    modHaplotype = 0;
+                }
+                
+                std::string read;
+                while(std::getline(totalReadStream, read, ','))
+                {
+                   auto readIter = readSVHapCount.find(read);
+                   if(readIter==readSVHapCount.end()){
+                       readSVHapCount[read][0]=0;
+                       readSVHapCount[read][1]=0;
+                   }
+                   readSVHapCount[read][modHaplotype]++;
+                }
+            }
         }
     }
 }
 
 void HaplotagProcess::tagRead(HaplotagParameters &params){
 
+    // update chromosome processing based on region
+    if (!params.region.empty()) {
+        auto colonPos = params.region.find(":");
+        std::string regionChr;
+        if (colonPos != std::string::npos) {
+            regionChr = params.region.substr(0, colonPos);
+        }
+        else {
+            regionChr = params.region;
+        }
+        auto chrVecIter = std::find(chrVec.begin(), chrVec.end(), regionChr);
+        if (chrVecIter != chrVec.end()) {
+            chrVec = std::vector<std::string>{regionChr};
+        } else {
+            std::cerr << "ERROR: Incorrect chromosome for input region\n" << std::endl;
+            exit(1);
+        }
+    }
     // input file management
     std::string openBamFile = params.bamFile;
     // open bam file
@@ -253,6 +305,8 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
     hts_set_fai_filename(in, params.fastaFile.c_str() );
     // input reader
     bam_hdr_t *bamHdr = sam_hdr_read(in);
+    // header add pg tag
+    sam_hdr_add_pg(bamHdr, "longphase", "VN", params.version.c_str(), "CL", params.command.c_str(), NULL);
     // bam file index
     hts_idx_t *idx = NULL;
     // check input bam file
@@ -265,9 +319,11 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
     }
 
     // output file mangement
-    std::string writeBamFile = params.resultPrefix + ".bam";
+    std::string writeBamFile = params.resultPrefix + "." + params.outputFormat;
     // open output bam file
-    samFile *out = hts_open(writeBamFile.c_str(), "wb");
+    samFile *out = hts_open(writeBamFile.c_str(), (params.outputFormat == "bam" ? "wb" : "wc" ));
+    // load reference file
+    hts_set_fai_filename(out, params.fastaFile.c_str() );
     // output writer
     int result = sam_hdr_write(out, bamHdr);
     // check index file
@@ -275,6 +331,21 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
         std::cerr<<"ERROR: Cannot open index for bam file\n";
         exit(1);
     }
+
+    // record reference last variant pos
+    std::vector<int> last_pos;
+    for( auto chr : chrVec ){
+        auto lastVariantIter = chrVariantPS[chr].rbegin();
+        if( lastVariantIter != chrVariantPS[chr].rend() ){
+            last_pos.push_back(lastVariantIter->second);
+        }
+        else{
+            last_pos.push_back(0);
+        }
+    }
+
+    // reference fasta parser
+    FastaParser fastaParser(params.fastaFile, chrVec, last_pos, params.numThreads);
 
     // write tag read detail information
     std::ofstream *tagResult=NULL;
@@ -290,6 +361,7 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
             (*tagResult) << "##bamFile:"             << params.bamFile             << "\n";
             (*tagResult) << "##resultPrefix:"        << params.resultPrefix        << "\n";
             (*tagResult) << "##numThreads:"          << params.numThreads          << "\n";
+            (*tagResult) << "##region:"              << params.region              << "\n";
             (*tagResult) << "##qualityThreshold:"    << params.qualityThreshold    << "\n";
             (*tagResult) << "##percentageThreshold:" << params.percentageThreshold << "\n";
             (*tagResult) << "#tagSupplementary:"     << params.tagSupplementary    << "\n";
@@ -324,72 +396,87 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
     for(auto chr : chrVec ){
         std::time_t begin = time(NULL);
         std::cerr<<"chr: " << chr << " ... " ;
-
-        currentVariants = chrVariant[chr];
-        firstVariantIter = currentVariants.begin();
-
-        std::map<int, RefAlt>::reverse_iterator last = currentVariants.rbegin();
-
-        std::string range = chr + ":1-" + std::to_string(chrLength[chr]);
-        hts_itr_t* iter = sam_itr_querys(idx, bamHdr, range.c_str());
-
+        // records all variants within this chromosome.
+        currentChrVariants = chrVariant[chr];
+        // since each read is sorted based on the start coordinates, to save time, 
+        // firstVariantIter keeps track of the first variant that each read needs to check.
+        firstVariantIter = currentChrVariants.begin();
+        // get the coordinates of the last variant
+        // the tagging process will not be perform if the read's start coordinate are over than last variant.
+        std::map<int, RefAlt>::reverse_iterator last = currentChrVariants.rbegin();
+        
+        // fetch chromosome string
+        std::string chr_reference = fastaParser.chrString.at(chr);
+        
+        // tagging will be attempted for reads within the specified coordinate region.
+        std::string region = !params.region.empty() ? params.region : chr + ":1-" + std::to_string(chrLength[chr]);
+        hts_itr_t *iter = sam_itr_querys(idx, bamHdr, region.c_str());
+        // iter all reads
         while ((result = sam_itr_multi_next(in, iter, aln)) >= 0) {
             totalAlignment++;
             int flag = aln->core.flag;
 
             if ( aln->core.qual < params.qualityThreshold ){
                 // mapping quality is lower than threshold
-                result = sam_write1(out, bamHdr, aln);
-                continue;
+                totalUnTagCount++;
             }
-
-            if( (flag & 0x4) != 0 ){
+            else if( (flag & 0x4) != 0 ){
                 // read unmapped
                 totalUnmapped++;
-                result = sam_write1(out, bamHdr, aln);
-                continue;
+                totalUnTagCount++;
             }
-            if( (flag & 0x100) != 0 ){
+            else if( (flag & 0x100) != 0 ){
                 // secondary alignment. repeat.
                 // A secondary alignment occurs when a given read could align reasonably well to more than one place.
                 totalSecondary++;
-                result = sam_write1(out, bamHdr, aln);
-                continue;
+                totalUnTagCount++;
             }
-            if( (flag & 0x800) != 0 && params.tagSupplementary == false ){
+            else if( (flag & 0x800) != 0 && params.tagSupplementary == false ){
                 // supplementary alignment
                 // A chimeric alignment is represented as a set of linear alignments that do not have large overlaps.
                 totalSupplementary++;
-                result = sam_write1(out, bamHdr, aln);
-                continue;
+                totalUnTagCount++;
             }
-
-            if(last == currentVariants.rend()){
-                totalUnTagCuonnt++;
+            else if(last == currentChrVariants.rend()){
+                // skip 
+                totalUnTagCount++;
             }
             else if(int(aln->core.pos) <= (*last).first){
+                
+                if( (flag & 0x800) != 0 ){
+                    totalSupplementary++;
+                }
+
                 int pqValue = 0;
-                int haplotype = judgeHaplotype(*bamHdr, *aln, chr, params.percentageThreshold, tagResult, pqValue);
+                int haplotype = judgeHaplotype(*bamHdr, *aln, chr, params.percentageThreshold, tagResult, pqValue, chr_reference);
 
                 initFlag(aln, "HP");
                 initFlag(aln, "PS");
                 initFlag(aln, "PQ");
 
-                if (haplotype != 0) {
+                if (haplotype != 0){
 
                     int psValue = chrVariantPS[chr][(*firstVariantIter).first];
                     bam_aux_append(aln, "HP", 'i', sizeof(haplotype), (uint8_t*) &haplotype);
                     bam_aux_append(aln, "PS", 'i', sizeof(psValue), (uint8_t*) &psValue);
                     bam_aux_append(aln, "PQ", 'i', sizeof(pqValue), (uint8_t*) &pqValue);
-                    totalTagCuonnt++;
+                    totalTagCount++;
                 }
                 else{
-                    totalUnTagCuonnt++;
+                    totalUnTagCount++;
                 }
             }
+            else{
+                totalUnTagCount++;
+            }
+
+            // write this alignment to result bam file
             result = sam_write1(out, bamHdr, aln);
         }
         std::cerr<< difftime(time(NULL), begin) << "s\n";
+    }
+    if(tagResult!=NULL){
+        (*tagResult).close();
     }
     hts_idx_destroy(idx);
     bam_hdr_destroy(bamHdr);
@@ -411,7 +498,7 @@ void HaplotagProcess::initFlag(bam1_t *aln, std::string flag){
     return;
 }
 
-int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, std::string chrName, double percentageThreshold, std::ofstream *tagResult, int &pqValue){
+int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, std::string chrName, double percentageThreshold, std::ofstream *tagResult, int &pqValue, const std::string &ref_string){
 
     int hp1Count = 0;
     int hp2Count = 0;
@@ -420,11 +507,13 @@ int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, 
     std::map<int,int> countPS;
 
     // Skip variants that are to the left of this read
-    while( firstVariantIter != currentVariants.end() && (*firstVariantIter).first < aln.core.pos )
+    while( firstVariantIter != currentChrVariants.end() && (*firstVariantIter).first < aln.core.pos ){
         firstVariantIter++;
-
-    if( firstVariantIter == currentVariants.end() )
+    }
+    
+    if( firstVariantIter == currentChrVariants.end() ){
         return 0;
+    }
 
     // position relative to reference
     int ref_pos = aln.core.pos;
@@ -441,7 +530,7 @@ int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, 
         int length   = bam_cigar_oplen(cigar[i]);
 
         // iterator next variant
-        while( currentVariantIter != currentVariants.end() && (*currentVariantIter).first < ref_pos ){
+        while( currentVariantIter != currentChrVariants.end() && (*currentVariantIter).first < ref_pos ){
             currentVariantIter++;
         }
 
@@ -451,8 +540,10 @@ int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, 
         // 8: sequence mismatch
         if( cigar_op == 0 || cigar_op == 7 || cigar_op == 8 ){
 
-            while( currentVariantIter != currentVariants.end() && (*currentVariantIter).first < ref_pos + length){
+            while( currentVariantIter != currentChrVariants.end() && (*currentVariantIter).first < ref_pos + length){
 
+                int refAlleleLen = (*currentVariantIter).second.Ref.length();
+                int altAlleleLen = (*currentVariantIter).second.Alt.length();
                 int offset = (*currentVariantIter).first - ref_pos;
 
                 if( offset < 0){
@@ -461,29 +552,99 @@ int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, 
                     uint8_t *q = bam_get_seq(&aln);
                     char base_chr = seq_nt16_str[bam_seqi(q,query_pos + offset)];
                     std::string base(1, base_chr);
-                    // base match SNP allele
-                    if( (base == (*currentVariantIter).second.Ref) || (base == (*currentVariantIter).second.Alt) ){
+                    
+                    // currentVariant is SNP
+                    if( refAlleleLen == 1 && altAlleleLen == 1 ){
+                        // Detected that the base of the read is either REF or ALT. 
+                        if( (base == (*currentVariantIter).second.Ref) || (base == (*currentVariantIter).second.Alt) ){
 
-                        std::map<int, int>::iterator posPSiter = chrVariantPS[chrName].find((*currentVariantIter).first);
+                            std::map<int, int>::iterator posPSiter = chrVariantPS[chrName].find((*currentVariantIter).first);
 
-                        if( posPSiter == chrVariantPS[chrName].end() ){
-                            std::cerr<< (*currentVariantIter).first << "\t"
-                                     << (*currentVariantIter).second.Ref << "\t"
-                                     << (*currentVariantIter).second.Alt << "\n";
-                            exit(EXIT_SUCCESS);
+                            if( posPSiter == chrVariantPS[chrName].end() ){
+                                std::cerr<< (*currentVariantIter).first << "\t"
+                                         << (*currentVariantIter).second.Ref << "\t"
+                                         << (*currentVariantIter).second.Alt << "\n";
+                                exit(EXIT_SUCCESS);
+                            }
+                            else{
+                                if( base == chrVariantHP1[chrName][(*currentVariantIter).first]){
+                                    hp1Count++;
+                                    variantsHP[(*currentVariantIter).first]=0;
+                                }
+                                if( base == chrVariantHP2[chrName][(*currentVariantIter).first]){
+                                    hp2Count++;
+                                    variantsHP[(*currentVariantIter).first]=1;
+                                }
+                                countPS[chrVariantPS[chrName][(*currentVariantIter).first]]++;
+                            }
+                            
                         }
-                        else{
-                            if( base == chrVariantHP1[chrName][(*currentVariantIter).first]){
+                    }
+                    // currentVariant is insertion
+                    else if( refAlleleLen == 1 && altAlleleLen != 1 && i+1 < aln_core_n_cigar){
+                        
+                        int hp1Length = chrVariantHP1[chrName][(*currentVariantIter).first].length();
+                        int hp2Length = chrVariantHP2[chrName][(*currentVariantIter).first].length();
+                        
+                        if ( ref_pos + length - 1 == (*currentVariantIter).first && bam_cigar_op(cigar[i+1]) == 1 ) {
+                            // hp1 occur insertion
+                            if( hp1Length != 1 && hp2Length == 1 ){
                                 hp1Count++;
                                 variantsHP[(*currentVariantIter).first]=0;
                             }
-                            if(base == chrVariantHP2[chrName][(*currentVariantIter).first]){
+                            // hp2 occur insertion
+                            else if( hp1Length == 1 && hp2Length != 1 ){
                                 hp2Count++;
                                 variantsHP[(*currentVariantIter).first]=1;
                             }
-                            countPS[chrVariantPS[chrName][(*currentVariantIter).first]]++;
                         }
-                    }
+                        else {
+                            // hp1 occur insertion
+                            if( hp1Length != 1 && hp2Length == 1 ){
+                                hp2Count++;
+                                variantsHP[(*currentVariantIter).first]=1;
+                            }
+                            // hp2 occur insertion
+                            else if( hp1Length == 1 && hp2Length != 1 ){
+                                hp1Count++;
+                                variantsHP[(*currentVariantIter).first]=0;
+                            }
+                        }
+                        countPS[chrVariantPS[chrName][(*currentVariantIter).first]]++;
+                    } 
+                    // currentVariant is deletion
+                    else if( refAlleleLen != 1 && altAlleleLen == 1 && i+1 < aln_core_n_cigar) {
+                        
+                        int hp1Length = chrVariantHP1[chrName][(*currentVariantIter).first].length();
+                        int hp2Length = chrVariantHP2[chrName][(*currentVariantIter).first].length();
+                        
+                        if ( ref_pos + length - 1 == (*currentVariantIter).first && bam_cigar_op(cigar[i+1]) == 2 ) {
+                            // hp1 occur deletion
+                            if( hp1Length != 1 && hp2Length == 1 ){
+                                hp1Count++;
+                                variantsHP[(*currentVariantIter).first]=0;
+                            }
+                            // hp2 occur deletion
+                            else if( hp1Length == 1 && hp2Length != 1 ){
+                                hp2Count++;
+                                variantsHP[(*currentVariantIter).first]=1;
+                            }
+                        }
+                        else {
+                            // hp2 occur deletion
+                            if( hp1Length != 1 && hp2Length == 1 ){
+                                hp2Count++;
+                                variantsHP[(*currentVariantIter).first]=1;
+                            }
+                            // hp1 occur deletion
+                            else if( hp1Length == 1 && hp2Length != 1 ){
+                                hp1Count++;
+                                variantsHP[(*currentVariantIter).first]=0;
+                            }
+                        }
+                        countPS[chrVariantPS[chrName][(*currentVariantIter).first]]++;
+                    } 
+
                 }
                 currentVariantIter++;
             }
@@ -496,6 +657,58 @@ int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, 
         }
             // 2: deletion from the reference
         else if( cigar_op == 2 ){
+            
+            if(ref_string != ""){
+                int del_len = length;
+                if ( ref_pos + del_len + 1 == (*currentVariantIter).first ){
+                    //if( homopolymerLength((*currentVariantIter).first , ref_string) >=3 ){
+                        // special case
+                    //}
+                }
+                else if( (*currentVariantIter).first >= ref_pos  && (*currentVariantIter).first < ref_pos + del_len ){
+                    // check variant in homopolymer
+                    if( homopolymerLength((*currentVariantIter).first , ref_string) >=3 ){
+                        
+                        int refAlleleLen = (*currentVariantIter).second.Ref.length();
+                        int altAlleleLen = (*currentVariantIter).second.Alt.length();
+                        
+                        // SNP
+                        if( refAlleleLen == 1 && altAlleleLen == 1){
+                            // get the next match
+                            char base_chr = seq_nt16_str[bam_seqi(bam_get_seq(&aln), query_pos)];
+                            std::string base(1, base_chr);
+
+                            if( base == chrVariantHP1[chrName][(*currentVariantIter).first]){
+                                hp1Count++;
+                                variantsHP[(*currentVariantIter).first]=0;
+                            }
+                            if( base == chrVariantHP2[chrName][(*currentVariantIter).first]){
+                                hp2Count++;
+                                variantsHP[(*currentVariantIter).first]=1;
+                            }
+                            countPS[chrVariantPS[chrName][(*currentVariantIter).first]]++;
+                        }
+                        
+                        // the read deletion contain VCF's deletion
+                        else if( refAlleleLen != 1 && altAlleleLen == 1){
+
+                            int hp1Length = chrVariantHP1[chrName][(*currentVariantIter).first].length();
+                            int hp2Length = chrVariantHP2[chrName][(*currentVariantIter).first].length();
+                            // hp1 occur deletion
+                            if( hp1Length != 1 && hp2Length == 1 ){
+                                hp1Count++;
+                                variantsHP[(*currentVariantIter).first]=0;
+                            }
+                            // hp2 occur deletion
+                            else if( hp1Length == 1 && hp2Length != 1 ){
+                                hp2Count++;
+                                variantsHP[(*currentVariantIter).first]=1;
+                            }
+                            countPS[chrVariantPS[chrName][(*currentVariantIter).first]]++;
+                        }
+                    }
+                }
+            }
             ref_pos += length;
         }
             // 3: skipped region from the reference
@@ -557,6 +770,11 @@ int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, 
     else{
         pqValue=-10*(std::log10((double)min/double(max+min)));
     }
+    
+    // cross two block
+    if( countPS.size() > 1  ){
+        hpResult = 0;
+    }
 
     if(tagResult!=NULL){
         //write tag log file
@@ -567,14 +785,6 @@ int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, 
             auto psIter = countPS.begin();
             psResultStr = std::to_string((*psIter).first);
         }
-
-        // cross two block
-        if( countPS.size() > 1  ){
-            hpResultStr = ".";
-            psResultStr = ".";
-            hpResult = 0;
-        }
-
 
         (*tagResult)<< bam_get_qname(&aln)              << "\t"
                     << bamHdr.target_name[aln.core.tid] << "\t"
@@ -607,17 +817,19 @@ int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, 
 }
 
 HaplotagProcess::HaplotagProcess(HaplotagParameters params):
-totalAlignment(0),totalSupplementary(0),totalSecondary(0),totalUnmapped(0),totalTagCuonnt(0),totalUnTagCuonnt(0),processBegin(time(NULL)),integerPS(false)
+totalAlignment(0),totalSupplementary(0),totalSecondary(0),totalUnmapped(0),totalTagCount(0),totalUnTagCount(0),processBegin(time(NULL)),integerPS(false)
 {
     std::cerr<< "phased SNP file:   " << params.snpFile             << "\n";
     std::cerr<< "phased SV file:    " << params.svFile              << "\n";
+    std::cerr<< "phased MOD file:   " << params.modFile             << "\n";
     std::cerr<< "input bam file:    " << params.bamFile             << "\n";
     std::cerr<< "input ref file:    " << params.fastaFile           << "\n";
-    std::cerr<< "output bam file:   " << params.resultPrefix+".bam" << "\n";
+    std::cerr<< "output bam file:   " << params.resultPrefix + "." + params.outputFormat << "\n";
     std::cerr<< "number of threads: " << params.numThreads          << "\n";
     std::cerr<< "write log file:    " << (params.writeReadLog ? "true" : "false") << "\n";
     std::cerr<< "log file:          " << (params.writeReadLog ? (params.resultPrefix+".out") : "") << "\n";
     std::cerr<< "-------------------------------------------\n";
+    std::cerr<< "tag region:                    " << (!params.region.empty() ? params.region : "all") << "\n";
     std::cerr<< "filter mapping quality below:  " << params.qualityThreshold    << "\n";
     std::cerr<< "percentage threshold:          " << params.percentageThreshold << "\n";
     std::cerr<< "tag supplementary:             " << (params.tagSupplementary ? "true" : "false") << "\n";
@@ -626,16 +838,28 @@ totalAlignment(0),totalSupplementary(0),totalSecondary(0),totalUnmapped(0),total
     // load SNP vcf file
     std::time_t begin = time(NULL);
     std::cerr<< "parsing SNP VCF ... ";
-    parseSVFile = false;
+    parseSnpFile = true;
     variantParser(params.snpFile);
+    parseSnpFile = false;
     std::cerr<< difftime(time(NULL), begin) << "s\n";
 
     // load SV vcf file
     if(params.svFile!=""){
         begin = time(NULL);
-        std::cerr<< "parsing SV VCF ...\n";
+        std::cerr<< "parsing SV VCF ... ";
         parseSVFile = true;
         variantParser(params.svFile);
+        parseSVFile = false;
+        std::cerr<< difftime(time(NULL), begin) << "s\n";    
+    }
+    
+    // load MOD vcf file
+    if(params.modFile!=""){
+        begin = time(NULL);
+        std::cerr<< "parsing MOD VCF ... ";
+        parseMODFile = true;
+        variantParser(params.modFile);
+        parseMODFile = false;
         std::cerr<< difftime(time(NULL), begin) << "s\n";    
     }
 
@@ -655,7 +879,7 @@ HaplotagProcess::~HaplotagProcess(){
     std::cerr<< "total supplementary: " << totalSupplementary << "\n";
     std::cerr<< "total secondary:     " << totalSecondary     << "\n";
     std::cerr<< "total unmapped:      " << totalUnmapped      << "\n";
-    std::cerr<< "total tag alignment: " << totalTagCuonnt     << "\n";
-    std::cerr<< "total untagged:      " << totalUnTagCuonnt   << "\n";
+    std::cerr<< "total tag alignment: " << totalTagCount     << "\n";
+    std::cerr<< "total untagged:      " << totalUnTagCount   << "\n";
 };
 

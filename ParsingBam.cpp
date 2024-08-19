@@ -20,24 +20,35 @@ FastaParser::FastaParser(std::string fastaFile,  std::vector<std::string> chrNam
     for(std::vector<std::string>::iterator iter = chrName.begin() ; iter != chrName.end() ; iter++)
         chrString.insert(std::make_pair( (*iter) , ""));
 
+    // load reference index
+    faidx_t *fai = NULL;
+    fai = fai_load(fastaFile.c_str());
+    
     // iterating all chr
-    #pragma omp parallel for schedule(dynamic) num_threads(numThreads)
+    #pragma omp parallfel for schedule(dynamic) num_threads(numThreads)
     for(std::vector<std::string>::iterator iter = chrName.begin() ; iter != chrName.end() ; iter++){
         
         faidx_t *fai = NULL;
         fai = fai_load(fastaFile.c_str());
         int index = iter - chrName.begin();
-
+        
+        // Do not extract references without SNP coverage.
+        if( last_pos.at(index) == -1){
+            chrString[(*iter)]="";
+            continue;
+        }
+        
         // ref_len is a return value that is length of retrun string
         int ref_len = 0;
+
         // read file
-        std::string chr_info(faidx_fetch_seq(fai , (*iter).c_str() , 0 ,last_pos.at(index)+5 , &ref_len));
+        std::string chr_info(faidx_fetch_seq(fai , (*iter).c_str() , 0 , last_pos.at(index)+5 , &ref_len));
         if(ref_len == 0){
             std::cout<<"nothing in reference file \n";
         }
+
         // update map
         chrString[(*iter)] = chr_info;
-
     }
 }
 
@@ -319,6 +330,47 @@ std::map<int, RefAlt> SnpParser::getVariants(std::string chrName){
     if( chrIter != chrVariant->end() )
         targetVariants = (*chrIter).second;
     
+    return targetVariants;
+}
+
+std::map<int, RefAlt> SnpParser::getVariants_markindel(std::string chrName, const std::string &ref){
+    std::map<int, RefAlt> targetVariants;
+    std::map<std::string, std::map<int, RefAlt> >::iterator chrIter = chrVariant->find(chrName);
+
+    //Mark the indel which lies in the tandem repeat
+    if (chrIter != chrVariant->end()) {
+    // Accessing the inner map using chrIter->second and iterating over it
+        for ( auto innerIter = chrIter->second.begin(); innerIter != chrIter->second.end(); innerIter++ ) {
+            int variant_pos = innerIter->first;      // Accessing the variant_pos of the inner map
+            RefAlt variant_info = innerIter->second; // Accessing the variant_info of the inner map
+            int ref_pos = variant_pos ;
+	    bool danger = false ;
+
+            std::string repeat = ref.substr(ref_pos + 1, 2) ; // get the 2 words string in the reference which behind the indel position
+            int i = 0 ;
+	    //check if there has 2 words tandem repeat in the reference
+            while ( i < 5 && (variant_info.Ref.length()>1 ||variant_info.Alt.length()>1) /*&& repeat[0]!=repeat[1]*/ ) {
+                if ( repeat[0] != ref[ref_pos+1] || repeat[1] != ref[ref_pos+2] ) {
+                    break ;
+                }
+
+                ref_pos = ref_pos + 2 ;
+                i++ ;
+            }
+
+	    // set the dnager to true if the repeat word repeats at least five times
+	    if ( i == 5 ) danger = true ;
+
+            innerIter->second.is_danger = danger ;
+
+        }
+
+        targetVariants = (*chrIter).second;
+    }
+    else {
+        // Handle the case where chrName doesn't exist in chrVariant
+    }
+
     return targetVariants;
 }
 
@@ -695,20 +747,25 @@ void SVParser::parserProcess(std::string &input){
         if(filter){
             return;
         }
-
+        
         // get read INFO
         int read_pos = fields[7].find("RNAMES=");
-        read_pos = fields[7].find("=",read_pos);
-        read_pos++;
-                
-        int next_field = fields[7].find(";",read_pos);
-        std::string totalRead = fields[7].substr(read_pos,next_field-read_pos);
-        std::stringstream totalReadStream(totalRead);
-                
-        std::string read;
-        while(std::getline(totalReadStream, read, ','))
-        {
-           (*chrVariant)[chr][pos][read]= true;
+        // detected RNAMES included in INFO
+        if( read_pos != -1 ){
+            // Extract the position of "=" in "RNAMES="
+            read_pos = fields[7].find("=",read_pos);
+            read_pos++;
+            // Capture the position of the ";" symbol at the end of the information in "RNAMES="
+            int next_field = fields[7].find(";",read_pos);
+            // Capture the range of read IDs included in the entire RNAMES
+            std::string totalRead = fields[7].substr(read_pos,next_field-read_pos);
+            std::stringstream totalReadStream(totalRead);
+            // Extract each read ID individually
+            std::string read;
+            while(std::getline(totalReadStream, read, ','))
+            {
+               (*chrVariant)[chr][pos][read]= true;
+            }
         }
     }
 }
@@ -901,14 +958,15 @@ bool SVParser::findSV(std::string chr, int position){
         
     return true;
 }
-BamParser::BamParser(std::string inputChrName, std::vector<std::string> inputBamFileVec, SnpParser &snpMap, SVParser &svFile, METHParser &modFile):chrName(inputChrName),BamFileVec(inputBamFileVec){
+BamParser::BamParser(std::string inputChrName, std::vector<std::string> inputBamFileVec, SnpParser &snpMap, SVParser &svFile, METHParser &modFile, const std::string &ref_string):chrName(inputChrName),BamFileVec(inputBamFileVec){
     
     currentVariants = new std::map<int, RefAlt>;
     currentSV = new std::map<int, std::map<std::string ,bool> >;
     currentMod = new std::map<int, std::map<std::string ,RefAlt> >;
     
     // use chromosome to find recorded snp map
-    (*currentVariants) = snpMap.getVariants(chrName);
+    //(*currentVariants) = snpMap.getVariants(chrName);
+    (*currentVariants) = snpMap.getVariants_markindel(chrName, ref_string);
     // set skip variant start iterator
     firstVariantIter = currentVariants->begin();
     if( firstVariantIter == currentVariants->end() ){
@@ -1030,13 +1088,11 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<R
     int aln_core_n_cigar = aln.core.n_cigar;
     uint8_t* nm_tag = bam_aux_get(&aln, "NM");
     int nm_value = bam_aux2i(nm_tag);
-    
+
     int cigar_del_oplen = 0;
     int cigar_indel_oplen = 0;
     int cigar_clip_oplen = 0;
     int cigar_total_oplen = 0;
-    //int pushread = 0;
-    //int giveupread = 0;
     
     // reading cigar to detect varaint on this read
     for(int i = 0; i < aln_core_n_cigar ; i++ ){
@@ -1044,7 +1100,6 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<R
         // get current cigar type and cigar length
         int cigar_op = bam_cigar_op(cigar[i]);
         int cigar_oplen = bam_cigar_oplen(cigar[i]);
-        
         
         // get the starting position of each variant currently.
         int modPos = (*currentModIter).first;
@@ -1160,6 +1215,11 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<R
                         }
                         // using this quality to identify indel
                         base_q = -4;
+                        
+			// using this quality to identify danger indel
+			if ( (*currentVariantIter).second.is_danger ) {
+                            base_q = -5 ;
+                        }
                     } 
             
                     // deletion
@@ -1174,6 +1234,11 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<R
                         }
                         // using this quality to identify indel
                         base_q = -4;
+
+			// using this quality to identify danger indel
+			if ( (*currentVariantIter).second.is_danger ) {
+                            base_q = -5 ;
+                        }
                     } 
             
                     if( allele != -1 ){
@@ -1198,12 +1263,12 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<R
         if( cigar_op == 0 || cigar_op == 7 || cigar_op == 8 ){
             query_pos += cigar_oplen;
             ref_pos += cigar_oplen;
-            cigar_total_oplen += cigar_oplen;
+	    cigar_total_oplen += cigar_oplen;
         }
         // 1: insertion to the reference
         else if( cigar_op == 1 ){
             query_pos += cigar_oplen;
-            cigar_indel_oplen += cigar_oplen;
+	    cigar_indel_oplen += cigar_oplen;
             cigar_total_oplen += cigar_oplen;
         }
         else if( cigar_op == 2 ){
@@ -1274,7 +1339,7 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<R
                 }
             }
             ref_pos += cigar_oplen;
-            cigar_del_oplen += cigar_oplen;
+	    cigar_del_oplen += cigar_oplen;
             cigar_indel_oplen += cigar_oplen;
             cigar_total_oplen += cigar_oplen;
         }
@@ -1286,16 +1351,16 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<R
         // 4: soft clipping (clipped sequences present in SEQ)
         else if( cigar_op == 4 ){
             query_pos += cigar_oplen;
-            cigar_clip_oplen += cigar_oplen;
+	    cigar_clip_oplen += cigar_oplen;
             cigar_total_oplen += cigar_oplen;
         }
         // 5: hard clipping (clipped sequences NOT present in SEQ)
-        // 6: padding (silent deletion from padded reference)
-        else if( cigar_op == 5 ){
+	else if( cigar_op == 5 ){
             cigar_clip_oplen += cigar_oplen;
             cigar_total_oplen += cigar_oplen;
         }
-        else if(cigar_op == 6 ){
+	// 6: padding (silent deletion from padded reference)
+	else if(cigar_op == 6 ){
             cigar_total_oplen += cigar_oplen;
         }
         else{
