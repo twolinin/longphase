@@ -25,7 +25,7 @@ static const char *CORRECT_USAGE_MESSAGE =
 
 "parse alignment arguments:\n"
 "   -q, --mappingQuality=Num               filter alignment if mapping quality is lower than threshold. default:1\n"
-"   -x, --mismatchRate=Num                 mark reads as false if mismatchRate of them are lower than threshold. default:3\n\n"
+"   -x, --mismatchRate=Num                 mark reads as false if mismatchRate of them are higher than threshold. default:3\n\n"
 
 "phasing graph arguments:\n"
 "   -p, --baseQuality=[0~90]               change edge's weight to --edgeWeight if base quality is lower than the threshold. default:12\n"
