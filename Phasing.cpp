@@ -31,7 +31,7 @@ static const char *CORRECT_USAGE_MESSAGE =
 "   -p, --baseQuality=[0~90]               change edge's weight to --edgeWeight if base quality is lower than the threshold. default:12\n"
 "   -e, --edgeWeight=[0~1]                 if one of the bases connected by the edge has a quality lower than --baseQuality\n"
 "                                          its weight is reduced from the normal 1. default:0.1\n"
-"   -a, --connectAdjacent=Num              connect adjacent N SNPs. default:20\n"
+"   -a, --connectAdjacent=Num              connect adjacent N SNPs. default:35\n"
 "   -d, --distance=Num                     phasing two variant if distance less than threshold. default:300000\n"
 "   -1, --edgeThreshold=[0~1]              give up SNP-SNP phasing pair if the number of reads of the \n"
 "                                          two combinations are similar. default:0.7\n"
@@ -90,7 +90,7 @@ namespace opt
     static bool isPB=false;
     static bool phaseIndel=false;
     
-    static int connectAdjacent = 20;
+    static int connectAdjacent = 35;
     static int mappingQuality = 1;
     static double mismatchRate = 3;
     
