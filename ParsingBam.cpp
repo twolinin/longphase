@@ -28,8 +28,6 @@ FastaParser::FastaParser(std::string fastaFile,  std::vector<std::string> chrNam
     #pragma omp parallfel for schedule(dynamic) num_threads(numThreads)
     for(std::vector<std::string>::iterator iter = chrName.begin() ; iter != chrName.end() ; iter++){
         
-        faidx_t *fai = NULL;
-        fai = fai_load(fastaFile.c_str());
         int index = iter - chrName.begin();
         
         // Do not extract references without SNP coverage.
@@ -1086,13 +1084,13 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<R
     // set cigar pointer and number of cigar
     uint32_t *cigar = bam_get_cigar(&aln);
     int aln_core_n_cigar = aln.core.n_cigar;
-    uint8_t* nm_tag = bam_aux_get(&aln, "NM");
-    int nm_value = bam_aux2i(nm_tag);
+    uint8_t* nm_tag = bam_aux_get(&aln, "NM"); // get the nm_tag in the bam
+    int nm_value = bam_aux2i(nm_tag); // get the nm_value in the read
 
-    int cigar_del_oplen = 0;
-    int cigar_indel_oplen = 0;
-    int cigar_clip_oplen = 0;
-    int cigar_total_oplen = 0;
+    int cigar_del_oplen = 0; // count the total deletion length
+    int cigar_indel_oplen = 0; // count the total insertion length
+    int cigar_clip_oplen = 0; // count the total clip length (hard+soft)
+    int cigar_total_oplen = 0; // count the total cigar length
     
     // reading cigar to detect varaint on this read
     for(int i = 0; i < aln_core_n_cigar ; i++ ){
@@ -1368,9 +1366,11 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<R
             exit(1);
         }
     }
-    int num_of_mismatch = nm_value - cigar_indel_oplen;
-    int length = cigar_total_oplen - cigar_clip_oplen - cigar_del_oplen;
+    int num_of_mismatch = nm_value - cigar_indel_oplen; // count the num of mismatch without indel
+    int length = cigar_total_oplen - cigar_clip_oplen - cigar_del_oplen; // count the legth of read without clipping
     double mmrate = ((float)num_of_mismatch / (float)length)*100;
+
+    // if the mmrate is too high mark the read as fakeRead
     if( mmrate > mismatchRate ){ 
       (*tmpReadResult).fakeRead = true;
     }

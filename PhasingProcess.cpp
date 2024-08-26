@@ -26,6 +26,7 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
     std::cerr<< "Distance Threshold : " << params.distance        << "\n";
     std::cerr<< "Connect Adjacent   : " << params.connectAdjacent << "\n";
     std::cerr<< "Edge Threshold     : " << params.edgeThreshold   << "\n";
+    std::cerr<< "Overlap Threshold  : " << params.overlapThreshold   << "\n";
     std::cerr<< "Mapping Quality    : " << params.mappingQuality  << "\n";
     std::cerr<< "Mismatch Rate      : " << params.mismatchRate  << "\n";
     std::cerr<< "Variant Confidence : " << params.snpConfidence   << "\n";
@@ -118,7 +119,7 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
         }
         
         // create a graph object and prepare to phasing.
-        VairiantGraph *vGraph = new VairiantGraph(chr_reference, params, snpFile, (*chrIter));
+        VairiantGraph *vGraph = new VairiantGraph(chr_reference, params);
         // trans read-snp info to edge info
         vGraph->addEdge(readVariantVec);
         // run main algorithm

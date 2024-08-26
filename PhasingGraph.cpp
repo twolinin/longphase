@@ -37,6 +37,7 @@ void SubEdge::addSubEdge(int currentQuality, Variant connectNode, std::string re
             (*refQuality)[connectNode.position] += currentQuality + connectNode.quality;
         }*/
 
+	//if the base quality on both snps is high enough and didn't be marked as fakeRead, the edge has normal weight
         if ( currentQuality >= baseQuality && connectNode.quality >= baseQuality && fakeRead == false)
             (*refReadCount)[connectNode.position]++;
         else if ( fakeRead == true )
@@ -59,7 +60,8 @@ void SubEdge::addSubEdge(int currentQuality, Variant connectNode, std::string re
         else{
             (*altQuality)[connectNode.position] += currentQuality + connectNode.quality;
         }*/
-        
+       
+	//if the base quality on both snps is high enough and didn't be marked as fakeRead, the edge has normal weight 
         if ( currentQuality >= baseQuality && connectNode.quality >= baseQuality && fakeRead == false)
             (*altReadCount)[connectNode.position]++;
         else if ( fakeRead == true )
@@ -163,12 +165,12 @@ VariantEdge::VariantEdge(int inCurrPos){
     currPos = inCurrPos;
     alt = new SubEdge();
     ref = new SubEdge();
-    refcnt = 0;
-    altcnt = 0;
-    coverage = 0;
-    vaf_fake_count = 0;
+    refcnt = 0; 
+    altcnt = 0; 
+    coverage = 0;  
 }
 
+//to get the value of fakeSnp
 bool VariantEdge::get_fakeSnp(){
     bool fakeSnp;
     if(vaf == 0 || vaf == 1)
@@ -199,27 +201,13 @@ std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool
     //std::cout << currPos+1 << "\t" << altcnt << "\t" << refcnt << "\t" << vaf << "\n" ;
     if( rr + aa > ra + ar ){
         // RR conect
-        if(vaf == 0 || vaf == 1){
-          refAllele = 3;
-          altAllele = 4;
-        } 
-        else{
-          refAllele = 1;
-          altAllele = 2;
-        }
-
+        refAllele = 1;
+        altAllele = 2;
     }
     else if( rr + aa < ra + ar ){
         // RA connect
-        if(vaf == 0 || vaf == 1){
-          refAllele = 4;
-          altAllele = 3;
-        }
-        else{
-          refAllele = 2;
-          altAllele = 1;
-        }
-
+        refAllele = 2;
+        altAllele = 1;
     }
     else if( rr + aa == ra + ar ){
         // no connect 
@@ -238,17 +226,19 @@ std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool
         refAllele = -1;
         altAllele = -1;
     }
-    if(vaf == 0 || vaf == 1){
-        vaf_fake_count+=1;
-    }
     
 
     if(debug){
         std::cout << currPos << "\t->\t" << targetPos << "\t|rr aa | ra ar\t" << "\t" << rr << "\t" << aa << "\t" << ra << "\t" << ar  << "\n";
     }
-   
+
+    // if the vaf is 0 or 1, we think this variant is a fake variant and we lower its weight
+    if ( vaf == 0 || vaf == 1 ) {
+        vote.weight = 0.01 ;
+        //std::cout<< "fakesnp\t" << currPos+1 << "->" << targetPos+1 << "\t" << vote.weight << "\n";
+    }
     // the lower the edgeSimilarRatio means the higher reads consistency, and we will make the weight bigger if the reads consistency is high enough
-    if ( (edgeSimilarRatio <= 0.1 && (rr + aa + ra + ar) >= 1)  || ((rr+aa)<1&&(ra+ar)>=1) || ((rr+aa)>=1&&(ra+ar)<1) ) {
+    else if ( (edgeSimilarRatio <= 0.1 && (rr + aa + ra + ar) >= 1)  || ((rr+aa)<1&&(ra+ar)>=1) || ((rr+aa)>=1&&(ra+ar)<1) ) {
         vote.weight = 20 ;
     }
 
@@ -358,8 +348,10 @@ void VairiantGraph::edgeConnectResult(){
         // get the number of HP1 and HP2 supported reference allele
         //int h1 = (*hpCountMap)[currPos][1].size();
         //int h2 = (*hpCountMap)[currPos][2].size();
-	float h1 = (*hpCountMap2)[currPos][1] ;
-	float h2 = (*hpCountMap2)[currPos][2] ;
+        float h1 = (*hpCountMap2)[currPos][1] ;
+	      float h2 = (*hpCountMap2)[currPos][2] ;
+
+        //std::cout<< currPos+1 << "\th1\th2\t" << h1 << "\t" << h2 << "\n" ;
 
 	//Handle the special case which One Long Read provides wrong info repeatedly
         std::pair<float, float> special = Onelongcase( (*hpCountMap3)[currPos] ) ;
@@ -386,7 +378,6 @@ void VairiantGraph::edgeConnectResult(){
                 (*phasedBlocks)[blockStart].push_back(currPos);
             }
         }
-        //std::cout<< currPos+1 << "\th1\th2\t" << h1 << "\t" << h2 << "\n" ;
         // Check if there is no edge from current node
         std::map<int,VariantEdge*>::iterator edgeIter = edgeList->find( currPos );
         if( edgeIter==edgeList->end() ){
@@ -405,14 +396,6 @@ void VairiantGraph::edgeConnectResult(){
                 vote.weight = 0.1 ;
             }
 
-	    if ( tmp.first.second == 3 ) {
-                vote.weight = 0.01 ;
-		tmp.first.second = 1 ;
-            }
-	    else if ( tmp.first.second == 4 ) {
-                vote.weight = 0.01 ;
-		tmp.first.second = 2 ;
-            }
             // -1 : no connect  
             //  1 : the haplotype of next (i+1)'s SNP are same as previous
             //  2 : the haplotype of next (i+1)'s SNP are different as previous
@@ -421,13 +404,13 @@ void VairiantGraph::edgeConnectResult(){
                 if( (*hpResult)[currPos] == 1 ){
                     if( tmp.first.second == 1 ){
                         (*hpCountMap)[nextNodeIter->first][1].push_back(currPos);
-			(*hpCountMap2)[nextNodeIter->first][1] += vote.weight;
-			vote.hap = 1 ;
+		        (*hpCountMap2)[nextNodeIter->first][1] += vote.weight;
+                        vote.hap = 1 ;
                     }
                     if( tmp.first.second == 2 ){
                         (*hpCountMap)[nextNodeIter->first][2].push_back(currPos);
 			(*hpCountMap2)[nextNodeIter->first][2] += vote.weight;
-			vote.hap = 2 ;
+		  	vote.hap = 2 ;
                     }
                 }
                 if( (*hpResult)[currPos]==2 ){
@@ -438,12 +421,12 @@ void VairiantGraph::edgeConnectResult(){
                     }
                     if( tmp.first.second == 2 ){
                         (*hpCountMap)[nextNodeIter->first][1].push_back(currPos);
-			(*hpCountMap2)[nextNodeIter->first][1] += vote.weight;
-			vote.hap = 1 ;
+		        (*hpCountMap2)[nextNodeIter->first][1] += vote.weight;
+	                vote.hap = 1 ;
                     }
                 }
 
-		(*hpCountMap3)[nextNodeIter->first].push_back( vote );
+                (*hpCountMap3)[nextNodeIter->first].push_back( vote );
 
                 if( params->generateDot ){
                     std::string e1 = std::to_string(currPos+1) + ".1\t->\t" + std::to_string(tmp.first.first+1) + "." + std::to_string(tmp.first.second);
@@ -518,7 +501,7 @@ void VairiantGraph::edgeConnectResult(){
     delete phasedBlocks;
 }
 
-VairiantGraph::VairiantGraph(std::string &in_ref, PhasingParameters &in_params, SnpParser &snpFile, std::string chrName){
+VairiantGraph::VairiantGraph(std::string &in_ref, PhasingParameters &in_params){
     params=&in_params;
     ref=&in_ref;
     
@@ -641,11 +624,14 @@ void VairiantGraph::addEdge(std::vector<ReadVariant> &in_readVariant){
     for(std::vector<ReadVariant>::iterator readIter = in_readVariant.begin() ; readIter != in_readVariant.end() ; readIter++ ){
 
 	std::map<std::string,ReadVariant>::iterator posIter = mergeReadMap.find((*readIter).read_name) ;
+
+	// fakeRead is initialize as fake
 	if ( posIter == mergeReadMap.end() ) {
             mergeReadMap[(*readIter).read_name].fakeRead = false ;
         }
         //std::cout << (*readIter).mm_rate << "\n";
 
+	//if the mmrate too high we think it's a fake read
         if( (*readIter).fakeRead == true ){
           mergeReadMap[(*readIter).read_name].fakeRead = true ;
         }
@@ -714,13 +700,12 @@ void VairiantGraph::addEdge(std::vector<ReadVariant> &in_readVariant){
             if( posIter == edgeList->end() )
                 (*edgeList)[(*variant1Iter).position] = new VariantEdge((*variant1Iter).position);
 
+	    //count the ref and alt base amount on the variant
 	    if( (*variant1Iter).allele == 0 && (*readIter).second.fakeRead == false ) {
                 (*edgeList)[(*variant1Iter).position]->refcnt++ ;
-		std::cout << "plus1\n" ;
 	    }
             if( (*variant1Iter).allele == 1 && (*readIter).second.fakeRead == false ) {
                 (*edgeList)[(*variant1Iter).position]->altcnt++ ;
-		std::cout << "plus2\n" ;
 	    }
             (*edgeList)[(*variant1Iter).position]->coverage++;
 
@@ -744,6 +729,7 @@ void VairiantGraph::addEdge(std::vector<ReadVariant> &in_readVariant){
             variant2Iter = std::next(variant1Iter,1);
         }
 
+        //count the ref and alt base amount of the last variant on the read
 	if ( variant1Iter != (*readIter).second.variantVec.end() && variant2Iter == (*readIter).second.variantVec.end() ) {
             std::map<int,VariantEdge*>::iterator posIter = edgeList->find((*variant1Iter).position);
             if( posIter == edgeList->end() ) {
@@ -789,6 +775,7 @@ void VairiantGraph::readCorrection(){
             //block = nodePS->second;
             if( nodePS != bkResult->end() ){
                 if((*bkResult)[refAllele] != 0 ){
+		    //when vaf is 0 or 1, the fakeSnp will be true
                     //VarintType < 0=SNP 1=SV 2=MOD 3=INDEL 4=tandem repeat INDEL >
                     if( fakeSnp == true ){
                         if((*subNodeHP)[refAllele]==0) refCount+=0.01;
@@ -829,6 +816,7 @@ void VairiantGraph::readCorrection(){
             
             for(auto variantIter = (*readIter).variantVec.begin() ; variantIter != (*readIter).variantVec.end() ; variantIter++ ){
                 if( (*variantIter).allele == 0 || (*variantIter).allele == 1){
+		    // when the mmrate is too high, we think it's a fakeRead
                     if( (*readIter).fakeRead == true )
                       (*hpAlleleCountMap)[belongHP][(*variantIter).position][(*variantIter).allele]+=0.01;
                     else

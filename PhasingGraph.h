@@ -61,11 +61,10 @@ struct VariantEdge{
     int currPos;
     SubEdge* alt;
     SubEdge* ref;
-    int refcnt ;
-    int altcnt ;
-    double vaf ;
-    int coverage ;
-    int vaf_fake_count ;
+    int refcnt ; // count the ref base amount
+    int altcnt ; // count the alt base amount
+    double vaf ; // count the vaf of the left snp
+    int coverage ; // count the coverge on the snp
     
     VariantEdge(int currPos);
     // node pair 
@@ -126,7 +125,7 @@ class VairiantGraph{
 
     public:
     
-        VairiantGraph(std::string &ref, PhasingParameters &params, SnpParser &snpFile, std::string chrName);
+        VairiantGraph(std::string &ref, PhasingParameters &params);
         ~VairiantGraph();
     
         void addEdge(std::vector<ReadVariant> &in_readVariant);
