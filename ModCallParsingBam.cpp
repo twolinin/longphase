@@ -93,7 +93,6 @@ void MethBamParser::detectMeth(std::string chrName, int chr_len, htsThreadPool &
         bam_hdr_destroy(bamHdr);
         bam_destroy1(aln);
         sam_close(fp_in);
-        hts_tpool_destroy(threadPool.pool);
     }
 }
 
@@ -551,10 +550,10 @@ void MethylationGraph::addEdge(std::vector<ReadVariant> &in_readVariant){
 
                 // this allele support ref
                 if( (*variant1Iter).allele == 0 )
-                    (*edgeList)[(*variant1Iter).position]->ref->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).read_name,0,1);
+                    (*edgeList)[(*variant1Iter).position]->ref->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).read_name,0,1,false);
                 // this allele support alt
                 if( (*variant1Iter).allele == 1 )
-                    (*edgeList)[(*variant1Iter).position]->alt->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).read_name,0,1);
+                    (*edgeList)[(*variant1Iter).position]->alt->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).read_name,0,1,false);
                 
                 // next snp
                 variant2Iter++;

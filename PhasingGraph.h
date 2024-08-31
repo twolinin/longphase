@@ -32,7 +32,7 @@ class SubEdge{
         
         void destroy();
         
-        void addSubEdge(int currentQuality, Variant connectNode, std::string readName, int baseQuality, double edgeWeight);
+        void addSubEdge(int currentQuality, Variant connectNode, std::string readName, int baseQuality, double edgeWeight,bool fakeRead);
         std::pair<float,float> BestPair(int targetPos);
         float getRefReadCount(int targetPos);
         float getAltReadCount(int targetPos);        
@@ -61,12 +61,17 @@ struct VariantEdge{
     int currPos;
     SubEdge* alt;
     SubEdge* ref;
-
+    int refcnt ; // count the ref base amount
+    int altcnt ; // count the alt base amount
+    double vaf ; // count the vaf of the left snp
+    int coverage ; // count the coverge on the snp
+    
     VariantEdge(int currPos);
     // node pair 
     std::pair<PosAllele,PosAllele> findBestEdgePair(int targetPos, bool isONT, double diffRatioThreshold, bool debug, std::map<int,int> &variantType, VoteResult &vote);
     // number of read of two node. AA and AB combination
     std::pair<float,float> findNumberOfRead(int targetPos);
+    bool get_fakeSnp();
 };
 
 
