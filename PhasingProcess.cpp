@@ -97,14 +97,16 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
             continue;
         }
 
-	// fetch chromosome string
+	    // fetch chromosome string
         std::string chr_reference = fastaParser.chrString.at(*chrIter);
         // create a bam parser object and prepare to fetch varint from each vcf file
-	BamParser *bamParser = new BamParser((*chrIter), params.bamFile, snpFile, svFile, modFile, chr_reference);
+	    BamParser *bamParser = new BamParser((*chrIter), params.bamFile, snpFile, svFile, modFile, chr_reference);
         // use to store variant
         std::vector<ReadVariant> readVariantVec;
+        // use to store clip count
+        ClipCount clipCount;
         // run fetch variant process
-        bamParser->direct_detect_alleles(lastSNPpos, threadPool, params, readVariantVec , chr_reference);
+        bamParser->direct_detect_alleles(lastSNPpos, threadPool, params, readVariantVec, clipCount, chr_reference);
         // free memory
         delete bamParser;
         
@@ -117,11 +119,17 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
         if( readVariantVec.size() == 0 ){
             continue;
         }
-        
+        Clip *clip = new Clip((*chrIter), clipCount);
+        clip->getCNVInterval(clipCount);
+
+        /*for(std::vector<std::pair<int, int>>::iterator CNVIter = clip->smallCNVMap.begin(); CNVIter != clip->smallCNVMap.end(); CNVIter++){
+            std::cout << "smallCNV:" << "\t" << clip->getChr() << "\t" << CNVIter->first << "\t" << CNVIter->second << "\n";
+        }*/
+
         // create a graph object and prepare to phasing.
-        VairiantGraph *vGraph = new VairiantGraph(chr_reference, params);
+        VairiantGraph *vGraph = new VairiantGraph(chr_reference, params, (*chrIter));
         // trans read-snp info to edge info
-        vGraph->addEdge(readVariantVec);
+        vGraph->addEdge(readVariantVec, *clip);
         // run main algorithm
         vGraph->phasingProcess();
         // push result to phasingResult

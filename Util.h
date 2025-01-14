@@ -62,6 +62,7 @@ struct Variant{
     int allele;
     int quality;
     bool underHomopolymer;
+    std::vector<std::pair<int, char>> variantBases;
 };
 
 struct ReadVariant{
@@ -81,7 +82,8 @@ struct ReadVariant{
     std::string BX_tag;
     bool is_reverse;
     bool fakeRead;
-    
+    std::map<int, int> cnv_mmrate_map;
+
     std::vector<Variant> variantVec;
     
     void sort();

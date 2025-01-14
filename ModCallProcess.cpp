@@ -53,10 +53,10 @@ ModCallProcess::ModCallProcess(ModCallParameters params){
         methbamparser->judgeMethGenotype(chrName, readVariantVec, fReadVariantVec, rReadVariantVec);
         MethylationGraph *fGraph = new MethylationGraph(params);
         MethylationGraph *rGraph = new MethylationGraph(params);
-        fGraph->addEdge(fReadVariantVec);
+        fGraph->addEdge(fReadVariantVec, chrName);
         fGraph->connectResults(chrName, (*passPosition));
         
-        rGraph->addEdge(rReadVariantVec);
+        rGraph->addEdge(rReadVariantVec, chrName);
         rGraph->connectResults(chrName, (*passPosition));
         
         fGraph->destroy();

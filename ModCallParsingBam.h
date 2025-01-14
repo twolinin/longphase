@@ -118,7 +118,7 @@ class MethylationGraph{
         MethylationGraph(ModCallParameters &params);
         ~MethylationGraph();
         
-        void addEdge(std::vector<ReadVariant> &readVariant);
+        void addEdge(std::vector<ReadVariant> &readVariant, std::string chrName);
         void connectResults(std::string chrName, std::map<int,std::vector<int>> &passPosition);
         
         void destroy();

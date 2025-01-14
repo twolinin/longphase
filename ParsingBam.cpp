@@ -25,7 +25,7 @@ FastaParser::FastaParser(std::string fastaFile,  std::vector<std::string> chrNam
     fai = fai_load(fastaFile.c_str());
     
     // iterating all chr
-    #pragma omp parallfel for schedule(dynamic) num_threads(numThreads)
+    //#pragma omp parallel for schedule(dynamic) num_threads(numThreads)
     for(std::vector<std::string>::iterator iter = chrName.begin() ; iter != chrName.end() ; iter++){
         
         int index = iter - chrName.begin();
@@ -986,7 +986,7 @@ BamParser::~BamParser(){
     delete currentMod;
 }
 
-void BamParser::direct_detect_alleles(int lastSNPPos, htsThreadPool &threadPool, PhasingParameters params, std::vector<ReadVariant> &readVariantVec, const std::string &ref_string){
+void BamParser::direct_detect_alleles(int lastSNPPos, htsThreadPool &threadPool, PhasingParameters params, std::vector<ReadVariant> &readVariantVec, ClipCount &clipCount, const std::string &ref_string){
     
     // record SNP start iter
     std::map<int, RefAlt>::iterator tmpFirstVariantIter = firstVariantIter;
@@ -1036,7 +1036,7 @@ void BamParser::direct_detect_alleles(int lastSNPPos, htsThreadPool &threadPool,
                 continue;
             }
 
-            get_snp(*bamHdr,*aln,readVariantVec, ref_string, params.isONT, params.mismatchRate);
+            get_snp(*bamHdr, *aln, readVariantVec, clipCount, ref_string, params.isONT, params.mismatchRate);
         }
         hts_idx_destroy(idx);
         bam_hdr_destroy(bamHdr);
@@ -1046,7 +1046,106 @@ void BamParser::direct_detect_alleles(int lastSNPPos, htsThreadPool &threadPool,
     
 }
 
-void BamParser::get_snp(const bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<ReadVariant> &readVariantVec, const std::string &ref_string, bool isONT, double mismatchRate){
+enum CIGAR_OP
+{
+    MATCH = 0,     // alignment match (can be a sequence match or mismatch)
+    INSERTION = 1, // insertion to the reference
+    DELETION = 2,  // deletion from the reference
+    SKIP = 3,      // skipped region from the reference
+    SOFT_CLIP = 4, // soft clipping
+    HARD_CLIP = 5, // hard clipping
+    N = 6,         // skipped region of unknown type
+    EQ = 7,        // sequence match
+    X = 8,         // sequence mismatch
+};
+
+int processCigarOperation(const uint32_t *cigar, int &cigarIndex, int cigarIndexEnd, int direction, int &remainingBases, int &currReadPos, int &refPos, int &cigarOp){
+    cigarIndex += direction;
+
+    while (cigarIndex < cigarIndexEnd && cigarIndex >= 0){
+        cigarOp = bam_cigar_op(cigar[cigarIndex]);
+        int cigarOpLen = bam_cigar_oplen(cigar[cigarIndex]);
+
+        if (cigarOp == MATCH || cigarOp == SKIP || cigarOp == N || cigarOp == EQ || cigarOp == X){
+            remainingBases += cigarOpLen;
+            return 1;
+        }
+        else if (cigarOp == INSERTION){
+            currReadPos += cigarOpLen * direction;
+        }
+        else if (cigarOp == DELETION){
+            refPos += cigarOpLen * direction;
+        }
+        else if (cigarOp == SOFT_CLIP || cigarOp == HARD_CLIP){
+            return 0;
+        }
+        else {
+            return 0;
+        }
+        cigarIndex += direction;
+
+    }
+    return 0;
+}
+
+std::vector<std::pair<int, char>> get_window_alt_order(const uint32_t *cigar, int cigarIndex, const bam1_t &aln, const std::string &refString, int readPos, int remainingBases, int refPos, int direction, int windowSize = 100){
+    const int cigarIndexEnd = aln.core.n_cigar;
+    const int readLen = aln.core.l_qseq;
+    const int refLen = refString.length();
+    int cigarOp = bam_cigar_op(cigar[cigarIndex]);
+    const uint8_t *seq = bam_get_seq(&aln);
+    std::vector<std::pair<int, char>> variantBases;
+
+    
+    for (int i = 1; i <= windowSize; i++){
+        remainingBases-- ;
+        if (remainingBases == 0){
+            if(!processCigarOperation(cigar, cigarIndex, cigarIndexEnd, direction, remainingBases, readPos, refPos, cigarOp)){
+                return variantBases;
+            }
+        }
+        if (cigarOp == DELETION || cigarOp == SKIP || cigarOp == N){
+            continue;
+        }
+        readPos += direction;
+        refPos += direction;
+        if (readPos > readLen || refPos > refLen || readPos < 0 || refPos < 0) {
+            return variantBases;
+        }
+        char read_base = seq_nt16_str[bam_seqi(seq, readPos)];
+        char ref_base = refString[refPos];
+        if (read_base != ref_base){
+            variantBases.push_back(std::make_pair(i * direction, read_base));
+        }
+    }
+    return variantBases;
+}
+
+std::vector<std::pair<int, char>> get_windows_alt(const uint32_t *cigar, int cigarIndex, const bam1_t &aln, const std::string &refString, int readPos, int readOffset, int refPos, int windowSize = 200){
+    const int cigarOpLen = bam_cigar_oplen(cigar[cigarIndex]);
+    const int cigarOp = bam_cigar_op(cigar[cigarIndex]);
+    int ForwardRemainingBases = 0;
+    int ReverseRemainingBases = 0;
+    readPos += readOffset;
+    if(cigarOp != INSERTION){
+        ForwardRemainingBases = cigarOpLen - readOffset;
+        ReverseRemainingBases = readOffset;
+    }
+
+
+    std::vector<std::pair<int, char>> variantBases;
+
+    auto appendBases = [&](int direction, int buffer) {
+        auto bases = get_window_alt_order(cigar, cigarIndex, aln, refString, readPos, buffer, refPos, direction, windowSize);
+        variantBases.insert(variantBases.end(), bases.begin(), bases.end());
+    };
+
+    appendBases(-1, ReverseRemainingBases);
+    appendBases( 1, ForwardRemainingBases);
+    return variantBases;
+}
+
+void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln, std::vector<ReadVariant> &readVariantVec, ClipCount &clipCount, const std::string &ref_string, bool isONT, double mismatchRate){
 
     ReadVariant *tmpReadResult = new ReadVariant();
     (*tmpReadResult).read_name = bam_get_qname(&aln);
@@ -1191,7 +1290,7 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<R
                             allele = 0;
                         else if(base == (*currentVariantIter).second.Alt[0])
                             allele = 1;
-
+                        
                         base_q = bam_get_qual(&aln)[query_pos + offset];
                     } 
             
@@ -1213,9 +1312,9 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<R
                         }
                         // using this quality to identify indel
                         base_q = -4;
-                        
-			// using this quality to identify danger indel
-			if ( (*currentVariantIter).second.is_danger ) {
+
+                        // using this quality to identify danger indel
+                        if ( (*currentVariantIter).second.is_danger ) {
                             base_q = -5 ;
                         }
                     } 
@@ -1233,8 +1332,8 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<R
                         // using this quality to identify indel
                         base_q = -4;
 
-			// using this quality to identify danger indel
-			if ( (*currentVariantIter).second.is_danger ) {
+                        // using this quality to identify danger indel
+                        if ( (*currentVariantIter).second.is_danger ) {
                             base_q = -5 ;
                         }
                     } 
@@ -1242,6 +1341,12 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<R
                     if( allele != -1 ){
                         // record snp result
                         Variant *tmpVariant = new Variant(variantPos, allele, base_q);
+                        std::vector<std::pair<int, char>> variantBases = get_windows_alt(cigar, i, aln, ref_string, query_pos, offset, variantPos);
+                        
+                        // if(allele == 1 && variantPos == 10176171){
+                        //     std::cout << variantBases.size() << std::endl;
+                        // }
+                        (*tmpVariant).variantBases = variantBases;
                         (*tmpReadResult).variantVec.push_back( (*tmpVariant) );
                         delete tmpVariant;                        
                     }
@@ -1261,12 +1366,12 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<R
         if( cigar_op == 0 || cigar_op == 7 || cigar_op == 8 ){
             query_pos += cigar_oplen;
             ref_pos += cigar_oplen;
-	    cigar_total_oplen += cigar_oplen;
+	        cigar_total_oplen += cigar_oplen;
         }
         // 1: insertion to the reference
         else if( cigar_op == 1 ){
             query_pos += cigar_oplen;
-	    cigar_indel_oplen += cigar_oplen;
+	        cigar_indel_oplen += cigar_oplen;
             cigar_total_oplen += cigar_oplen;
         }
         else if( cigar_op == 2 ){
@@ -1337,7 +1442,7 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<R
                 }
             }
             ref_pos += cigar_oplen;
-	    cigar_del_oplen += cigar_oplen;
+	        cigar_del_oplen += cigar_oplen;
             cigar_indel_oplen += cigar_oplen;
             cigar_total_oplen += cigar_oplen;
         }
@@ -1349,13 +1454,15 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<R
         // 4: soft clipping (clipped sequences present in SEQ)
         else if( cigar_op == 4 ){
             query_pos += cigar_oplen;
-	    cigar_clip_oplen += cigar_oplen;
+	        cigar_clip_oplen += cigar_oplen;
             cigar_total_oplen += cigar_oplen;
+            getClip(ref_pos, i, cigar_oplen, clipCount);
         }
         // 5: hard clipping (clipped sequences NOT present in SEQ)
 	else if( cigar_op == 5 ){
             cigar_clip_oplen += cigar_oplen;
             cigar_total_oplen += cigar_oplen;
+            getClip(ref_pos, i, cigar_oplen, clipCount);
         }
 	// 6: padding (silent deletion from padded reference)
 	else if(cigar_op == 6 ){
@@ -1372,19 +1479,31 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<R
 
     // if the mmrate is too high mark the read as fakeRead
     if( mmrate > mismatchRate ){ 
-      (*tmpReadResult).fakeRead = true;
+      (*tmpReadResult).fakeRead = false;
     }
     else{
       (*tmpReadResult).fakeRead = false;
     }
     //float error_rate = nm_value / length;
-    
+
     if( (*tmpReadResult).variantVec.size() > 0 )
       readVariantVec.push_back((*tmpReadResult));
     
     //std::cout<< "readname: " << bam_get_qname(&aln) << "\tnm_value: " << nm_value << "\tcigar_total_oplen: " << cigar_total_oplen << "\tcigar_clip_oplen: " << cigar_clip_oplen << "\tcigar_indel_oplen: " << cigar_indel_oplen << "\tmm_rate: " << mm_rate << "\n";
     //std::cout << bamHdr.target_name[aln.core.tid] << "\treadname: " << bam_get_qname(&aln) << "\t" << mmrate << "\n";
+    //std::cout << bamHdr.target_name[aln.core.tid] << "\t" << bam_get_qname(&aln) << "\t" << aln.core.pos << "\t" << aln.core.pos + length << "\t" << length << "\n";
     delete tmpReadResult;
+}
+
+void BamParser::getClip(int pos, int clipFrontBack, int len, ClipCount &clipCount){
+    if (len > 5){
+        if (clipFrontBack == FRONT){
+            clipCount[pos][FRONT]++;
+        }
+        else {
+            clipCount[pos][BACK]++;
+        }
+    }
 }
 
 METHParser::METHParser(PhasingParameters &in_params, SnpParser &in_snpFile, SVParser &in_svFile):commandLine(false){

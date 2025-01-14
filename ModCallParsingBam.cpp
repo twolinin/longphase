@@ -494,7 +494,7 @@ MethylationGraph::MethylationGraph(ModCallParameters &in_params){
 MethylationGraph::~MethylationGraph(){
 }
 
-void MethylationGraph::addEdge(std::vector<ReadVariant> &in_readVariant){
+void MethylationGraph::addEdge(std::vector<ReadVariant> &in_readVariant, std::string chrName){
     readVariant = &in_readVariant;
     // iter all read
     for(std::vector<ReadVariant>::iterator readIter = in_readVariant.begin() ; readIter != in_readVariant.end() ; readIter++ ){
@@ -550,10 +550,10 @@ void MethylationGraph::addEdge(std::vector<ReadVariant> &in_readVariant){
 
                 // this allele support ref
                 if( (*variant1Iter).allele == 0 )
-                    (*edgeList)[(*variant1Iter).position]->ref->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).read_name,0,1,false);
+                    (*edgeList)[(*variant1Iter).position]->ref->addSubEdge((*variant1Iter).quality, (*variant2Iter), (*readIter).read_name, 0, 1);
                 // this allele support alt
                 if( (*variant1Iter).allele == 1 )
-                    (*edgeList)[(*variant1Iter).position]->alt->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).read_name,0,1,false);
+                    (*edgeList)[(*variant1Iter).position]->alt->addSubEdge((*variant1Iter).quality, (*variant2Iter), (*readIter).read_name, 0, 1);
                 
                 // next snp
                 variant2Iter++;
