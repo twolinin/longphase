@@ -615,58 +615,67 @@ void VairiantGraph::addEdge(std::vector<ReadVariant> &in_readVariant, Clip &clip
     std::vector<int> delReadIdx;
 
     // Check for overlaps among different alignments of a read and filter out the shorter overlapping alignments.
-    for(int readIter = 0 ; readIter < (int)in_readVariant.size() ; readIter++ ){
+    for (int readIter = 0; readIter < (int)in_readVariant.size(); readIter++) {
+        int is_toDelete = 0;
         std::string readName = in_readVariant[readIter].read_name;
-        int firstVariantPos = in_readVariant[readIter].variantVec[0].position;
-        int lastVariantPos  = in_readVariant[readIter].variantVec[in_readVariant[readIter].variantVec.size()-1].position;
-        
-        auto rangeIter = alignRange.find(readName);
-        // this read name appears for the first time
-        if( rangeIter == alignRange.end() ){
-            alignRange[readName]=std::make_pair(firstVariantPos,lastVariantPos);
-        }
-        // the read appears more than once, check if the alignments overlap
-        else{
-            // overlap
-            if( alignRange[readName].first <= firstVariantPos && firstVariantPos <= alignRange[readName].second ){
-                double alignStart   = std::min(alignRange[readName].first, firstVariantPos);
-                double alignEnd     = std::max(alignRange[readName].second, lastVariantPos);
-                double alignSpan    = alignEnd - alignStart + 1;
-                double overlapStart = std::max(alignRange[readName].first, firstVariantPos);
-                double overlapEnd   = std::min(alignRange[readName].second, lastVariantPos);
-                double overlapLen   = overlapEnd - overlapStart + 1;
-                double overlapRatio = overlapLen / alignSpan;
-                
-                //filtering highly overlapping alignments.
-                if( overlapRatio >= params->overlapThreshold ){
-                    int alignLen1 = alignRange[readName].second - alignRange[readName].first + 1;
-                    int alignLen2 = lastVariantPos - firstVariantPos + 1;
-                    
-                    // filter shorter alignment
-                    // current alignment is shorter
-                    if( alignLen2 <= alignLen1 ){
-                        delReadIdx.push_back(readIter);
-                    }
-                    // previous alignment is shorter
-                    else{
-                        // iterate all previous alignments
-                        for(int iter = 0 ; iter < (int)readIdxVec[readName].size() ; iter++ ){
-                            delReadIdx.push_back(readIdxVec[readName][iter]);
-                        }
+        int firstVariantPos = in_readVariant[readIter].variantVec.front().position;
+        int lastVariantPos = in_readVariant[readIter].variantVec.back().position;
+        auto& readRange = alignRange[readName];
+        auto& readIdxVecRef = readIdxVec[readName];
 
-                        // update range
-                        alignRange[readName].first  = firstVariantPos;
-                        alignRange[readName].second = lastVariantPos;
-                        readIdxVec[readName].clear();
-                        readIdxVec[readName].push_back(readIter);
+        // Initialize readRange if it's the first appearance
+        if (alignRange.find(readName) == alignRange.end()) {
+            readRange = {firstVariantPos,lastVariantPos};
+        } else {
+            // Check for overlaps
+            while (readRange.first <= firstVariantPos && firstVariantPos <= readRange.second) {
+                if (lastVariantPos < readRange.second) {
+                    is_toDelete = 1;
+                    delReadIdx.push_back(readIter);
+                    break;
+                }
+
+                int preAlignIdx = readIdxVecRef.size() - 1;
+                if (preAlignIdx < 0 ) break;
+
+                const auto& previousAlignment = in_readVariant[readIdxVecRef[preAlignIdx]];
+                const auto& prevVariantVec = previousAlignment.variantVec;
+                int prevStart = prevVariantVec.front().position;
+                int prevEnd = prevVariantVec.back().position;
+
+                double overlapStart = std::max(prevStart, firstVariantPos);
+                double overlapEnd = std::min(prevEnd, lastVariantPos);
+                if (overlapStart > overlapEnd) break; // No overlap
+                double overlapLen = overlapEnd - overlapStart + 1;
+
+                double alignStart = std::max(prevEnd, lastVariantPos);
+                double alignEnd = std::min(prevStart, firstVariantPos);
+                double alignSpan = alignStart - alignEnd + 1;
+                double overlapRatio = overlapLen / alignSpan;
+
+                // Filtering highly overlapping alignments
+                if (overlapRatio >= params->overlapThreshold) {
+                    int alignLen1 = prevEnd - prevStart + 1;
+                    int alignLen2 = lastVariantPos - firstVariantPos + 1;
+
+                    if (alignLen2 <= alignLen1) {
+                        is_toDelete = 1;
+                        delReadIdx.push_back(readIter); // Current alignment is shorter
+                        break;
+                    } else {
+                        delReadIdx.push_back(readIdxVecRef[preAlignIdx]); // Previous alignment is shorter
+                        readIdxVecRef.pop_back();
+                        readRange.second = (preAlignIdx > 0) ? in_readVariant[readIdxVecRef[preAlignIdx - 1]].variantVec.back().position : firstVariantPos;
                     }
-                    continue;
+                } else {
+                    break;
                 }
             }
             // update range
-            alignRange[readName].second = lastVariantPos;
+            readRange.second = lastVariantPos;
         }
-        readIdxVec[readName].push_back(readIter);
+        if (is_toDelete == 0 )
+            readIdxVecRef.push_back(readIter);
     }
 
     // sort read index
