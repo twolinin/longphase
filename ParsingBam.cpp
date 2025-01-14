@@ -1183,13 +1183,6 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln, std::vector<
     // set cigar pointer and number of cigar
     uint32_t *cigar = bam_get_cigar(&aln);
     int aln_core_n_cigar = aln.core.n_cigar;
-    uint8_t* nm_tag = bam_aux_get(&aln, "NM"); // get the nm_tag in the bam
-    int nm_value = bam_aux2i(nm_tag); // get the nm_value in the read
-
-    int cigar_del_oplen = 0; // count the total deletion length
-    int cigar_indel_oplen = 0; // count the total insertion length
-    int cigar_clip_oplen = 0; // count the total clip length (hard+soft)
-    int cigar_total_oplen = 0; // count the total cigar length
     
     // reading cigar to detect varaint on this read
     for(int i = 0; i < aln_core_n_cigar ; i++ ){
@@ -1290,7 +1283,7 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln, std::vector<
                             allele = 0;
                         else if(base == (*currentVariantIter).second.Alt[0])
                             allele = 1;
-                        
+
                         base_q = bam_get_qual(&aln)[query_pos + offset];
                     } 
             
@@ -1366,13 +1359,10 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln, std::vector<
         if( cigar_op == 0 || cigar_op == 7 || cigar_op == 8 ){
             query_pos += cigar_oplen;
             ref_pos += cigar_oplen;
-	        cigar_total_oplen += cigar_oplen;
         }
         // 1: insertion to the reference
         else if( cigar_op == 1 ){
             query_pos += cigar_oplen;
-	        cigar_indel_oplen += cigar_oplen;
-            cigar_total_oplen += cigar_oplen;
         }
         else if( cigar_op == 2 ){
             
@@ -1442,56 +1432,33 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln, std::vector<
                 }
             }
             ref_pos += cigar_oplen;
-	        cigar_del_oplen += cigar_oplen;
-            cigar_indel_oplen += cigar_oplen;
-            cigar_total_oplen += cigar_oplen;
         }
         // 3: skipped region from the reference
         else if( cigar_op == 3 ){
             ref_pos += cigar_oplen;
-            cigar_total_oplen += cigar_oplen;
         }
         // 4: soft clipping (clipped sequences present in SEQ)
         else if( cigar_op == 4 ){
             query_pos += cigar_oplen;
-	        cigar_clip_oplen += cigar_oplen;
-            cigar_total_oplen += cigar_oplen;
             getClip(ref_pos, i, cigar_oplen, clipCount);
         }
         // 5: hard clipping (clipped sequences NOT present in SEQ)
 	else if( cigar_op == 5 ){
-            cigar_clip_oplen += cigar_oplen;
-            cigar_total_oplen += cigar_oplen;
             getClip(ref_pos, i, cigar_oplen, clipCount);
         }
 	// 6: padding (silent deletion from padded reference)
 	else if(cigar_op == 6 ){
-            cigar_total_oplen += cigar_oplen;
+
         }
         else{
             std::cerr<< "alignment find unsupported CIGAR operation from read: " << bam_get_qname(&aln) << "\n";
             exit(1);
         }
     }
-    int num_of_mismatch = nm_value - cigar_indel_oplen; // count the num of mismatch without indel
-    int length = cigar_total_oplen - cigar_clip_oplen - cigar_del_oplen; // count the legth of read without clipping
-    double mmrate = ((float)num_of_mismatch / (float)length)*100;
-
-    // if the mmrate is too high mark the read as fakeRead
-    if( mmrate > mismatchRate ){ 
-      (*tmpReadResult).fakeRead = false;
-    }
-    else{
-      (*tmpReadResult).fakeRead = false;
-    }
-    //float error_rate = nm_value / length;
 
     if( (*tmpReadResult).variantVec.size() > 0 )
       readVariantVec.push_back((*tmpReadResult));
     
-    //std::cout<< "readname: " << bam_get_qname(&aln) << "\tnm_value: " << nm_value << "\tcigar_total_oplen: " << cigar_total_oplen << "\tcigar_clip_oplen: " << cigar_clip_oplen << "\tcigar_indel_oplen: " << cigar_indel_oplen << "\tmm_rate: " << mm_rate << "\n";
-    //std::cout << bamHdr.target_name[aln.core.tid] << "\treadname: " << bam_get_qname(&aln) << "\t" << mmrate << "\n";
-    //std::cout << bamHdr.target_name[aln.core.tid] << "\t" << bam_get_qname(&aln) << "\t" << aln.core.pos << "\t" << aln.core.pos + length << "\t" << length << "\n";
     delete tmpReadResult;
 }
 

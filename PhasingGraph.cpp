@@ -1,5 +1,5 @@
 #include "PhasingGraph.h"
-
+#include <numeric>
 //SubEdge
 
 SubEdge::SubEdge():readCount(0){ 
@@ -161,9 +161,6 @@ VariantEdge::VariantEdge(int inCurrPos){
     currPos = inCurrPos;
     alt = new SubEdge();
     ref = new SubEdge();
-    refcnt = 0; 
-    altcnt = 0; 
-    coverage = 0;  
 }
 
 template <typename T>

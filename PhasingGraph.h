@@ -104,17 +104,11 @@ struct VariantEdge{
     int currPos;
     SubEdge* alt;
     SubEdge* ref;
-    int refcnt ; // count the ref base amount
-    int altcnt ; // count the alt base amount
-    double vaf ; // count the vaf of the left snp
-    int coverage ; // count the coverge on the snp
-    
     VariantEdge(int currPos);
     // node pair 
     std::pair<PosAllele,PosAllele> findBestEdgePair(int targetPos, bool isONT, double diffRatioThreshold, bool debug, std::map<int,int> &variantType, VoteResult &vote);
     // number of read of two node. AA and AB combination
     std::pair<float,float> findNumberOfRead(int targetPos);
-    bool get_fakeSnp();
 };
 
 
@@ -129,12 +123,6 @@ struct EdgeResult{
     int ra;
     int ar;
     int aa;
-};
-
-struct readInfo{
-    std::string readName;
-    int mapping_quality;
-    double mm_rate;
 };
 
 struct CnvStatistics{
@@ -209,7 +197,6 @@ class VairiantGraph{
         void destroy();
         
 };
-
 
 
 

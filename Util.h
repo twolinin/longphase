@@ -81,7 +81,6 @@ struct ReadVariant{
     int reference_start;
     std::string BX_tag;
     bool is_reverse;
-    bool fakeRead;
     std::map<int, int> cnv_mmrate_map;
 
     std::vector<Variant> variantVec;
