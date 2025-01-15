@@ -530,9 +530,6 @@ void VairiantGraph::calculateCnvMismatchRate(std::vector<ReadVariant>& in_readVa
     //std::map<int, int> cnvMap = clip.getCnvMap();
     for(auto& read : in_readVariant){
         read.sort(); 
-        for(const auto& cnv : clip.cnvMap){
-            read.cnv_mmrate_map[cnv.first] = 0;
-        }
         for(const auto& variant : read.variantVec){
             for(const auto& cnv : clip.cnvMap){
                 if(isPositionInRange(variant.position, cnv.first, cnv.second) && variant.allele == 1) {
@@ -548,7 +545,7 @@ void VairiantGraph::aggregateCnvReadMismatchRate(const std::vector<ReadVariant>&
     for(const auto& read : in_readVariant){
         for(const auto& variant : read.variantVec){
             for(const auto& cnv : clip.cnvMap){
-                if(isPositionInRange(variant.position, cnv.first, cnv.second)){
+                if(isPositionInRange(variant.position, cnv.first, cnv.second) && read.cnv_mmrate_map.find(cnv.first) != read.cnv_mmrate_map.end()){
                     cnvReadMmrate[variant.position][variant.allele].push_back(read.cnv_mmrate_map.at(cnv.first));
                 }
             }
