@@ -485,11 +485,9 @@ void VairiantGraph::edgeConnectResult(){
     delete phasedBlocks;
 }
 
-VairiantGraph::VairiantGraph(std::string &in_ref, PhasingParameters &in_params, std::string &chrName){
+VairiantGraph::VairiantGraph(std::string &in_ref, PhasingParameters &in_params){
     params=&in_params;
     ref=&in_ref;
-    this->chrName = chrName;
-    variantPosType = new std::map<int,int>;
     totalVariantInfo = new std::map<int,ReadBaseMap*>;
     edgeList = new std::map<int,VariantEdge*>;
     bkResult = new std::map<PosAllele,int>;
@@ -516,7 +514,6 @@ void VairiantGraph::destroy(){
         delete variantIter->second;
     }
     
-    delete variantPosType;
     delete totalVariantInfo;
     delete edgeList;
     delete bkResult;
@@ -532,7 +529,7 @@ bool VairiantGraph::isPositionInRange(int position, int start, int end){
 void VairiantGraph::calculateCnvMismatchRate(std::vector<ReadVariant>& in_readVariant, Clip &clip){
     //std::map<int, int> cnvMap = clip.getCnvMap();
     for(auto& read : in_readVariant){
-        read.sort();        
+        read.sort(); 
         for(const auto& cnv : clip.cnvMap){
             read.cnv_mmrate_map[cnv.first] = 0;
         }
@@ -568,7 +565,7 @@ void VairiantGraph::calculateAverageMismatchRate(const Clip& clip, const std::ma
                 auto alt_iter = variant.second.find(1);
                 if(ref_iter != variant.second.end() && alt_iter != variant.second.end()){
                     double AvgRefCnvReadMiss = calculateMean(ref_iter->second);
-                    double AvgAltCnvReadMiss = calculateMean(alt_iter->second);    
+                    double AvgAltCnvReadMiss = calculateMean(alt_iter->second);
                     if(AvgRefCnvReadMiss != 0 && AvgAltCnvReadMiss != 0){
                         missRateMap[variant.first] = AvgAltCnvReadMiss / (AvgRefCnvReadMiss + AvgAltCnvReadMiss);
                     }
@@ -697,35 +694,15 @@ void VairiantGraph::addEdge(std::vector<ReadVariant> &in_readVariant, Clip &clip
     calculateAverageMismatchRate(clip, cnvStats.cnvReadMmrate, cnvStats.missRateMap);
     filterHighMismatchVariants(in_readVariant, clip, cnvStats.missRateMap);
 
-    //position, allele, count
-    std::map<int, std::map<int, int>> posAlleleCount;
-    //position, allele, base, count
-    std::map<int, std::map<int, std::map<int, int>>> variantBases;
     int readCount=0;
     // merge alignment
     for(std::vector<ReadVariant>::iterator readIter = in_readVariant.begin() ; readIter != in_readVariant.end() ; readIter++ ){
-
-        //std::map<std::string,ReadVariant>::iterator posIter = mergeReadMap.find((*readIter).read_name) ;
-
-
  
         // Creating a pseudo read which allows filtering out variants that should not be phased
         //ReadVariant tmpRead;
         // Visiting all the variants on the read
         for( auto variant : (*readIter).variantVec ){
-            readCount++;  
-            posAlleleCount[variant.position][variant.allele]++;
-            for(auto base : variant.variantBases){
-                variantBases[variant.position][variant.allele][base.first]++;
-            }
-            if( variant.quality <= UNDEFINED ){
-                (*variantPosType)[variant.position] = variant.quality;
-                
-            }
-            else{
-                (*variantPosType)[variant.position] = SNP_HET;
-            }
-
+            readCount++;
             // modification
             if( variant.quality == -2 || variant.quality == -3 ){
                 (*variantType)[variant.position] = 2;
@@ -770,102 +747,10 @@ void VairiantGraph::addEdge(std::vector<ReadVariant> &in_readVariant, Clip &clip
             
             (*(*totalVariantInfo)[variant.position])[(*readIter).read_name] = variant.quality;
         }
-    }  
+    }   
 
-    /*std::map<int, int> sameCountMap;
-    int up = 0;
-    std::string logFileName = "/bip8_disk/pochung112/test-cluster/" + this->chrName + "_log.txt";
-    std::ofstream logFile(logFileName);
-    for(auto variantIter = variantBases.begin() ; variantIter != variantBases.end() ; variantIter++){
-        enum Allele{
-            REF = 0,
-            ALT = 1
-        };
-        auto alleleIter = variantIter->second;
-        int alleleCount = alleleIter.size();
-        auto refIter = alleleIter.find(REF);
-        auto altIter = alleleIter.find(ALT);
-        if(altIter == alleleIter.end()){
-            continue;
-        }
-
-        int alleleBaseCount = posAlleleCount[variantIter->first][ALT];
-        int sameCount = 0;
-        for(auto baseIter = altIter->second.begin() ; baseIter != altIter->second.end() ; baseIter++){
-            int aa = baseIter->second;
-
-            int ra = 0;
-            if(refIter != alleleIter.end()){
-                auto refBaseIter = refIter->second.find(baseIter->first);
-                ra = (refBaseIter != refIter->second.end()) ? refBaseIter->second : 0; // 如果找不到，預設為0
-            }
-            double condition1 = static_cast<double>(aa) / alleleBaseCount;
-            double condition2 = static_cast<double>(aa) / (ra + aa);
-            
-            if(1 >= condition1 && condition1 >= 0.5 && condition2 >= 0.6){
-                sameCount++;
-            }
-        }
-        //logFile << this->chrName << "\t" << variantIter->first << "\t" << (variantIter->first - up) << "\t" << sameCount << "\n";
-        up = variantIter->first;
-        sameCountMap[variantIter->first] = sameCount;
-        
-    }
-    
-
-    for(auto readIter = in_readVariant.begin() ; readIter != in_readVariant.end() ; readIter++){
-        std::vector<int> delVariantIdx;
-
-        for(auto i =0; i < readIter->variantVec.size(); i++){
-            for(auto cnv : clip.cnvMap){
-                if(sameCountMap[readIter->variantVec[i].position] >= 2 && isPositionInRange(readIter->variantVec[i].position, cnv.first, cnv.second)){
-                    // readIter->second.variantVec.erase(readIter->second.variantVec.begin() + i);
-                    //logFile << this->chrName << "\t" << readIter->variantVec[i].position << "\t" << sameCountMap[readIter->variantVec[i].position] << "\n";
-                    delVariantIdx.push_back(i);
-                }
-            }
-        }
-
-        delVariantIdx.push_back((int)readIter->variantVec.size());
-        int saveIter = *(delVariantIdx.begin());
-        for (auto delIter = delVariantIdx.begin(), nextdelIter = std::next(delVariantIdx.begin(), 1); nextdelIter != delVariantIdx.end(); delIter++ , nextdelIter++) {
-            auto nowDelIter = *delIter+1;
-            while (nowDelIter<*nextdelIter){
-                readIter->variantVec[saveIter++]=readIter->variantVec[nowDelIter++];
-            }
-        }
-        readIter->variantVec.erase( std::next(readIter->variantVec.begin(), saveIter), readIter->variantVec.end());
-    
-
-        (*readIter).sort();
-    }*/
-    
-
-    for(std::map<std::string,ReadVariant>::iterator readIter = mergeReadMap.begin() ; readIter != mergeReadMap.end() ; readIter++){
-        std::vector<int> delVariantIdx;
-
-        /*for(auto i =0; i < readIter->second.variantVec.size(); i++){
-            for(auto cnv : clip.cnvMap){
-                if(sameCountMap[readIter->second.variantVec[i].position] >= 2 && isPositionInRange(readIter->second.variantVec[i].position, cnv.first, cnv.second)){
-                    // readIter->second.variantVec.erase(readIter->second.variantVec.begin() + i);
-                    delVariantIdx.push_back(i);
-                }
-            }
-        }
-
-        delVariantIdx.push_back((int)readIter->second.variantVec.size());
-        int saveIter = *(delVariantIdx.begin());
-        for (auto delIter = delVariantIdx.begin(), nextdelIter = std::next(delVariantIdx.begin(), 1); nextdelIter != delVariantIdx.end(); delIter++ , nextdelIter++) {
-            auto nowDelIter = *delIter+1;
-            while (nowDelIter<*nextdelIter){
-                readIter->second.variantVec[saveIter++]=readIter->second.variantVec[nowDelIter++];
-            }
-        }
-        readIter->second.variantVec.erase( std::next(readIter->second.variantVec.begin(), saveIter), readIter->second.variantVec.end());*/
-    
-
+    for(std::map<std::string,ReadVariant>::iterator readIter = mergeReadMap.begin() ; readIter != mergeReadMap.end() ; readIter++){ 
         (*readIter).second.sort();
-
         
         // iter all pair of snp and construct initial graph
         std::vector<Variant>::iterator variant1Iter = readIter->second.variantVec.begin();
@@ -902,11 +787,9 @@ void VairiantGraph::addEdge(std::vector<ReadVariant> &in_readVariant, Clip &clip
             std::map<int,VariantEdge*>::iterator posIter = edgeList->find((*variant1Iter).position);
             if( posIter == edgeList->end() ) {
                 (*edgeList)[(*variant1Iter).position] = new VariantEdge((*variant1Iter).position);
-                //(*edgeList)[(*variant1Iter).position]->vaf = (*currentVariants)[(*variant1Iter).position].vaf ;
             }
         }
     }
-    //logFile.close();
 } 
 
 void VairiantGraph::readCorrection(){
@@ -1237,13 +1120,4 @@ void Clip::getCNVInterval(ClipCount &clipCount){
         }
     }
     clipCount.erase(--clipCount.end());
-
-    /*std::string outFileName = "test/" + this->chr + "-30x-cnvArea.txt";
-    std::ofstream outFile2(outFileName);
-    for(auto areaIter = cnvArea.begin(); areaIter != cnvArea.end() ; areaIter++){
-        for(auto areaIter2 = areaIter->second.begin(); areaIter2 != areaIter->second.end() ; areaIter2++){
-            outFile2 << this->chr << "\t" << areaIter->first << "\t" << areaIter2->first+1 << "\t" << areaIter2->second+1 << "\n";
-        }
-    }
-    outFile2.close();*/
 }

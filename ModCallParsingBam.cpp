@@ -494,7 +494,7 @@ MethylationGraph::MethylationGraph(ModCallParameters &in_params){
 MethylationGraph::~MethylationGraph(){
 }
 
-void MethylationGraph::addEdge(std::vector<ReadVariant> &in_readVariant, std::string chrName){
+void MethylationGraph::addEdge(std::vector<ReadVariant> &in_readVariant){
     readVariant = &in_readVariant;
     // iter all read
     for(std::vector<ReadVariant>::iterator readIter = in_readVariant.begin() ; readIter != in_readVariant.end() ; readIter++ ){

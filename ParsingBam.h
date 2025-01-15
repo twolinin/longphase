@@ -13,29 +13,11 @@
 
 #include <zlib.h>
 
-enum VariantType {
-    UNDEFINED = -1,
-    SNP_HET = -2, // heterozygous Single Nucleotide Polymorphism
-    SNP_HOM = -3, // homozygous Single Nucleotide Polymorphism
-    INDEL_HET = -4, // heterozygous insertion/deletion
-    INDEL_HOM = -5, // homozygous insertion/deletion
-    SV_HET = -6, // heterozygous structure variation
-    SV_HOM = -7, // homozygous structure variation
-    MOD_HET_FORWARD_STRAND = -8, // heterozygous forward strand modification
-    MOD_HET_REVERSE_STRAND = -9, // heterozygous reverse strand modification
-    MOD_HET = -10, // heterozygous modification
-    MOD_HOM = -11, // homozygous modification
-    DANGER_INDEL_HET = -12, // danger heterozygous insertion/deletion
-    DANGER_INDEL_HOM = -13, // danger homozygous insertion/deletion
-};
-
 struct RefAlt{
     std::string Ref;
     std::string Alt;
-    float vaf;
     bool is_reverse;
     bool is_modify;
-    bool is_homozygous;
     bool is_danger;
 };
 
@@ -92,7 +74,7 @@ class SnpParser : public BaseVairantParser{
             
         std::map<int, RefAlt> getVariants(std::string chrName);  
 
-	std::map<int, RefAlt> getVariants_markindel(std::string chrName, const std::string &ref);
+	    std::map<int, RefAlt> getVariants_markindel(std::string chrName, const std::string &ref);
 
         std::vector<std::string> getChrVec();
         
@@ -207,7 +189,7 @@ class BamParser{
         // mod map and iter
         std::map<int, std::map<std::string ,RefAlt> > *currentMod;
         std::map<int, std::map<std::string ,RefAlt> >::iterator firstModIter;
-        void get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln, std::vector<ReadVariant> &readVariantVec, ClipCount &clipCount, const std::string &ref_string, bool isONT, double mismatchRate);
+        void get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln, std::vector<ReadVariant> &readVariantVec, ClipCount &clipCount, const std::string &ref_string, bool isONT);
         void getClip(int pos, int clipFrontBack, int len, ClipCount &clipCount);
 
     public:

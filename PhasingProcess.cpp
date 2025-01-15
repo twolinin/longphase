@@ -122,12 +122,8 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
         Clip *clip = new Clip((*chrIter), clipCount);
         clip->getCNVInterval(clipCount);
 
-        /*for(std::vector<std::pair<int, int>>::iterator CNVIter = clip->smallCNVMap.begin(); CNVIter != clip->smallCNVMap.end(); CNVIter++){
-            std::cout << "smallCNV:" << "\t" << clip->getChr() << "\t" << CNVIter->first << "\t" << CNVIter->second << "\n";
-        }*/
-
         // create a graph object and prepare to phasing.
-        VairiantGraph *vGraph = new VairiantGraph(chr_reference, params, (*chrIter));
+        VairiantGraph *vGraph = new VairiantGraph(chr_reference, params);
         // trans read-snp info to edge info
         vGraph->addEdge(readVariantVec, *clip);
         // run main algorithm

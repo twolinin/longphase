@@ -62,7 +62,6 @@ struct Variant{
     int allele;
     int quality;
     bool underHomopolymer;
-    std::vector<std::pair<int, char>> variantBases;
 };
 
 struct ReadVariant{

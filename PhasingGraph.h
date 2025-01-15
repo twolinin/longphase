@@ -134,7 +134,6 @@ struct CnvStatistics{
 class VairiantGraph{
     
     private:
-        std::string chrName;
         PhasingParameters *params;
         std::string *ref;
         std::vector<std::string> dotResult;
@@ -143,9 +142,6 @@ class VairiantGraph{
         // By default, a Map in C++ is sorted in increasing order based on its key.
         // position, edge
         std::map<int,VariantEdge*> *edgeList;
-        // position, type
-        std::map<int,int> *variantPosType;
-
 
         // Each position will record the included reads and their corresponding base qualities.
         // position, < read name, quality>
@@ -183,7 +179,7 @@ class VairiantGraph{
 
     public:
     
-        VairiantGraph(std::string &ref, PhasingParameters &params, std::string &chrName);
+        VairiantGraph(std::string &ref, PhasingParameters &params);
         ~VairiantGraph();
     
         void addEdge(std::vector<ReadVariant> &in_readVariant, Clip &clip);
