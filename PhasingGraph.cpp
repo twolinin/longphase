@@ -528,7 +528,7 @@ bool VairiantGraph::isPositionInRange(int position, int start, int end){
 
 void VairiantGraph::calculateCnvMismatchRate(std::vector<ReadVariant>& in_readVariant, Clip &clip){
     //std::map<int, int> cnvMap = clip.getCnvMap();
-    for(auto& read : in_readVariant){
+    /*for(auto& read : in_readVariant){
         read.sort(); 
         for(const auto& variant : read.variantVec){
             for(const auto& cnv : clip.cnvMap){
@@ -537,12 +537,46 @@ void VairiantGraph::calculateCnvMismatchRate(std::vector<ReadVariant>& in_readVa
                 }
             }
         }
+    }*/
+    
+    if(in_readVariant.empty() || clip.cnvMap.empty()){
+        return;
     }
+    size_t cnvIndex = 0;
+
+    for(auto& read : in_readVariant){
+
+        if(read.variantVec.empty()){
+            continue;
+        }
+
+        int readStart = read.variantVec.front().position;
+        int readEnd = read.variantVec.back().position;
+
+        while(cnvIndex > 0 && clip.cnvVec[cnvIndex].first > readStart){
+            cnvIndex--;
+        }
+        size_t i = cnvIndex;
+        while(i < clip.cnvVec.size() && clip.cnvVec[i].first <= readEnd){
+            for(const auto& variant : read.variantVec){
+                if(variant.position > clip.cnvVec[i].second){
+                    break;
+                }
+                if(isPositionInRange(variant.position, clip.cnvVec[i].first, clip.cnvVec[i].second) && variant.allele == 1){
+                    read.cnv_mmrate_map[clip.cnvVec[i].first]++;
+                }
+            }
+            i++;
+        }
+        cnvIndex = i > 0 ? i - 1 : 0;
+    }
+    
 }
+
 
 void VairiantGraph::aggregateCnvReadMismatchRate(const std::vector<ReadVariant>& in_readVariant, const Clip &clip, std::map<int, std::map<int, std::vector<int>>>& cnvReadMmrate) {
     //std::map<int, int> cnvMap = clip.getCnvMap();
-    for(const auto& read : in_readVariant){
+    /*for(const auto& read : in_readVariant){
         for(const auto& variant : read.variantVec){
             for(const auto& cnv : clip.cnvMap){
                 if(isPositionInRange(variant.position, cnv.first, cnv.second) && read.cnv_mmrate_map.find(cnv.first) != read.cnv_mmrate_map.end()){
@@ -550,12 +584,45 @@ void VairiantGraph::aggregateCnvReadMismatchRate(const std::vector<ReadVariant>&
                 }
             }
         }
+    }*/
+
+    if(in_readVariant.empty() || clip.cnvMap.empty()){
+        return;
+    }
+
+    size_t cnvIndex = 0;
+
+    for(const auto& read : in_readVariant){
+        if(read.variantVec.empty()){
+            continue;
+        }
+
+        int readStart = read.variantVec.front().position;
+        int readEnd = read.variantVec.back().position;
+
+        while(cnvIndex > 0 && clip.cnvVec[cnvIndex].first > readStart){
+            cnvIndex--;
+        }
+
+        size_t i = cnvIndex;
+        while(i < clip.cnvVec.size() && clip.cnvVec[i].first <= readEnd){
+            for(const auto& variant : read.variantVec){
+                if(variant.position > clip.cnvVec[i].second){
+                    break;
+                }
+                if(isPositionInRange(variant.position, clip.cnvVec[i].first, clip.cnvVec[i].second) && read.cnv_mmrate_map.find(clip.cnvVec[i].first) != read.cnv_mmrate_map.end()){
+                    cnvReadMmrate[variant.position][variant.allele].push_back(read.cnv_mmrate_map.at(clip.cnvVec[i].first));
+                }
+            }
+            i++;
+        }
+        cnvIndex = i > 0 ? i - 1 : 0;
     }
 }
 
 void VairiantGraph::calculateAverageMismatchRate(const Clip& clip, const std::map<int, std::map<int, std::vector<int>>>& cnvReadMmrate, std::map<int, double>& missRateMap){
     //std::map<int, int> cnvMap = clip.getCnvMap();
-    for(const auto& variant : cnvReadMmrate){
+    /*for(const auto& variant : cnvReadMmrate){
         for(const auto& cnv : clip.cnvMap){
             if(isPositionInRange(variant.first, cnv.first, cnv.second)){
                 auto ref_iter = variant.second.find(0);
@@ -569,6 +636,39 @@ void VairiantGraph::calculateAverageMismatchRate(const Clip& clip, const std::ma
                 }
             }
         }
+    }*/
+
+    if(cnvReadMmrate.empty() || clip.cnvMap.empty()){
+        return;
+    }
+
+    size_t cnvIndex = 0;
+
+    for(const auto& variant : cnvReadMmrate){
+        while(cnvIndex > 0 && clip.cnvVec[cnvIndex].first > variant.first){
+            cnvIndex--;
+        }
+        
+        size_t i = cnvIndex;
+        while(i < clip.cnvVec.size()){
+            if(clip.cnvVec[i].first > variant.first){
+                break;
+            }
+            
+            if(isPositionInRange(variant.first, clip.cnvVec[i].first, clip.cnvVec[i].second)){
+                auto ref_iter = variant.second.find(0);
+                auto alt_iter = variant.second.find(1);
+                if(ref_iter != variant.second.end() && alt_iter != variant.second.end()){
+                    double AvgRefCnvReadMiss = calculateMean(ref_iter->second);
+                    double AvgAltCnvReadMiss = calculateMean(alt_iter->second);
+                    if(AvgRefCnvReadMiss != 0 && AvgAltCnvReadMiss != 0){
+                        missRateMap[variant.first] = AvgAltCnvReadMiss / (AvgRefCnvReadMiss + AvgAltCnvReadMiss);
+                    }
+                }
+            }
+            i++;
+        }
+
     }
 }
 
@@ -576,7 +676,7 @@ void VairiantGraph::calculateAverageMismatchRate(const Clip& clip, const std::ma
 
 void VairiantGraph::filterHighMismatchVariants(std::vector<ReadVariant>& in_readVariant, const Clip& clip, const std::map<int, double>& missRateMap){
     //std::map<int, int> cnvMap = clip.getCnvMap();
-    for(auto& read : in_readVariant){
+    /*for(auto& read : in_readVariant){
         read.sort();
         auto variantIter = read.variantVec.begin();
         while(variantIter != read.variantVec.end()){
@@ -592,6 +692,49 @@ void VairiantGraph::filterHighMismatchVariants(std::vector<ReadVariant>& in_read
             if(!shouldErase){
                 ++variantIter;
             }
+        }
+    }*/
+
+    if(in_readVariant.empty() || clip.cnvMap.empty() || missRateMap.empty()){
+        return;
+    }
+
+    size_t cnvIndex = 0;
+
+    for(auto& read : in_readVariant){
+        if(read.variantVec.empty()){
+            continue;
+        }
+        auto variantIter = read.variantVec.begin();
+        int readStart = read.variantVec.front().position;
+        int readEnd = read.variantVec.back().position;
+
+        while(cnvIndex > 0 && clip.cnvVec[cnvIndex].first > readStart){
+            cnvIndex--;
+        }
+
+        while(variantIter != read.variantVec.end()){
+            bool shouldErase = false;
+            
+            // 從目前的cnvIndex開始檢查，直到超出當前variant的位置
+            size_t i = cnvIndex;
+            while(i < clip.cnvVec.size() && clip.cnvVec[i].first <= variantIter->position){
+                if(isPositionInRange(variantIter->position, clip.cnvVec[i].first, clip.cnvVec[i].second)){
+                    auto missIter = missRateMap.find(variantIter->position);
+                    if(missIter != missRateMap.end() && missIter->second >= 0.7){
+                        shouldErase = true;
+                        variantIter = read.variantVec.erase(variantIter);
+                        break;
+                    }
+                }
+                i++;
+            }
+            
+            if(!shouldErase){
+                ++variantIter;
+            }
+
+            cnvIndex = i > 0 ? i - 1 : 0;
         }
     }
 }
@@ -1075,12 +1218,14 @@ void Clip::getCNVInterval(ClipCount &clipCount){
 
             if(downCount >= state.pullDownCount){
                 cnvArea["cnvArea"].emplace(std::make_pair(state.candidateStartPos, posIter->first));
+                cnvVec.emplace_back(state.candidateStartPos, posIter->first);
                 cnvMap.emplace(std::make_pair(state.candidateStartPos, posIter->first));
                 state.reset();
             }
 
             else if(state.currCount <= state.slowDownCount && posIter->first <= state.candidateEndPos){
                 cnvArea["Down"].emplace(std::make_pair(state.candidateStartPos, posIter->first));
+                cnvVec.emplace_back(state.candidateStartPos, posIter->first);
                 cnvMap.emplace(std::make_pair(state.candidateStartPos, posIter->first));              
                 state.reset();
             }
@@ -1093,6 +1238,7 @@ void Clip::getCNVInterval(ClipCount &clipCount){
         else if(state.slowUp){
             if(state.currCount > 20 ? downCount >= state.currCount/4 : downCount >= 5){
                 cnvArea["Up"].emplace(std::make_pair(state.candidateStartPos, posIter->first));
+                cnvVec.emplace_back(state.candidateStartPos, posIter->first);
                 cnvMap.emplace(std::make_pair(state.candidateStartPos, posIter->first));
                 state.reset();
             }

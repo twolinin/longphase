@@ -46,6 +46,7 @@ class Clip{
         ~Clip();
         //const std::map<int, int>& getCnvMap() const{return cnvMap;}
         std::map<int,int> cnvMap;
+        std::vector<std::pair<int, int>> cnvVec;
         void getCNVInterval(ClipCount &clipCount);
         PosVec detectLOH(SnpParser &snpMap);
         std::string getChr() const { return chr;}
