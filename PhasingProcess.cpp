@@ -28,6 +28,7 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
     std::cerr<< "Edge Threshold     : " << params.edgeThreshold   << "\n";
     std::cerr<< "Overlap Threshold  : " << params.overlapThreshold   << "\n";
     std::cerr<< "Mapping Quality    : " << params.mappingQuality  << "\n";
+    std::cerr<< "Mismatch Rate      : " << params.mismatchRate  << "\n";
     std::cerr<< "Variant Confidence : " << params.snpConfidence   << "\n";
     std::cerr<< "ReadTag Confidence : " << params.readConfidence  << "\n";
     std::cerr<< "\n";
@@ -96,10 +97,10 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
             continue;
         }
 
-        // create a bam parser object and prepare to fetch varint from each vcf file
-        BamParser *bamParser = new BamParser((*chrIter), params.bamFile, snpFile, svFile, modFile);
-        // fetch chromosome string
+	// fetch chromosome string
         std::string chr_reference = fastaParser.chrString.at(*chrIter);
+        // create a bam parser object and prepare to fetch varint from each vcf file
+	BamParser *bamParser = new BamParser((*chrIter), params.bamFile, snpFile, svFile, modFile, chr_reference);
         // use to store variant
         std::vector<ReadVariant> readVariantVec;
         // run fetch variant process

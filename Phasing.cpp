@@ -24,17 +24,19 @@ static const char *CORRECT_USAGE_MESSAGE =
 "   --dot                                  each contig/chromosome will generate dot file. \n\n"
 
 "parse alignment arguments:\n"
-"   -q, --mappingQuality=Num               filter alignment if mapping quality is lower than threshold. default:1\n\n"
+"   -q, --mappingQuality=Num               filter alignment if mapping quality is lower than threshold. default:1\n"
+"   -x, --mismatchRate=Num                 mark reads as false if mismatchRate of them are higher than threshold. default:3\n\n"
 
 "phasing graph arguments:\n"
 "   -p, --baseQuality=[0~90]               change edge's weight to --edgeWeight if base quality is lower than the threshold. default:12\n"
 "   -e, --edgeWeight=[0~1]                 if one of the bases connected by the edge has a quality lower than --baseQuality\n"
 "                                          its weight is reduced from the normal 1. default:0.1\n"
-"   -a, --connectAdjacent=Num              connect adjacent N SNPs. default:20\n"
+"   -a, --connectAdjacent=Num              connect adjacent N SNPs. default:35\n"
 "   -d, --distance=Num                     phasing two variant if distance less than threshold. default:300000\n"
 "   -1, --edgeThreshold=[0~1]              give up SNP-SNP phasing pair if the number of reads of the \n"
 "                                          two combinations are similar. default:0.7\n"
 "   -L, --overlapThreshold=[0~1]           filtering different alignments of the same read if there is overlap. default:0.2 \n"
+
 
 "haplotag read correction arguments:\n"
 "   -m, --readConfidence=[0.5~1]           The confidence of a read being assigned to any haplotype. default:0.65\n"
@@ -42,7 +44,7 @@ static const char *CORRECT_USAGE_MESSAGE =
 
 "\n";
 
-static const char* shortopts = "s:b:o:t:r:d:1:a:q:p:e:n:m:L:";
+static const char* shortopts = "s:b:o:t:r:d:1:a:q:x:p:e:n:m:L:";
 
 enum { OPT_HELP = 1 , DOT_FILE, SV_FILE, MOD_FILE, IS_ONT, IS_PB, PHASE_INDEL, VERSION};
 
@@ -64,8 +66,9 @@ static const struct option longopts[] = {
     { "edgeThreshold",        required_argument,  NULL, '1' },
     { "connectAdjacent",      required_argument,  NULL, 'a' },
     { "mappingQuality",       required_argument,  NULL, 'q' },
-    { "baseQuality",          required_argument,  NULL, 'p' },
-    { "edgeWeight",           required_argument,  NULL, 'e' },
+    { "mismatchRate",       required_argument,  NULL, 'x' },
+    { "baseQuality",       required_argument,  NULL, 'p' },
+    { "edgeWeight",       required_argument,  NULL, 'e' },
     { "snpConfidence",        required_argument,  NULL, 'n' },
     { "readConfidence",       required_argument,  NULL, 'm' },
     { "overlapThreshold",     required_argument,  NULL, 'L' },
@@ -87,16 +90,18 @@ namespace opt
     static bool isPB=false;
     static bool phaseIndel=false;
     
-    static int connectAdjacent = 20;
+    static int connectAdjacent = 35;
     static int mappingQuality = 1;
-
+    static double mismatchRate = 3;
+    
     static int baseQuality = 12;
     static double edgeWeight = 0.1 ;
-
+    
     static double snpConfidence  = 0.75;
     static double readConfidence = 0.65;
     
     static double edgeThreshold = 0.7;
+
     static double overlapThreshold = 0.2;
 
     static std::string command;
@@ -120,6 +125,7 @@ void PhasingOptions(int argc, char** argv)
         case '1': arg >> opt::edgeThreshold; break; 
         case 'a': arg >> opt::connectAdjacent; break;
         case 'q': arg >> opt::mappingQuality; break;
+        case 'x': arg >> opt::mismatchRate; break;
         case 'p': arg >> opt::baseQuality; break;
         case 'e': arg >> opt::edgeWeight; break;
         case 'n': arg >> opt::snpConfidence; break;
@@ -219,6 +225,27 @@ void PhasingOptions(int argc, char** argv)
                   << "\n please check -m, --mappingQuality=Num\n";
         die = true;
     }
+    
+    if ( opt::mismatchRate < 0 ){
+        std::cerr << SUBPROGRAM " invalid mismatchRate. value: " 
+                  << opt::mismatchRate 
+                  << "\n please check -x, --mismatchRate=Num\n";
+        die = true;
+    }
+    
+    if ( opt::baseQuality < 0 ){
+        std::cerr << SUBPROGRAM " invalid baseQuality. value: "
+                  << opt::baseQuality
+                  << "\n please check -m, --mappingQuality=[0~90]\n";
+        die = true;
+    }
+
+    if ( opt::edgeWeight < 0 ){
+        std::cerr << SUBPROGRAM " invalid edgeWeight. value: "
+                  << opt::edgeWeight
+                  << "\n please check -e, --edgeWeight=[0~1]\n";
+        die = true;
+    }
 
     if ( opt::baseQuality < 0 ){
         std::cerr << SUBPROGRAM " invalid baseQuality. value: "
@@ -261,7 +288,8 @@ void PhasingOptions(int argc, char** argv)
                   << "\n please check -n, --snpConfidence=[0.5~1]\n";
         die = true;
     }
-
+    
+    
     if (die)
     {
         std::cerr << "\n" << CORRECT_USAGE_MESSAGE;
@@ -292,7 +320,8 @@ int PhasingMain(int argc, char** argv, std::string in_version)
     
     ecParams.connectAdjacent=opt::connectAdjacent;
     ecParams.mappingQuality=opt::mappingQuality;
-
+    ecParams.mismatchRate=opt::mismatchRate;
+    
     ecParams.baseQuality=opt::baseQuality;
     ecParams.edgeWeight=opt::edgeWeight;
 

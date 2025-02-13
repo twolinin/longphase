@@ -88,7 +88,7 @@ class MethBamParser{
         MethBamParser(ModCallParameters &params, std::string &refString);
         ~MethBamParser();
         void detectMeth(std::string chrName, int chr_len, htsThreadPool &threadPool, std::vector<ReadVariant> &readVariantVec);
-        void exportResult(std::string chrName, std::string chrSquence, int chrLen , std::map<int,int> &passPosition, std::ostringstream &methResult);
+        void exportResult(std::string chrName, std::string chrSquence, int chrLen , std::map<int,std::vector<int>> &passPosition, std::ostringstream &methResult);
         void judgeMethGenotype(std::string chrName, std::vector<ReadVariant> &readVariantVec, std::vector<ReadVariant> &fReadVariantVec, std::vector<ReadVariant> &rReadVariantVec );
         void calculateDepth();
         
@@ -119,7 +119,7 @@ class MethylationGraph{
         ~MethylationGraph();
         
         void addEdge(std::vector<ReadVariant> &readVariant);
-        void connectResults(std::string chrName, std::map<int,int> &passPosition);
+        void connectResults(std::string chrName, std::map<int,std::vector<int>> &passPosition);
         
         void destroy();
 };

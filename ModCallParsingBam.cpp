@@ -48,6 +48,7 @@ MethBamParser::~MethBamParser(){
 
 void MethBamParser::detectMeth(std::string chrName, int chr_len, htsThreadPool &threadPool, std::vector<ReadVariant> &readVariantVec){
 
+
     for( auto bamFile: params->bamFileVec ){
 
         // open cram file
@@ -70,7 +71,6 @@ void MethBamParser::detectMeth(std::string chrName, int chr_len, htsThreadPool &
 
         
         int result;
-
         hts_set_opt(fp_in, HTS_OPT_THREAD_POOL, &threadPool);
 
         while ((result = sam_itr_multi_next(fp_in, iter, aln)) >= 0) { 
@@ -253,7 +253,7 @@ void MethBamParser::parse_CIGAR(const bam_hdr_t &bamHdr,const bam1_t &aln, std::
     delete tmpReadResult;
 }
 
-void MethBamParser::exportResult(std::string chrName, std::string chrSquence, int chrLen , std::map<int,int> &passPosition, std::ostringstream &modCallResult){
+void MethBamParser::exportResult(std::string chrName, std::string chrSquence, int chrLen , std::map<int,std::vector<int>> &passPosition, std::ostringstream &modCallResult){
     
     for(std::map<int , MethPosInfo>::iterator posinfoIter = chrMethMap->begin(); posinfoIter != chrMethMap->end(); posinfoIter++){
         std::string infostr= "";
@@ -261,11 +261,32 @@ void MethBamParser::exportResult(std::string chrName, std::string chrSquence, in
         std::string samplestr;
         std::string strandinfo;
         std::string ref;
+        bool print = false;
         
         auto passPosIter =  passPosition.find((*posinfoIter).first);
         auto prepassPosIter =  passPosition.find((*posinfoIter).first - 1);
         auto nextpassPosIter =  passPosition.find((*posinfoIter).first + 1);
         
+        // Determine continuous methylation position (CpG) that can be output
+        if(!passPosition[passPosIter->first].empty() && !passPosition[prepassPosIter->first].empty()){
+            for(std::vector<int>::iterator posIter = passPosition[passPosIter->first].begin(); posIter != passPosition[passPosIter->first].end(); posIter++){
+                for(std::vector<int>::iterator posIter2 = passPosition[prepassPosIter->first].begin(); posIter2 != passPosition[prepassPosIter->first].end(); posIter2++){
+                    if((*posIter)-1 == (*posIter2)){
+                        print = true;
+                    }
+                }
+            }
+        }
+        if(!passPosition[passPosIter->first].empty() && !passPosition[nextpassPosIter->first].empty()){
+            for(std::vector<int>::iterator posIter = passPosition[passPosIter->first].begin(); posIter != passPosition[passPosIter->first].end(); posIter++){
+                for(std::vector<int>::iterator posIter2 = passPosition[nextpassPosIter->first].begin(); posIter2 != passPosition[nextpassPosIter->first].end(); posIter2++){
+                    if((*posIter)+1 == (*posIter2)){
+                        print = true;
+                    }
+                }
+            }
+        }
+
         // prevent variant coordinates from exceeding the reference.
         if( chrLen < (*posinfoIter).first ){
             continue;
@@ -290,7 +311,7 @@ void MethBamParser::exportResult(std::string chrName, std::string chrSquence, in
         }
         
         //Output contains only consecutive methylation position (CpG)
-        if( (prepassPosIter == passPosition.end() && nextpassPosIter == passPosition.end()) || passPosIter ==  passPosition.end() ){
+        if( (prepassPosIter == passPosition.end() && nextpassPosIter == passPosition.end()) || passPosIter ==  passPosition.end() || print == false){
             if( params->outputAllMod ){
                 int nonmethcnt = (*posinfoIter).second.canonreadcnt;
                 samplestr = (*posinfoIter).second.heterstatus + ":" + std::to_string((*posinfoIter).second.methreadcnt) + ":" + std::to_string(nonmethcnt) + ":" + std::to_string((*posinfoIter).second.depth);
@@ -345,7 +366,7 @@ void writeResultVCF( ModCallParameters &params, std::vector<ReferenceChromosome>
         modCallResultVcf<<"##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n";
         modCallResultVcf<<"##FORMAT=<ID=MD,Number=1,Type=Integer,Description=\"Modified Depth\">\n";
         modCallResultVcf<<"##FORMAT=<ID=UD,Number=1,Type=Integer,Description=\"Unmodified Depth\">\n";
-        modCallResultVcf<<"##FORMAT=<ID=DP,Number=1,Type=Integer,Description=\"Read Depth\"\n";
+        modCallResultVcf<<"##FORMAT=<ID=DP,Number=1,Type=Integer,Description=\"Read Depth\">\n";
         for(const auto& chrIter : chrInfo){
             modCallResultVcf<<"##contig=<ID="<<chrIter.name<<",length="<<chrIter.length<<">\n";
         }
@@ -529,10 +550,10 @@ void MethylationGraph::addEdge(std::vector<ReadVariant> &in_readVariant){
 
                 // this allele support ref
                 if( (*variant1Iter).allele == 0 )
-                    (*edgeList)[(*variant1Iter).position]->ref->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).read_name,0,1);
+                    (*edgeList)[(*variant1Iter).position]->ref->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).read_name,0,1,false);
                 // this allele support alt
                 if( (*variant1Iter).allele == 1 )
-                    (*edgeList)[(*variant1Iter).position]->alt->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).read_name,0,1);
+                    (*edgeList)[(*variant1Iter).position]->alt->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).read_name,0,1,false);
                 
                 // next snp
                 variant2Iter++;
@@ -547,7 +568,7 @@ void MethylationGraph::addEdge(std::vector<ReadVariant> &in_readVariant){
     }
 }
 
-void MethylationGraph::connectResults(std::string chrName, std::map<int,int> &passPosition){
+void MethylationGraph::connectResults(std::string chrName, std::map<int,std::vector<int>> &passPosition){
 
     // check clear connect variant
     for(std::map<int,ReadBaseMap*>::iterator nodeIter = nodeInfo->begin() ; nodeIter != nodeInfo->end() ; nodeIter++ ){
@@ -577,8 +598,8 @@ void MethylationGraph::connectResults(std::string chrName, std::map<int,int> &pa
             
 
             if( majorRatio >= params->connectConfidence && totalConnectReads > minimumConnection && tmp.first + tmp.second > 6 ){
-                passPosition[currPos] = 1;
-                passPosition[nextPos] = 1;
+                passPosition[currPos].push_back(nextPos);
+                passPosition[nextPos].push_back(currPos);
             }
             nextNodeIter++;
             if( nextNodeIter == nodeInfo->end() )

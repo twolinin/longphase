@@ -32,7 +32,7 @@ class SubEdge{
         
         void destroy();
         
-        void addSubEdge(int currentQuality, Variant connectNode, std::string readName, int baseQuality, double edgeWeight);
+        void addSubEdge(int currentQuality, Variant connectNode, std::string readName, int baseQuality, double edgeWeight,bool fakeRead);
         std::pair<float,float> BestPair(int targetPos);
         float getRefReadCount(int targetPos);
         float getAltReadCount(int targetPos);        
@@ -45,17 +45,33 @@ class SubEdge{
 
 };
 
+//use to store the voting info from the previous variants
+struct VoteResult{
+    int Pos;		//who votes
+    float para;		//rr+aa
+    float cross;	//ra+ar
+    float weight;	//how much weight
+    int hap;		//which haplotype 
+    double ESR;		//similarity of para and cross
+
+    VoteResult( int currPos, float weight ) ;
+};
 
 struct VariantEdge{
     int currPos;
     SubEdge* alt;
     SubEdge* ref;
-
+    int refcnt ; // count the ref base amount
+    int altcnt ; // count the alt base amount
+    double vaf ; // count the vaf of the left snp
+    int coverage ; // count the coverge on the snp
+    
     VariantEdge(int currPos);
     // node pair 
-    std::pair<PosAllele,PosAllele> findBestEdgePair(int targetPos, bool isONT, double diffRatioThreshold, bool debug);
+    std::pair<PosAllele,PosAllele> findBestEdgePair(int targetPos, bool isONT, double diffRatioThreshold, bool debug, std::map<int,int> &variantType, VoteResult &vote);
     // number of read of two node. AA and AB combination
-    std::pair<int,int> findNumberOfRead(int targetPos);
+    std::pair<float,float> findNumberOfRead(int targetPos);
+    bool get_fakeSnp();
 };
 
 
@@ -88,7 +104,9 @@ class VairiantGraph{
         std::map<int,ReadBaseMap*> *totalVariantInfo;
         // position, type < 0=SNP 1=SV 2=MOD 3=INDEL >
         std::map<int,int> *variantType;
-        
+ 
+        std::pair<float,float> Onelongcase( std::vector<VoteResult> vote ) ;
+
         // phasing result     
         // PosAllele , block_start    
         std::map<PosAllele,int> *bkResult;
