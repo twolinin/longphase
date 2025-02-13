@@ -361,7 +361,7 @@ void VairiantGraph::edgeConnectResult(){
         }
 
         // new block, set this position as block start 
-        if( h1 == 0 && h2 == 0 ){
+        if( h1 == h2 ){
             // No new blocks should be created if the next SNP has already been picked up
             if( currPos < lastConnectPos ){
                 continue;
@@ -372,11 +372,9 @@ void VairiantGraph::edgeConnectResult(){
             (*hpResult)[currPos] = 1;
         }
         else{
-            if( h1 > h2 || h1 < h2 ){
-                int currHP = ( h1 > h2 ? 1 : 2 );
-                (*hpResult)[currPos] = currHP;
-                (*phasedBlocks)[blockStart].push_back(currPos);
-            }
+            int currHP = ( h1 > h2 ? 1 : 2 );
+            (*hpResult)[currPos] = currHP;
+            (*phasedBlocks)[blockStart].push_back(currPos);
         }
         // Check if there is no edge from current node
         std::map<int,VariantEdge*>::iterator edgeIter = edgeList->find( currPos );
