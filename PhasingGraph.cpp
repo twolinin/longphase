@@ -1,5 +1,4 @@
 #include "PhasingGraph.h"
-#include <numeric>
 //SubEdge
 
 SubEdge::SubEdge():readCount(0){ 
@@ -161,15 +160,6 @@ VariantEdge::VariantEdge(int inCurrPos){
     currPos = inCurrPos;
     alt = new SubEdge();
     ref = new SubEdge();
-}
-
-template <typename T>
-double calculateMean(const std::vector<T>& data){
-    if(data.empty()){
-        return 0;
-    }
-    double sum = accumulate(data.begin(), data.end(), 0.0);
-    return sum / data.size();
 }
 
 //VariantEdge
@@ -520,19 +510,21 @@ void VairiantGraph::destroy(){
     delete readHpMap;
 }
 
+//check if the position is in the range of the cnv
 bool VairiantGraph::isPositionInRange(int position, int start, int end){
     return position >= start && position <= end;
 }
 
+//calculate the mismatch rate of the cnv
 void VairiantGraph::calculateCnvMismatchRate(std::vector<ReadVariant>& in_readVariant, Clip &clip){
-    
+    //if the read variant is empty or the cnv is empty, return
     if(in_readVariant.empty() || clip.cnvVec.empty()){
         return;
     }
     size_t cnvIndex = 0;
 
     for(auto& read : in_readVariant){
-
+        //if the read has no variant, continue
         if(read.variantVec.empty()){
             continue;
         }
@@ -540,29 +532,35 @@ void VairiantGraph::calculateCnvMismatchRate(std::vector<ReadVariant>& in_readVa
         int readStart = read.variantVec.front().position;
         int readEnd = read.variantVec.back().position;
 
+        //find the index of the cnv vector  
         while(cnvIndex > 0 && clip.cnvVec[cnvIndex].first > readStart){
             cnvIndex--;
         }
         size_t i = cnvIndex;
+
+        //iterate through the cnv vector
         while(i < clip.cnvVec.size() && clip.cnvVec[i].first <= readEnd){
             for(const auto& variant : read.variantVec){
+                //if the variant position is greater than the end of the cnv, break
                 if(variant.position > clip.cnvVec[i].second){
                     break;
                 }
+                //if the variant position is in the range of the cnv and the allele is reference, increment the mismatch rate
                 if(isPositionInRange(variant.position, clip.cnvVec[i].first, clip.cnvVec[i].second) && variant.allele == 1){
                     read.cnv_mmrate_map[clip.cnvVec[i].first]++;
                 }
             }
             i++;
         }
+        //update the index of the cnv vector
         cnvIndex = i > 0 ? i - 1 : 0;
     }
     
 }
 
-
-void VairiantGraph::aggregateCnvReadMismatchRate(const std::vector<ReadVariant>& in_readVariant, const Clip &clip, std::map<int, std::map<int, std::vector<int>>>& cnvReadMmrate) {
-
+//aggregate the mismatch rate of the cnv
+void VairiantGraph::aggregateCnvReadMismatchRate(const std::vector<ReadVariant>& in_readVariant, const Clip &clip, std::map<int, std::map<int, std::vector<int>>>& cnvReadMmrate) { 
+    //if the read variant is empty or the cnv is empty, return
     if(in_readVariant.empty() || clip.cnvVec.empty()){
         return;
     }
@@ -570,6 +568,7 @@ void VairiantGraph::aggregateCnvReadMismatchRate(const std::vector<ReadVariant>&
     size_t cnvIndex = 0;
 
     for(const auto& read : in_readVariant){
+        //if the read has no variant, continue
         if(read.variantVec.empty()){
             continue;
         }
@@ -577,16 +576,21 @@ void VairiantGraph::aggregateCnvReadMismatchRate(const std::vector<ReadVariant>&
         int readStart = read.variantVec.front().position;
         int readEnd = read.variantVec.back().position;
 
+        //find the index of the cnv vector
         while(cnvIndex > 0 && clip.cnvVec[cnvIndex].first > readStart){
             cnvIndex--;
         }
 
         size_t i = cnvIndex;
+        
+        //iterate through the cnv vector
         while(i < clip.cnvVec.size() && clip.cnvVec[i].first <= readEnd){
             for(const auto& variant : read.variantVec){
+                //if the variant position is greater than the end of the cnv, break
                 if(variant.position > clip.cnvVec[i].second){
                     break;
                 }
+                //if the variant position is in the range of the cnv, push the mismatch rate to the vector to the direct position and allele
                 if(isPositionInRange(variant.position, clip.cnvVec[i].first, clip.cnvVec[i].second) && read.cnv_mmrate_map.find(clip.cnvVec[i].first) != read.cnv_mmrate_map.end()){
                     cnvReadMmrate[variant.position][variant.allele].push_back(read.cnv_mmrate_map.at(clip.cnvVec[i].first));
                 }
@@ -597,6 +601,7 @@ void VairiantGraph::aggregateCnvReadMismatchRate(const std::vector<ReadVariant>&
     }
 }
 
+//calculate the average mismatch rate of the cnv
 void VairiantGraph::calculateAverageMismatchRate(const Clip& clip, const std::map<int, std::map<int, std::vector<int>>>& cnvReadMmrate, std::map<int, double>& missRateMap){
 
     if(cnvReadMmrate.empty() || clip.cnvVec.empty()){
@@ -611,11 +616,13 @@ void VairiantGraph::calculateAverageMismatchRate(const Clip& clip, const std::ma
         }
         
         size_t i = cnvIndex;
+        //iterate through the cnv vector
         while(i < clip.cnvVec.size()){
+            //if the variant position is greater than the end of the cnv, break
             if(clip.cnvVec[i].first > variant.first){
                 break;
             }
-            
+            //if the variant position is in the range of the cnv, calculate the average mismatch rate
             if(isPositionInRange(variant.first, clip.cnvVec[i].first, clip.cnvVec[i].second)){
                 auto ref_iter = variant.second.find(0);
                 auto alt_iter = variant.second.find(1);
@@ -633,10 +640,9 @@ void VairiantGraph::calculateAverageMismatchRate(const Clip& clip, const std::ma
     }
 }
 
-
-
+//filter the variants with high mismatch rate   
 void VairiantGraph::filterHighMismatchVariants(std::vector<ReadVariant>& in_readVariant, const Clip& clip, const std::map<int, double>& missRateMap){
-
+    //if the read variant is empty or the cnv is empty or the miss rate map is empty, return
     if(in_readVariant.empty() || clip.cnvVec.empty() || missRateMap.empty()){
         return;
     }
@@ -644,25 +650,28 @@ void VairiantGraph::filterHighMismatchVariants(std::vector<ReadVariant>& in_read
     size_t cnvIndex = 0;
 
     for(auto& read : in_readVariant){
+        //if the read has no variant, continue
         if(read.variantVec.empty()){
             continue;
         }
         auto variantIter = read.variantVec.begin();
         int readStart = read.variantVec.front().position;
-        int readEnd = read.variantVec.back().position;
 
         while(cnvIndex > 0 && clip.cnvVec[cnvIndex].first > readStart){
             cnvIndex--;
         }
 
+        //iterate through the variant vector
         while(variantIter != read.variantVec.end()){
             bool shouldErase = false;
             
-            // 從目前的cnvIndex開始檢查，直到超出當前variant的位置
+            //iterate through the cnv vector
             size_t i = cnvIndex;
             while(i < clip.cnvVec.size() && clip.cnvVec[i].first <= variantIter->position){
+                //if the variant position is in the range of the cnv, check the miss rate
                 if(isPositionInRange(variantIter->position, clip.cnvVec[i].first, clip.cnvVec[i].second)){
                     auto missIter = missRateMap.find(variantIter->position);
+                    //if the miss rate is greater than 0.7, erase the variant
                     if(missIter != missRateMap.end() && missIter->second >= 0.7){
                         shouldErase = true;
                         variantIter = read.variantVec.erase(variantIter);
