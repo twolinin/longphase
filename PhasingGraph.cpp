@@ -680,7 +680,7 @@ void VairiantGraph::filterHighMismatchVariants(std::vector<ReadVariant>& in_read
                 }
                 i++;
             }
-            
+            //if the variant should not be erased, increment the variant iterator
             if(!shouldErase){
                 ++variantIter;
             }
@@ -780,9 +780,13 @@ void VairiantGraph::addEdge(std::vector<ReadVariant> &in_readVariant, Clip &clip
     in_readVariant.erase( std::next(in_readVariant.begin(), saveIter), in_readVariant.end());
     
     CnvStatistics cnvStats;
+    //calculate the mismatch rate of the cnv
     calculateCnvMismatchRate(in_readVariant, clip);
+    //aggregate the mismatch rate of the cnv
     aggregateCnvReadMismatchRate(in_readVariant, clip, cnvStats.cnvReadMmrate);
+    //calculate the average mismatch rate of the cnv
     calculateAverageMismatchRate(clip, cnvStats.cnvReadMmrate, cnvStats.missRateMap);
+    //filter the variants with high mismatch rate
     filterHighMismatchVariants(in_readVariant, clip, cnvStats.missRateMap);
 
     int readCount=0;
@@ -1103,6 +1107,7 @@ Clip::Clip(std::string &chr, ClipCount &clipCount){
 Clip::~Clip(){
 }
 
+//update the threshold
 void Clip::updateThreshold(int upCount){
     state.rejectCount = upCount;
     if(upCount >= 20){
@@ -1124,15 +1129,18 @@ void Clip::getCNVInterval(ClipCount &clipCount){
     int downCount = 0;
     int AreaSize = 30000;
     state.reset();
-    
+
     clipCount[clipCount.rbegin()->first + AreaSize] = clipCount.rbegin()->second;
     std::map<std::string, std::map<int,int>> cnvArea;
+
 
     for(auto posIter = clipCount.begin(); posIter != clipCount.end() ; posIter++ ){
         upCount = posIter->second[FRONT];
         downCount = posIter->second[BACK];
 
+        //if the current state is not push, not slowdown, and not slowup
         if(!state.push && !state.slowDown && !state.slowUp){
+            //if the up count is greater than 5 and the current count is 0, then change the state to push and slow down
             if(upCount >= 5 && state.currCount == 0){
                 state.push = 1;
                 state.slowUp = 0;
@@ -1142,6 +1150,7 @@ void Clip::getCNVInterval(ClipCount &clipCount){
                 state.candidateEndPos = posIter->first + AreaSize;
                 updateThreshold(upCount);
             }
+            //if the up count is greater than the down count and the current count is 0, then change the state to slowup
             else if(upCount > downCount && state.currCount == 0){
                 state.push = 0;
                 state.slowUp = 1;
@@ -1151,7 +1160,9 @@ void Clip::getCNVInterval(ClipCount &clipCount){
                 state.candidateEndPos = posIter->first + AreaSize;
             }
         }
+        //if the current state is push and slowdown
         else if(state.push && state.slowDown){
+            //if the up count is greater than the reject count, then change the state to push
             if(upCount > state.rejectCount){
                 state.push = 1;
                 state.slowUp = 0;
@@ -1160,33 +1171,35 @@ void Clip::getCNVInterval(ClipCount &clipCount){
                 state.candidateStartPos = posIter->first;
                 state.candidateEndPos = posIter->first + AreaSize;
             }
-
+            //update the current count
             state.currCount = state.currCount + upCount - downCount;
-
+            //if the current count is greater than 30, then change the candidate end position to the current position + AreaSize
             if(state.currCount > 30){
                 state.candidateEndPos = posIter->first + AreaSize;
             }
-
+            //if the down count is greater than the pull down count, then push the cnv to the vector
             if(downCount >= state.pullDownCount){
                 cnvVec.emplace_back(state.candidateStartPos, posIter->first);
                 state.reset();
             }
-
+            //if the current count is less than or equal to the slow down count and the current position is less than or equal to the candidate end position, then push the cnv to the vector
             else if(state.currCount <= state.slowDownCount && posIter->first <= state.candidateEndPos){
                 cnvVec.emplace_back(state.candidateStartPos, posIter->first);            
                 state.reset();
             }
-            
+            //if the current position is greater than the candidate end position or the current count is less than or equal to 0 or the current position is greater than or equal to the candidate start position + 200000, then reset the state
             if(posIter->first > state.candidateEndPos || state.currCount <= 0 || posIter->first - state.candidateStartPos >= 200000){
                 state.reset();
             }
         }
-
+        //if the current state is slow up
         else if(state.slowUp){
+            //if the current count is greater than 20, then down count is greater than the current count / 4, then push the cnv to the vector
             if(state.currCount > 20 ? downCount >= state.currCount/4 : downCount >= 5){
                 cnvVec.emplace_back(state.candidateStartPos, posIter->first);
                 state.reset();
             }
+            //if the up count is greater than 5, then change the state to push and slow down
             else if(upCount >= 5){
                 state.push = 1;
                 state.slowUp = 0;
@@ -1198,9 +1211,11 @@ void Clip::getCNVInterval(ClipCount &clipCount){
             }
             else{
                 state.currCount = state.currCount + upCount - downCount;
+                //if the current count is greater than 30, then change the candidate end position to the current position + AreaSize
                 if(state.currCount > 30){
                     state.candidateEndPos = posIter->first + AreaSize;
                 }
+                //if the current position is greater than the candidate end position or the current count is less than or equal to 0 or the current position is greater than or equal to the candidate start position + 200000, then reset the state
                 if(posIter->first > state.candidateEndPos || state.currCount <= 0 || posIter->first - state.candidateStartPos >= 200000){
                     state.reset();
                 }

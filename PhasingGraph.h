@@ -14,8 +14,10 @@ class Clip{
     private:
         std::string chr;
         PosVec CNVtoLOHInterval(SnpParser &snpMap);
-        //std::map<int,int> cnvMap;
+
         struct cnvState{
+            cnvState():push(false),slowUp(false),slowDown(false),currCount(0),rejectCount(0),pullDownCount(0),slowDownCount(0),candidateStartPos(-1),candidateEndPos(-1){}
+            
             bool push;
             bool slowUp;
             bool slowDown;
