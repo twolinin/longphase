@@ -12,6 +12,7 @@
 #include <ctime>
 #include <vector>
 #include <omp.h>
+#include <numeric> 
 
 struct PhasingElement{
     // i.e. 0|1  or   1|0
@@ -80,8 +81,8 @@ struct ReadVariant{
     int reference_start;
     std::string BX_tag;
     bool is_reverse;
-    bool fakeRead;
-    
+    std::map<int, int> cnv_mmrate_map;
+
     std::vector<Variant> variantVec;
     
     void sort();
@@ -100,7 +101,7 @@ std::string getTargetString(std::string line, std::string start_sign, std::strin
 
 int homopolymerLength(int snp_pos, const std::string &ref_string);
 
-
-
+template <typename T>
+double calculateMean(const std::vector<T>& data);
 
 #endif

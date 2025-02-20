@@ -1,5 +1,4 @@
 #include "PhasingGraph.h"
-
 //SubEdge
 
 SubEdge::SubEdge():readCount(0){ 
@@ -23,7 +22,7 @@ void SubEdge::destroy(){
     delete altReadCount;
 }
 
-void SubEdge::addSubEdge(int currentQuality, Variant connectNode, std::string readName, int baseQuality, double edgeWeight,bool fakeRead){
+void SubEdge::addSubEdge(int currentQuality, Variant connectNode, std::string readName, int baseQuality, double edgeWeight){
     // target noded is REF allele
     if(connectNode.allele == 0 ){
         // debug, this parameter will record the names of all reads between two points
@@ -37,11 +36,9 @@ void SubEdge::addSubEdge(int currentQuality, Variant connectNode, std::string re
             (*refQuality)[connectNode.position] += currentQuality + connectNode.quality;
         }*/
 
-	//if the base quality on both snps is high enough and didn't be marked as fakeRead, the edge has normal weight
-        if ( currentQuality >= baseQuality && connectNode.quality >= baseQuality && fakeRead == false)
+	//if the base quality on both snps is high enough, the edge has normal weight
+        if ( currentQuality >= baseQuality && connectNode.quality >= baseQuality)
             (*refReadCount)[connectNode.position]++;
-        else if ( fakeRead == true )
-            (*refReadCount)[connectNode.position] = (*refReadCount)[connectNode.position] + 0.01 ;
         else
             (*refReadCount)[connectNode.position] = (*refReadCount)[connectNode.position] + edgeWeight ;
         
@@ -61,11 +58,9 @@ void SubEdge::addSubEdge(int currentQuality, Variant connectNode, std::string re
             (*altQuality)[connectNode.position] += currentQuality + connectNode.quality;
         }*/
        
-	//if the base quality on both snps is high enough and didn't be marked as fakeRead, the edge has normal weight 
-        if ( currentQuality >= baseQuality && connectNode.quality >= baseQuality && fakeRead == false)
+	//if the base quality on both snps is high enough, the edge has normal weight 
+        if ( currentQuality >= baseQuality && connectNode.quality >= baseQuality)
             (*altReadCount)[connectNode.position]++;
-        else if ( fakeRead == true )
-            (*altReadCount)[connectNode.position] = (*altReadCount)[connectNode.position] + 0.01 ;
         else
             (*altReadCount)[connectNode.position] = (*altReadCount)[connectNode.position] + edgeWeight ;
         
@@ -165,21 +160,7 @@ VariantEdge::VariantEdge(int inCurrPos){
     currPos = inCurrPos;
     alt = new SubEdge();
     ref = new SubEdge();
-    refcnt = 0; 
-    altcnt = 0; 
-    coverage = 0;  
 }
-
-//to get the value of fakeSnp
-bool VariantEdge::get_fakeSnp(){
-    bool fakeSnp;
-    if(vaf == 0 || vaf == 1)
-      fakeSnp = true;
-    else
-      fakeSnp = false;
-    
-    return fakeSnp;  
-}  
 
 //VariantEdge
 std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool isONT, double edgeThreshold, bool debug, std::map<int,int> &variantType, VoteResult &vote){
@@ -196,9 +177,7 @@ std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool
     int altAllele = -1;
     
     double edgeSimilarRatio = (double)std::min((rr+aa),(ar+ra)) / (double)std::max((rr+aa),(ar+ra));
-    vaf = (float)altcnt/(refcnt+altcnt);
-    
-    //std::cout << currPos+1 << "\t" << altcnt << "\t" << refcnt << "\t" << vaf << "\n" ;
+ 
     if( rr + aa > ra + ar ){
         // RR conect
         refAllele = 1;
@@ -226,17 +205,12 @@ std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool
         refAllele = -1;
         altAllele = -1;
     }
-    
+
 
     if(debug){
-        std::cout << currPos << "\t->\t" << targetPos << "\t|rr aa | ra ar\t" << "\t" << rr << "\t" << aa << "\t" << ra << "\t" << ar  << "\n";
+        std::cout << currPos + 1 << "\t->\t" << targetPos + 1 << "\t|rr aa | ra ar\t" << "\t" << rr << "\t" << aa << "\t" << ra << "\t" << ar  << "\n";
     }
 
-    // if the vaf is 0 or 1, we think this variant is a fake variant and we lower its weight
-    if ( vaf == 0 || vaf == 1 ) {
-        vote.weight = 0.01 ;
-        //std::cout<< "fakesnp\t" << currPos+1 << "->" << targetPos+1 << "\t" << vote.weight << "\n";
-    }
     // the lower the edgeSimilarRatio means the higher reads consistency, and we will make the weight bigger if the reads consistency is high enough
     else if ( (edgeSimilarRatio <= 0.1 && (rr + aa + ra + ar) >= 1)  || ((rr+aa)<1&&(ra+ar)>=1) || ((rr+aa)>=1&&(ra+ar)<1) ) {
         vote.weight = 20 ;
@@ -281,7 +255,7 @@ std::pair<float,float> VairiantGraph::Onelongcase( std::vector<VoteResult> vote 
     float h2 = 0 ;
 
     // iterate all the voting that previous variants provide
-    for ( int i = 0 ; i < vote.size() ; i++ ) {
+    for (std::vector<VoteResult>::size_type i = 0 ; i < vote.size() ; i++ ) {
 
 	// count the votes that refer to only one read
         if ( (vote[i].para+vote[i].cross) <= 1 ) {
@@ -349,13 +323,13 @@ void VairiantGraph::edgeConnectResult(){
         //int h1 = (*hpCountMap)[currPos][1].size();
         //int h2 = (*hpCountMap)[currPos][2].size();
         float h1 = (*hpCountMap2)[currPos][1] ;
-	      float h2 = (*hpCountMap2)[currPos][2] ;
+	    float h2 = (*hpCountMap2)[currPos][2] ;
 
-        //std::cout<< currPos+1 << "\th1\th2\t" << h1 << "\t" << h2 << "\n" ;
+        //std::cout << currPos+1 << "\t" << "h1:" << "\t" << h1 << "\t" << "h2:" << "\t" << h2 << "\n" ;
 
 	//Handle the special case which One Long Read provides wrong info repeatedly
         std::pair<float, float> special = Onelongcase( (*hpCountMap3)[currPos] ) ;
-	if ( special.first != -1 ) {
+	    if ( special.first != -1 ) {
            h1 = special.first ;
            h2 = special.second ;
         }
@@ -386,8 +360,8 @@ void VairiantGraph::edgeConnectResult(){
         for(int i = 0 ; i < params->connectAdjacent ; i++ ){
 	    VoteResult vote(currPos, 1); //used to store previous 20 variants' voting information
 
-            // consider reads from the currnt SNP and the next (i+1)'s SNP
-            std::pair<PosAllele,PosAllele> tmp = edgeIter->second->findBestEdgePair(nextNodeIter->first, params->isONT, params->edgeThreshold, false, *variantType, vote);
+        // consider reads from the currnt SNP and the next (i+1)'s SNP
+        std::pair<PosAllele,PosAllele> tmp = edgeIter->second->findBestEdgePair(nextNodeIter->first, params->isONT, params->edgeThreshold, false, *variantType, vote);
 
 	    // if the target is a danger indel change its weight to 0.1
 	    if ( (*variantType)[currPos] == 4 ) {
@@ -402,25 +376,25 @@ void VairiantGraph::edgeConnectResult(){
                 if( (*hpResult)[currPos] == 1 ){
                     if( tmp.first.second == 1 ){
                         (*hpCountMap)[nextNodeIter->first][1].push_back(currPos);
-		        (*hpCountMap2)[nextNodeIter->first][1] += vote.weight;
+		                (*hpCountMap2)[nextNodeIter->first][1] += vote.weight;
                         vote.hap = 1 ;
                     }
                     if( tmp.first.second == 2 ){
                         (*hpCountMap)[nextNodeIter->first][2].push_back(currPos);
-			(*hpCountMap2)[nextNodeIter->first][2] += vote.weight;
-		  	vote.hap = 2 ;
+		                (*hpCountMap2)[nextNodeIter->first][2] += vote.weight;
+		                vote.hap = 2 ;
                     }
                 }
                 if( (*hpResult)[currPos]==2 ){
                     if( tmp.first.second == 1 ){
                         (*hpCountMap)[nextNodeIter->first][2].push_back(currPos);
-			(*hpCountMap2)[nextNodeIter->first][2] += vote.weight;
-			vote.hap = 2 ;
+                        (*hpCountMap2)[nextNodeIter->first][2] += vote.weight;
+                        vote.hap = 2 ;
                     }
                     if( tmp.first.second == 2 ){
                         (*hpCountMap)[nextNodeIter->first][1].push_back(currPos);
-		        (*hpCountMap2)[nextNodeIter->first][1] += vote.weight;
-	                vote.hap = 1 ;
+                        (*hpCountMap2)[nextNodeIter->first][1] += vote.weight;
+                        vote.hap = 1 ;
                     }
                 }
 
@@ -502,7 +476,6 @@ void VairiantGraph::edgeConnectResult(){
 VairiantGraph::VairiantGraph(std::string &in_ref, PhasingParameters &in_params){
     params=&in_params;
     ref=&in_ref;
-    
     totalVariantInfo = new std::map<int,ReadBaseMap*>;
     edgeList = new std::map<int,VariantEdge*>;
     bkResult = new std::map<PosAllele,int>;
@@ -536,13 +509,193 @@ void VairiantGraph::destroy(){
     delete variantType;
     delete readHpMap;
 }
+
+//check if the position is in the range of the cnv
+bool VairiantGraph::isPositionInRange(int position, int start, int end){
+    return position >= start && position <= end;
+}
+
+//calculate the mismatch rate of the cnv
+void VairiantGraph::calculateCnvMismatchRate(std::vector<ReadVariant>& in_readVariant, Clip &clip){
+    //if the read variant is empty or the cnv is empty, return
+    if(in_readVariant.empty() || clip.cnvVec.empty()){
+        return;
+    }
+    size_t cnvIndex = 0;
+
+    for(auto& read : in_readVariant){
+        //if the read has no variant, continue
+        if(read.variantVec.empty()){
+            continue;
+        }
+
+        int readStart = read.variantVec.front().position;
+        int readEnd = read.variantVec.back().position;
+
+        //find the index of the cnv vector  
+        while(cnvIndex > 0 && clip.cnvVec[cnvIndex].first > readStart){
+            cnvIndex--;
+        }
+        size_t i = cnvIndex;
+
+        //iterate through the cnv vector
+        while(i < clip.cnvVec.size() && clip.cnvVec[i].first <= readEnd){
+            for(const auto& variant : read.variantVec){
+                //if the variant position is greater than the end of the cnv, break
+                if(variant.position > clip.cnvVec[i].second){
+                    break;
+                }
+                //if the variant position is in the range of the cnv and the allele is reference, increment the mismatch rate
+                if(isPositionInRange(variant.position, clip.cnvVec[i].first, clip.cnvVec[i].second) && variant.allele == 1){
+                    read.cnv_mmrate_map[clip.cnvVec[i].first]++;
+                }
+            }
+            i++;
+        }
+        //update the index of the cnv vector
+        cnvIndex = i > 0 ? i - 1 : 0;
+    }
     
-void VairiantGraph::addEdge(std::vector<ReadVariant> &in_readVariant){
+}
+
+//aggregate the mismatch rate of the cnv
+void VairiantGraph::aggregateCnvReadMismatchRate(const std::vector<ReadVariant>& in_readVariant, const Clip &clip, std::map<int, std::map<int, std::vector<int>>>& cnvReadMmrate) { 
+    //if the read variant is empty or the cnv is empty, return
+    if(in_readVariant.empty() || clip.cnvVec.empty()){
+        return;
+    }
+
+    size_t cnvIndex = 0;
+
+    for(const auto& read : in_readVariant){
+        //if the read has no variant, continue
+        if(read.variantVec.empty()){
+            continue;
+        }
+
+        int readStart = read.variantVec.front().position;
+        int readEnd = read.variantVec.back().position;
+
+        //find the index of the cnv vector
+        while(cnvIndex > 0 && clip.cnvVec[cnvIndex].first > readStart){
+            cnvIndex--;
+        }
+
+        size_t i = cnvIndex;
+        
+        //iterate through the cnv vector
+        while(i < clip.cnvVec.size() && clip.cnvVec[i].first <= readEnd){
+            for(const auto& variant : read.variantVec){
+                //if the variant position is greater than the end of the cnv, break
+                if(variant.position > clip.cnvVec[i].second){
+                    break;
+                }
+                //if the variant position is in the range of the cnv, push the mismatch rate to the vector to the direct position and allele
+                if(isPositionInRange(variant.position, clip.cnvVec[i].first, clip.cnvVec[i].second) && read.cnv_mmrate_map.find(clip.cnvVec[i].first) != read.cnv_mmrate_map.end()){
+                    cnvReadMmrate[variant.position][variant.allele].push_back(read.cnv_mmrate_map.at(clip.cnvVec[i].first));
+                }
+            }
+            i++;
+        }
+        cnvIndex = i > 0 ? i - 1 : 0;
+    }
+}
+
+//calculate the average mismatch rate of the cnv
+void VairiantGraph::calculateAverageMismatchRate(const Clip& clip, const std::map<int, std::map<int, std::vector<int>>>& cnvReadMmrate, std::map<int, double>& missRateMap){
+
+    if(cnvReadMmrate.empty() || clip.cnvVec.empty()){
+        return;
+    }
+
+    size_t cnvIndex = 0;
+
+    for(const auto& variant : cnvReadMmrate){
+        while(cnvIndex > 0 && clip.cnvVec[cnvIndex].first > variant.first){
+            cnvIndex--;
+        }
+        
+        size_t i = cnvIndex;
+        //iterate through the cnv vector
+        while(i < clip.cnvVec.size()){
+            //if the variant position is greater than the end of the cnv, break
+            if(clip.cnvVec[i].first > variant.first){
+                break;
+            }
+            //if the variant position is in the range of the cnv, calculate the average mismatch rate
+            if(isPositionInRange(variant.first, clip.cnvVec[i].first, clip.cnvVec[i].second)){
+                auto ref_iter = variant.second.find(0);
+                auto alt_iter = variant.second.find(1);
+                if(ref_iter != variant.second.end() && alt_iter != variant.second.end()){
+                    double AvgRefCnvReadMiss = calculateMean(ref_iter->second);
+                    double AvgAltCnvReadMiss = calculateMean(alt_iter->second);
+                    if(AvgRefCnvReadMiss != 0 && AvgAltCnvReadMiss != 0){
+                        missRateMap[variant.first] = AvgAltCnvReadMiss / (AvgRefCnvReadMiss + AvgAltCnvReadMiss);
+                    }
+                }
+            }
+            i++;
+        }
+
+    }
+}
+
+//filter the variants with high mismatch rate   
+void VairiantGraph::filterHighMismatchVariants(std::vector<ReadVariant>& in_readVariant, const Clip& clip, const std::map<int, double>& missRateMap){
+    //if the read variant is empty or the cnv is empty or the miss rate map is empty, return
+    if(in_readVariant.empty() || clip.cnvVec.empty() || missRateMap.empty()){
+        return;
+    }
+
+    size_t cnvIndex = 0;
+
+    for(auto& read : in_readVariant){
+        //if the read has no variant, continue
+        if(read.variantVec.empty()){
+            continue;
+        }
+        auto variantIter = read.variantVec.begin();
+        int readStart = read.variantVec.front().position;
+
+        while(cnvIndex > 0 && clip.cnvVec[cnvIndex].first > readStart){
+            cnvIndex--;
+        }
+
+        //iterate through the variant vector
+        while(variantIter != read.variantVec.end()){
+            bool shouldErase = false;
+            
+            //iterate through the cnv vector
+            size_t i = cnvIndex;
+            while(i < clip.cnvVec.size() && clip.cnvVec[i].first <= variantIter->position){
+                //if the variant position is in the range of the cnv, check the miss rate
+                if(isPositionInRange(variantIter->position, clip.cnvVec[i].first, clip.cnvVec[i].second)){
+                    auto missIter = missRateMap.find(variantIter->position);
+                    //if the miss rate is greater than 0.7, erase the variant
+                    if(missIter != missRateMap.end() && missIter->second >= 0.7){
+                        shouldErase = true;
+                        variantIter = read.variantVec.erase(variantIter);
+                        break;
+                    }
+                }
+                i++;
+            }
+            //if the variant should not be erased, increment the variant iterator
+            if(!shouldErase){
+                ++variantIter;
+            }
+
+            cnvIndex = i > 0 ? i - 1 : 0;
+        }
+    }
+}
+    
+void VairiantGraph::addEdge(std::vector<ReadVariant> &in_readVariant, Clip &clip){
 
     readVariant = &in_readVariant;
     std::map<std::string,ReadVariant> mergeReadMap;
 
-    // each read will record fist and list variant posistion
+    // each read will record first and last variant posistion
     std::map<std::string, std::pair<int,int>> alignRange;
     // record an iterator for all alignments of a read.
     std::map<std::string, std::vector<int>> readIdxVec;
@@ -625,24 +778,21 @@ void VairiantGraph::addEdge(std::vector<ReadVariant> &in_readVariant){
         }
     }
     in_readVariant.erase( std::next(in_readVariant.begin(), saveIter), in_readVariant.end());
+    
+    CnvStatistics cnvStats;
+    //calculate the mismatch rate of the cnv
+    calculateCnvMismatchRate(in_readVariant, clip);
+    //aggregate the mismatch rate of the cnv
+    aggregateCnvReadMismatchRate(in_readVariant, clip, cnvStats.cnvReadMmrate);
+    //calculate the average mismatch rate of the cnv
+    calculateAverageMismatchRate(clip, cnvStats.cnvReadMmrate, cnvStats.missRateMap);
+    //filter the variants with high mismatch rate
+    filterHighMismatchVariants(in_readVariant, clip, cnvStats.missRateMap);
 
     int readCount=0;
     // merge alignment
     for(std::vector<ReadVariant>::iterator readIter = in_readVariant.begin() ; readIter != in_readVariant.end() ; readIter++ ){
-
-	std::map<std::string,ReadVariant>::iterator posIter = mergeReadMap.find((*readIter).read_name) ;
-
-	// fakeRead is initialize as fake
-	if ( posIter == mergeReadMap.end() ) {
-            mergeReadMap[(*readIter).read_name].fakeRead = false ;
-        }
-        //std::cout << (*readIter).mm_rate << "\n";
-
-	//if the mmrate too high we think it's a fake read
-        if( (*readIter).fakeRead == true ){
-          mergeReadMap[(*readIter).read_name].fakeRead = true ;
-        }
-
+ 
         // Creating a pseudo read which allows filtering out variants that should not be phased
         //ReadVariant tmpRead;
         // Visiting all the variants on the read
@@ -670,8 +820,8 @@ void VairiantGraph::addEdge(std::vector<ReadVariant> &in_readVariant){
                 (*variantType)[variant.position] = 3;
                 variant.quality = 60;
             }
-	    //danger indel
-	    else if( variant.quality == -5 ){
+            //danger indel
+            else if( variant.quality == -5 ){
                 (*variantType)[variant.position] = 4;
                 variant.quality = 60;
             }
@@ -692,42 +842,33 @@ void VairiantGraph::addEdge(std::vector<ReadVariant> &in_readVariant){
             
             (*(*totalVariantInfo)[variant.position])[(*readIter).read_name] = variant.quality;
         }
-    }    
-    
-    for(std::map<std::string,ReadVariant>::iterator readIter = mergeReadMap.begin() ; readIter != mergeReadMap.end() ; readIter++){
+    }   
+
+    for(std::map<std::string,ReadVariant>::iterator readIter = mergeReadMap.begin() ; readIter != mergeReadMap.end() ; readIter++){ 
         (*readIter).second.sort();
         
         // iter all pair of snp and construct initial graph
-        std::vector<Variant>::iterator variant1Iter = (*readIter).second.variantVec.begin();
+        std::vector<Variant>::iterator variant1Iter = readIter->second.variantVec.begin();
         std::vector<Variant>::iterator variant2Iter = std::next(variant1Iter,1);
         
-        while(variant1Iter != (*readIter).second.variantVec.end() && variant2Iter != (*readIter).second.variantVec.end() ){
+        while(variant1Iter != readIter->second.variantVec.end() && variant2Iter != readIter->second.variantVec.end() ){
             // create new edge if not exist
-            std::map<int,VariantEdge*>::iterator posIter = edgeList->find((*variant1Iter).position);
+            std::map<int,VariantEdge*>::iterator posIter = edgeList->find(variant1Iter->position);
             if( posIter == edgeList->end() )
-                (*edgeList)[(*variant1Iter).position] = new VariantEdge((*variant1Iter).position);
-
-	    //count the ref and alt base amount on the variant
-	    if( (*variant1Iter).allele == 0 && (*readIter).second.fakeRead == false ) {
-                (*edgeList)[(*variant1Iter).position]->refcnt++ ;
-	    }
-            if( (*variant1Iter).allele == 1 && (*readIter).second.fakeRead == false ) {
-                (*edgeList)[(*variant1Iter).position]->altcnt++ ;
-	    }
-            (*edgeList)[(*variant1Iter).position]->coverage++;
+                (*edgeList)[variant1Iter->position] = new VariantEdge(variant1Iter->position);
 
             // add edge process
             for(int nextNode = 0 ; nextNode < params->connectAdjacent; nextNode++){
                 // this allele support ref
-                if( (*variant1Iter).allele == 0 )
-		    (*edgeList)[(*variant1Iter).position]->ref->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).first,params->baseQuality,params->edgeWeight,(*readIter).second.fakeRead);
+                if( variant1Iter->allele == 0 )
+                    (*edgeList)[variant1Iter->position]->ref->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).first,params->baseQuality,params->edgeWeight);
                 // this allele support alt
                 if( (*variant1Iter).allele == 1 )
-                    (*edgeList)[(*variant1Iter).position]->alt->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).first,params->baseQuality,params->edgeWeight,(*readIter).second.fakeRead);
-
+                    (*edgeList)[variant1Iter->position]->alt->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).first,params->baseQuality,params->edgeWeight);
+                
                 // next snp
                 variant2Iter++;
-                if( variant2Iter == (*readIter).second.variantVec.end() ){
+                if( variant2Iter == readIter->second.variantVec.end() ){
                     break;
                 }
             }
@@ -737,24 +878,17 @@ void VairiantGraph::addEdge(std::vector<ReadVariant> &in_readVariant){
         }
 
         //count the ref and alt base amount of the last variant on the read
-	if ( variant1Iter != (*readIter).second.variantVec.end() && variant2Iter == (*readIter).second.variantVec.end() ) {
+	    if ( variant1Iter != (*readIter).second.variantVec.end() && variant2Iter == (*readIter).second.variantVec.end() ) {
             std::map<int,VariantEdge*>::iterator posIter = edgeList->find((*variant1Iter).position);
             if( posIter == edgeList->end() ) {
                 (*edgeList)[(*variant1Iter).position] = new VariantEdge((*variant1Iter).position);
-                //(*edgeList)[(*variant1Iter).position]->vaf = (*currentVariants)[(*variant1Iter).position].vaf ;
             }
-
-            if( (*variant1Iter).allele == 0 && (*readIter).second.fakeRead == false)
-                (*edgeList)[(*variant1Iter).position]->refcnt++ ;
-            if( (*variant1Iter).allele == 1 && (*readIter).second.fakeRead == false)
-                (*edgeList)[(*variant1Iter).position]->altcnt++ ;
-	    (*edgeList)[(*variant1Iter).position]->coverage++;
         }
     }
 } 
 
 void VairiantGraph::readCorrection(){
-    
+
     
     std::map<std::string,std::map<int,std::map<int,int>>> readBlockHP;
     
@@ -763,32 +897,23 @@ void VairiantGraph::readCorrection(){
     
     // haplotype, <position <allele, base count>>
     std::map<int,std::map<int,std::map<double,double>>> *hpAlleleCountMap = new std::map<int,std::map<int,std::map<double,double>>>;
-    
 
+    
     // iter all read, determine the haplotype of the read
     for(std::vector<ReadVariant>::iterator readIter = (*readVariant).begin() ; readIter != (*readVariant).end() ; readIter++ ){
         double refCount = 0;
         double altCount = 0;
-        bool fakeSnp;
-        //int block;
-        
+        //int block;  
+          
         // loop all variant 
         for( auto variant : (*readIter).variantVec ){
             PosAllele refAllele = std::make_pair( variant.position , variant.allele+1);
             std::map<PosAllele,int>::iterator nodePS = bkResult->find(refAllele);
-            std::map<int,VariantEdge*>::iterator edgeIter = edgeList->find( variant.position );
-            fakeSnp = edgeIter->second->get_fakeSnp();
-            
+        
             //block = nodePS->second;
             if( nodePS != bkResult->end() ){
                 if((*bkResult)[refAllele] != 0 ){
-		    //when vaf is 0 or 1, the fakeSnp will be true
-                    //VarintType < 0=SNP 1=SV 2=MOD 3=INDEL 4=tandem repeat INDEL >
-                    if( fakeSnp == true ){
-                        if((*subNodeHP)[refAllele]==0) refCount+=0.01;
-                        else altCount+=0.01;
-                    }
-		    else if((*variantType)[variant.position] == 0){
+                    if((*variantType)[variant.position] == 0){
                         if((*subNodeHP)[refAllele]==0)refCount++;
                         else altCount++;
                     }
@@ -809,9 +934,9 @@ void VairiantGraph::readCorrection(){
                     }
                 }
             }
-            
+
         }
-        
+
         // tag high confident reads
         if( std::max(refCount,altCount)/(refCount+altCount) > params->readConfidence && (refCount + altCount) > 1 ){
             // tag read with the corresponding haplotype
@@ -820,14 +945,10 @@ void VairiantGraph::readCorrection(){
             
             //readBlockHP[(*readIter).read_name][(*readIter).reference_start][block]=belongHP;
             //readBlockHPcount[(*readIter).read_name][block][belongHP]++;
-            
+
             for(auto variantIter = (*readIter).variantVec.begin() ; variantIter != (*readIter).variantVec.end() ; variantIter++ ){
                 if( (*variantIter).allele == 0 || (*variantIter).allele == 1){
-		    // when the mmrate is too high, we think it's a fakeRead
-                    if( (*readIter).fakeRead == true )
-                      (*hpAlleleCountMap)[belongHP][(*variantIter).position][(*variantIter).allele]+=0.01;
-                    else
-                      (*hpAlleleCountMap)[belongHP][(*variantIter).position][(*variantIter).allele]++;
+                    (*hpAlleleCountMap)[belongHP][(*variantIter).position][(*variantIter).allele]++;
                 }
             }
         }
@@ -835,7 +956,7 @@ void VairiantGraph::readCorrection(){
             (*readHpMap)[(*readIter).read_name] = -1;
         }
     }
-    
+
     /*
     for(auto readIter = readBlockHP.begin() ; readIter != readBlockHP.end() ; readIter++ ){
         
@@ -857,7 +978,7 @@ void VairiantGraph::readCorrection(){
         std::cout<< "\n";
     }
     */
-    
+
     double snpConfidenceThreshold = params->snpConfidence;
 
     subNodeHP->clear();
@@ -978,4 +1099,128 @@ void VairiantGraph::phasingProcess(){
     this->readCorrection();  
 }
 
+Clip::Clip(std::string &chr, ClipCount &clipCount){
+    this->chr = chr;
+    getCNVInterval(clipCount);
+}
 
+Clip::~Clip(){
+}
+
+//update the threshold
+void Clip::updateThreshold(int upCount){
+    state.rejectCount = upCount;
+    if(upCount >= 20){
+        state.pullDownCount = upCount / 2;
+        state.slowDownCount = 5;
+    }
+    else if(upCount >= 10){
+        state.pullDownCount = upCount / 2;
+        state.slowDownCount = upCount / 4;
+    }
+    else{
+        state.pullDownCount = 5;
+        state.slowDownCount = 2;
+    }
+}
+
+void Clip::getCNVInterval(ClipCount &clipCount){
+    int upCount = 0;
+    int downCount = 0;
+    int AreaSize = 30000;
+    state.reset();
+
+    clipCount[clipCount.rbegin()->first + AreaSize] = clipCount.rbegin()->second;
+    std::map<std::string, std::map<int,int>> cnvArea;
+
+
+    for(auto posIter = clipCount.begin(); posIter != clipCount.end() ; posIter++ ){
+        upCount = posIter->second[FRONT];
+        downCount = posIter->second[BACK];
+
+        //if the current state is not push, not slowdown, and not slowup
+        if(!state.push && !state.slowDown && !state.slowUp){
+            //if the up count is greater than 5 and the current count is 0, then change the state to push and slow down
+            if(upCount >= 5 && state.currCount == 0){
+                state.push = 1;
+                state.slowUp = 0;
+                state.slowDown = 1;
+                state.currCount = upCount - downCount;
+                state.candidateStartPos = posIter->first;
+                state.candidateEndPos = posIter->first + AreaSize;
+                updateThreshold(upCount);
+            }
+            //if the up count is greater than the down count and the current count is 0, then change the state to slowup
+            else if(upCount > downCount && state.currCount == 0){
+                state.push = 0;
+                state.slowUp = 1;
+                state.slowDown = 0;
+                state.currCount = upCount - downCount;
+                state.candidateStartPos = posIter->first;
+                state.candidateEndPos = posIter->first + AreaSize;
+            }
+        }
+        //if the current state is push and slowdown
+        else if(state.push && state.slowDown){
+            //if the up count is greater than the reject count, then change the state to push
+            if(upCount > state.rejectCount){
+                state.push = 1;
+                state.slowUp = 0;
+                state.slowDown = 1;
+                updateThreshold(upCount);
+                state.candidateStartPos = posIter->first;
+                state.candidateEndPos = posIter->first + AreaSize;
+            }
+            //update the current count
+            state.currCount = state.currCount + upCount - downCount;
+            //if the current count is greater than 30, then change the candidate end position to the current position + AreaSize
+            if(state.currCount > 30){
+                state.candidateEndPos = posIter->first + AreaSize;
+            }
+            //if the down count is greater than the pull down count, then push the cnv to the vector
+            if(downCount >= state.pullDownCount){
+                cnvVec.emplace_back(state.candidateStartPos, posIter->first);
+                state.reset();
+            }
+            //if the current count is less than or equal to the slow down count and the current position is less than or equal to the candidate end position, then push the cnv to the vector
+            else if(state.currCount <= state.slowDownCount && posIter->first <= state.candidateEndPos){
+                cnvVec.emplace_back(state.candidateStartPos, posIter->first);            
+                state.reset();
+            }
+            //if the current position is greater than the candidate end position or the current count is less than or equal to 0 or the current position is greater than or equal to the candidate start position + 200000, then reset the state
+            if(posIter->first > state.candidateEndPos || state.currCount <= 0 || posIter->first - state.candidateStartPos >= 200000){
+                state.reset();
+            }
+        }
+        //if the current state is slow up
+        else if(state.slowUp){
+            //if the current count is greater than 20, then down count is greater than the current count / 4, then push the cnv to the vector
+            if(state.currCount > 20 ? downCount >= state.currCount/4 : downCount >= 5){
+                cnvVec.emplace_back(state.candidateStartPos, posIter->first);
+                state.reset();
+            }
+            //if the up count is greater than 5, then change the state to push and slow down
+            else if(upCount >= 5){
+                state.push = 1;
+                state.slowUp = 0;
+                state.slowDown = 1;
+                state.currCount = upCount - downCount;
+                state.candidateStartPos = posIter->first;
+                state.candidateEndPos = posIter->first + AreaSize;
+                updateThreshold(upCount);
+            }
+            else{
+                state.currCount = state.currCount + upCount - downCount;
+                //if the current count is greater than 30, then change the candidate end position to the current position + AreaSize
+                if(state.currCount > 30){
+                    state.candidateEndPos = posIter->first + AreaSize;
+                }
+                //if the current position is greater than the candidate end position or the current count is less than or equal to 0 or the current position is greater than or equal to the candidate start position + 200000, then reset the state
+                if(posIter->first > state.candidateEndPos || state.currCount <= 0 || posIter->first - state.candidateStartPos >= 200000){
+                    state.reset();
+                }
+            }
+        }
+    }
+    clipCount.erase(--clipCount.end());
+}
