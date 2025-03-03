@@ -91,12 +91,24 @@ float SubEdge::getAltReadCount(int targetPos){
 
 std::vector<std::string> SubEdge::showEdge(std::string message){
     std::vector<std::string> result;
-    for(std::map<int, float >::iterator edgeIter = refReadCount->begin() ; edgeIter != refReadCount->end() ; edgeIter++ ){
+    /*for(std::map<int, float >::iterator edgeIter = refReadCount->begin() ; edgeIter != refReadCount->end() ; edgeIter++ ){
         result.push_back(message +" -> ref_" + std::to_string((*edgeIter).first) + "[label=" + std::to_string((*edgeIter).second) + "];");
     }
     for(std::map<int, float >::iterator edgeIter = altReadCount->begin() ; edgeIter != altReadCount->end() ; edgeIter++ ){
         result.push_back(message +" -> alt_" + std::to_string((*edgeIter).first) + "[label=" + std::to_string((*edgeIter).second) + "];");
+    }*/
+    for(std::map<int, float >::iterator edgeIter = refReadCount->begin() ; edgeIter != refReadCount->end() ; edgeIter++ ){
+        std::ostringstream weighted;
+        weighted << std::fixed << std::setprecision(2) << (*edgeIter).second;
+        
+        result.push_back(message + " -> " + std::to_string((*edgeIter).first) + ".1 " + "[label=" + weighted.str() + "];");
     }
+    for(std::map<int, float >::iterator edgeIter = altReadCount->begin() ; edgeIter != altReadCount->end() ; edgeIter++ ){
+        std::ostringstream weighted;
+        weighted << std::fixed << std::setprecision(2) << (*edgeIter).second;
+        result.push_back(message + " -> " + std::to_string((*edgeIter).first) + ".2 " + "[label=" + weighted.str() + "];");
+    }
+    
     return result;
 }
 
@@ -1037,8 +1049,17 @@ void VairiantGraph::writingDotFile(std::string dotPrefix){
     else{
         resultVcf << "digraph G {\n";
 
-        for(auto edge : dotResult){
+        /*for(auto edge : dotResult){
             resultVcf << edge << "\n";
+        }*/
+        for(std::map<int,VariantEdge*>::iterator nodeIter = edgeList->begin() ; nodeIter != edgeList->end() ; nodeIter++ ){
+            std::vector<std::string> refEdge = (*nodeIter).second->ref->showEdge( std::to_string((*nodeIter).first) + ".1");
+            std::vector<std::string> altEdge = (*nodeIter).second->alt->showEdge( std::to_string((*nodeIter).first) + ".2" );
+            
+            for(std::vector<std::string>::iterator iter = refEdge.begin() ; iter != refEdge.end() ; iter++ )
+                resultVcf << (*iter) << "\n";
+            for(std::vector<std::string>::iterator iter = altEdge.begin() ; iter != altEdge.end() ; iter++ )
+                resultVcf << (*iter) << "\n";
         }
         resultVcf << "}\n";
     }

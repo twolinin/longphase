@@ -13,6 +13,7 @@
 #include <vector>
 #include <omp.h>
 #include <numeric> 
+#include <iomanip>
 
 struct PhasingElement{
     // i.e. 0|1  or   1|0
