@@ -53,6 +53,11 @@ class HaplotagProcess
     // The number of SVs occurring on different haplotypes in a read
     std::map<std::string, std::map<int, int> > readSVHapCount;
 
+    // record SV region
+    std::map<std::string, std::vector<std::tuple<int, int, int> > > chrRegions;
+    std::vector<std::tuple<int, int, int> > currentchrRegions;
+    std::vector<std::tuple<int, int, int> >::iterator firstSVIter;
+
     void initFlag(bam1_t *aln, std::string flag);
     
     int judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, std::string chrName, double percentageThreshold, std::ofstream *tagResult, int &pqValue, const std::string &ref_string);

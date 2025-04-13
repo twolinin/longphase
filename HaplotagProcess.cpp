@@ -213,34 +213,31 @@ void HaplotagProcess::parserProcess(std::string &input){
             // sv file
             if( parseSVFile ){
                 // get read INFO
-                int read_pos = fields[7].find("RNAMES=");
-                read_pos = fields[7].find("=",read_pos);
-                read_pos++;
-                        
-                int next_field = fields[7].find(";",read_pos);
-                std::string totalRead = fields[7].substr(read_pos,next_field-read_pos);
-                std::stringstream totalReadStream(totalRead);
-                
-                int svHaplotype;
-                // In which haplotype does SV occur
-                if( fields[9][modifu_start] == '0' && fields[9][modifu_start+2] == '1' ){
-                    svHaplotype = 1;
-                }
-                else if( fields[9][modifu_start] == '1' && fields[9][modifu_start+2] == '0' ){
-                    svHaplotype = 0;
-                }
-                
-                std::string read;
-                while(std::getline(totalReadStream, read, ','))
+                // get SV regions
+                int start = std::stoi(fields[1]);
+                std::string info = fields[7];
+                size_t svlenPos = info.find("SVLEN=");  // get SV length
+                if (svlenPos != std::string::npos)
                 {
-                   auto readIter = readSVHapCount.find(read);
-                   if(readIter==readSVHapCount.end()){
-                       readSVHapCount[read][0]=0;
-                       readSVHapCount[read][1]=0;
-                   }
-                   readSVHapCount[read][svHaplotype]++;
+                    svlenPos += 6;
+                    size_t semiPos = info.find(';', svlenPos);
+                    int svlen = std::stoi(info.substr(svlenPos, semiPos - svlenPos));
+                    // Insert SV information into chrRegions
+                    // In which haplotype does SV occur
+                    int svHaplotype;
+
+                    if (fields[9][modifu_start] == '0' && fields[9][modifu_start + 2] == '1')
+                    {
+                        svHaplotype = 1;
+                        chrRegions[chr].push_back(std::make_tuple(start, svlen, svHaplotype));
+                    }
+                    else if (fields[9][modifu_start] == '1' && fields[9][modifu_start + 2] == '0')
+                    {
+                        svHaplotype = 0;
+                        chrRegions[chr].push_back(std::make_tuple(start, svlen, svHaplotype));
+                    }
                 }
-                
+
             }
             // mod file
             if( parseMODFile ){
@@ -405,6 +402,9 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
         // the tagging process will not be perform if the read's start coordinate are over than last variant.
         std::map<int, RefAlt>::reverse_iterator last = currentChrVariants.rbegin();
         
+        // get the current chromosome SV region
+        currentchrRegions = chrRegions[chr];
+        firstSVIter = currentchrRegions.begin();
         // fetch chromosome string
         std::string chr_reference = fastaParser.chrString.at(chr);
         
@@ -511,6 +511,12 @@ int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, 
         firstVariantIter++;
     }
     
+    // Skip SVs that are to the left of this read
+    while (firstSVIter != currentchrRegions.end() && std::get<0>(*firstSVIter) < aln.core.pos)
+    {
+        firstSVIter++;
+    }
+
     if( firstVariantIter == currentChrVariants.end() ){
         return 0;
     }
@@ -521,6 +527,8 @@ int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, 
     int query_pos = 0;
     // set variant start for current alignment
     std::map<int, RefAlt>::iterator currentVariantIter = firstVariantIter;
+    // set first SV start for current alignment
+    std::vector<std::tuple<int, int, int> >::iterator currentchrRegionIter = firstSVIter;
 
     // reading cigar to detect snp on this read
     int aln_core_n_cigar = int(aln.core.n_cigar);
@@ -532,6 +540,39 @@ int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, 
         // iterator next variant
         while( currentVariantIter != currentChrVariants.end() && (*currentVariantIter).first < ref_pos ){
             currentVariantIter++;
+        }
+         // iterator next SV
+        while (currentchrRegionIter != currentchrRegions.end() && std::get<0>(*currentchrRegionIter) < ref_pos)
+        {
+            currentchrRegionIter++;
+        }
+
+        int window_size = 25;
+        double threshold = 0.10;
+        // make sure is in the region
+        if (currentchrRegionIter != currentchrRegions.end())
+        {
+            int sv_start = std::get<0>(*currentchrRegionIter);
+            int sv_length = std::get<1>(*currentchrRegionIter);
+            int sv_end = sv_start + std::abs(sv_length);
+            int svHaplotype = std::get<2>(*currentchrRegionIter);
+            double sv_region = sv_end - sv_start + 1;
+
+            for (int j = std::max(i - window_size, 0); j < std::min(i + window_size, aln_core_n_cigar); j++) {
+                int cigar_op = bam_cigar_op(cigar[j]);
+                int cigar_oplen = bam_cigar_oplen(cigar[j]);
+                if (cigar_op == BAM_CDEL && std::abs(sv_region - cigar_oplen) / std::abs(sv_region) < threshold)
+                {
+                    readSVHapCount[bam_get_qname(&aln)][svHaplotype]++;
+                    break;
+                }
+
+                if (cigar_op == BAM_CINS && std::abs(sv_region - cigar_oplen) / std::abs(sv_region) < threshold)
+                {
+                    readSVHapCount[bam_get_qname(&aln)][svHaplotype]++;
+                    break;
+                }
+            }
         }
 
         // CIGAR operators: MIDNSHP=X correspond 012345678
