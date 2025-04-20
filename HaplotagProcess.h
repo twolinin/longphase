@@ -9,8 +9,10 @@ struct HaplotagParameters
 {
     int numThreads;
     int qualityThreshold;
+    int svWindow;
     
     double percentageThreshold;
+    double svThreshold;
     
     std::string snpFile;
     std::string svFile;
@@ -60,7 +62,7 @@ class HaplotagProcess
 
     void initFlag(bam1_t *aln, std::string flag);
     
-    int judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, std::string chrName, double percentageThreshold, std::ofstream *tagResult, int &pqValue, const std::string &ref_string);
+    int judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, std::string chrName, double percentageThreshold, std::ofstream *tagResult, int &pqValue, const std::string &ref_string, int svWindow, double svThreshold);
     
     int totalAlignment;
     int totalSupplementary;

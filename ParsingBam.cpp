@@ -1035,7 +1035,7 @@ void BamParser::direct_detect_alleles(int lastSNPPos, htsThreadPool &threadPool,
                 continue;
             }
 
-            get_snp(*bamHdr, *aln, readVariantVec, clipCount, ref_string, params.isONT);
+            get_snp(*bamHdr, *aln, readVariantVec, clipCount, ref_string, params.isONT, params.svWindow, params.svThreshold);
         }
         hts_idx_destroy(idx);
         bam_hdr_destroy(bamHdr);
@@ -1045,7 +1045,7 @@ void BamParser::direct_detect_alleles(int lastSNPPos, htsThreadPool &threadPool,
     
 }
 
-void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln, std::vector<ReadVariant> &readVariantVec, ClipCount &clipCount, const std::string &ref_string, bool isONT){
+void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln, std::vector<ReadVariant> &readVariantVec, ClipCount &clipCount, const std::string &ref_string, bool isONT, int svWindow, double svThreshold){
 
     ReadVariant *tmpReadResult = new ReadVariant();
     (*tmpReadResult).read_name = bam_get_qname(&aln);
@@ -1152,8 +1152,8 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln, std::vector<
                 double sv_region = sv_end - sv_start + 1;
 
                 // this read contains SV.
-                int window_size = 25;
-                double threshold = 0.10;
+                int window_size = svWindow;
+                double threshold = svThreshold;
                 for(int j = std::max(i - window_size, 0); j < std::min(i + window_size, aln_core_n_cigar); j++){
                     int cigar_op = bam_cigar_op(cigar[j]);
                     int cigar_oplen = bam_cigar_oplen(cigar[j]);

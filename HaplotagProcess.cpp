@@ -362,6 +362,8 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
             (*tagResult) << "##qualityThreshold:"    << params.qualityThreshold    << "\n";
             (*tagResult) << "##percentageThreshold:" << params.percentageThreshold << "\n";
             (*tagResult) << "#tagSupplementary:"     << params.tagSupplementary    << "\n";
+            (*tagResult) << "#svWindowsize:"         << params.svWindow            << "\n";
+            (*tagResult) << "#svThreshold:"          << params.svThreshold         << "\n";
             (*tagResult) << "#Read\t"
                          << "Chr\t"
                          << "ReadStart\t"
@@ -448,7 +450,7 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
                 }
 
                 int pqValue = 0;
-                int haplotype = judgeHaplotype(*bamHdr, *aln, chr, params.percentageThreshold, tagResult, pqValue, chr_reference);
+                int haplotype = judgeHaplotype(*bamHdr, *aln, chr, params.percentageThreshold, tagResult, pqValue, chr_reference, params.svWindow, params.svThreshold);
 
                 initFlag(aln, "HP");
                 initFlag(aln, "PS");
@@ -498,7 +500,7 @@ void HaplotagProcess::initFlag(bam1_t *aln, std::string flag){
     return;
 }
 
-int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, std::string chrName, double percentageThreshold, std::ofstream *tagResult, int &pqValue, const std::string &ref_string){
+int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, std::string chrName, double percentageThreshold, std::ofstream *tagResult, int &pqValue, const std::string &ref_string, int svWindow, double svThreshold){
 
     int hp1Count = 0;
     int hp2Count = 0;
@@ -547,8 +549,8 @@ int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, 
             currentchrRegionIter++;
         }
 
-        int window_size = 25;
-        double threshold = 0.10;
+        int window_size = svWindow;
+        double threshold = svThreshold;
         // make sure is in the region
         if (currentchrRegionIter != currentchrRegions.end())
         {
@@ -860,20 +862,24 @@ int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, 
 HaplotagProcess::HaplotagProcess(HaplotagParameters params):
 totalAlignment(0),totalSupplementary(0),totalSecondary(0),totalUnmapped(0),totalTagCount(0),totalUnTagCount(0),processBegin(time(NULL)),integerPS(false)
 {
-    std::cerr<< "phased SNP file:   " << params.snpFile             << "\n";
-    std::cerr<< "phased SV file:    " << params.svFile              << "\n";
-    std::cerr<< "phased MOD file:   " << params.modFile             << "\n";
-    std::cerr<< "input bam file:    " << params.bamFile             << "\n";
-    std::cerr<< "input ref file:    " << params.fastaFile           << "\n";
-    std::cerr<< "output bam file:   " << params.resultPrefix + "." + params.outputFormat << "\n";
-    std::cerr<< "number of threads: " << params.numThreads          << "\n";
-    std::cerr<< "write log file:    " << (params.writeReadLog ? "true" : "false") << "\n";
-    std::cerr<< "log file:          " << (params.writeReadLog ? (params.resultPrefix+".out") : "") << "\n";
+    std::cerr<< "phased SNP file    : " << params.snpFile             << "\n";
+    std::cerr<< "phased SV file     : " << params.svFile              << "\n";
+    std::cerr<< "phased MOD file    : " << params.modFile             << "\n";
+    std::cerr<< "input bam file     : " << params.bamFile             << "\n";
+    std::cerr<< "input ref file     : " << params.fastaFile           << "\n";
+    std::cerr<< "output bam file    : " << params.resultPrefix + "." + params.outputFormat << "\n";
+    std::cerr<< "number of threads  : " << params.numThreads          << "\n";
+    std::cerr<< "write log file     : " << (params.writeReadLog ? "true" : "false") << "\n";
+    std::cerr<< "log file           : " << (params.writeReadLog ? (params.resultPrefix+".out") : "") << "\n";
     std::cerr<< "-------------------------------------------\n";
-    std::cerr<< "tag region:                    " << (!params.region.empty() ? params.region : "all") << "\n";
-    std::cerr<< "filter mapping quality below:  " << params.qualityThreshold    << "\n";
-    std::cerr<< "percentage threshold:          " << params.percentageThreshold << "\n";
-    std::cerr<< "tag supplementary:             " << (params.tagSupplementary ? "true" : "false") << "\n";
+    std::cerr<< "tag region                   : " << (!params.region.empty() ? params.region : "all") << "\n";
+    std::cerr<< "filter mapping quality below : " << params.qualityThreshold    << "\n";
+    std::cerr<< "percentage threshold         : " << params.percentageThreshold << "\n";
+    if (!params.svFile.empty()) {
+        std::cerr<< "SV windowsize                : " << params.svWindow    << "\n";
+        std::cerr<< "SV threshold                 : " << params.svThreshold << "\n";
+    }
+    std::cerr<< "tag supplementary            : " << (params.tagSupplementary ? "true" : "false") << "\n";
     std::cerr<< "-------------------------------------------\n";
 
     // load SNP vcf file
