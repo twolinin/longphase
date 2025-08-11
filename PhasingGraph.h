@@ -47,7 +47,7 @@ class Clip{
         Clip(std::string &chr, ClipCount &inClipCount);
         ~Clip();
         std::vector<std::pair<int, int>> cnvVec;
-        void getCNVInterval(ClipCount &clipCount);
+        void getCNVInterval(ClipCount &clipCount, std::string &chr);
         PosVec detectLOH(SnpParser &snpMap);
         std::string getChr() const { return chr;}
 };
@@ -135,6 +135,7 @@ struct CnvStatistics{
 class VairiantGraph{
     
     private:
+        std::string *chrName;
         PhasingParameters *params;
         std::string *ref;
         std::vector<std::string> dotResult;
@@ -180,7 +181,7 @@ class VairiantGraph{
 
     public:
     
-        VairiantGraph(std::string &ref, PhasingParameters &params);
+        VairiantGraph(std::string &ref, PhasingParameters &params, std::string &chrName);
         ~VairiantGraph();
     
         void addEdge(std::vector<ReadVariant> &in_readVariant, Clip &clip);

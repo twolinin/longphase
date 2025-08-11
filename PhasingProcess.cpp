@@ -90,7 +90,7 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
         
         std::time_t chrbegin = time(NULL);
         
-        // get lase SNP variant position
+        // get last SNP variant position
         int lastSNPpos = snpFile.getLastSNP((*chrIter));
         // therer is no variant on SNP file. 
         if( lastSNPpos == -1 ){
@@ -120,10 +120,11 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
             continue;
         }
         Clip *clip = new Clip((*chrIter), clipCount);
-        clip->getCNVInterval(clipCount);
+        clip->getCNVInterval(clipCount, (*chrIter));
+        
 
         // create a graph object and prepare to phasing.
-        VairiantGraph *vGraph = new VairiantGraph(chr_reference, params);
+        VairiantGraph *vGraph = new VairiantGraph(chr_reference, params, (*chrIter));
         // trans read-snp info to edge info
         vGraph->addEdge(readVariantVec, *clip);
         // run main algorithm

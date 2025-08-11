@@ -3,8 +3,14 @@
 
 ModCallProcess::ModCallProcess(ModCallParameters params){
 
+     // load SNP vcf file
+    std::time_t begin = time(NULL);
+    std::cerr<< "parsing VCF ... ";
+    MethSnpParser snpFile(params);
+    std::cerr<< difftime(time(NULL), begin) << "s\n";
+    
     // parsing ref fasta
-    std::time_t begin= time(NULL);
+    begin= time(NULL);
     std::cerr<< "reading reference ... ";
     std::vector<ReferenceChromosome> chrInfo;
     MethFastaParser MethFastaParser(params.fastaFile, chrInfo);
@@ -31,38 +37,30 @@ ModCallProcess::ModCallProcess(ModCallParameters params){
     #pragma omp parallel for schedule(dynamic) num_threads(params.numThreads)
     for(auto chrIter = chrInfo.begin(); chrIter != chrInfo.end(); ++chrIter) {
         std::time_t chrbegin = time(NULL);
-
         // store variant
-        std::vector<ReadVariant> fReadVariantVec;
-        std::vector<ReadVariant> rReadVariantVec;
+        std::vector<ReadVariant> modReadVariantVec;
         std::vector<ReadVariant> readVariantVec;
         // record hetero metyhl position
-        std::map<int,std::vector<int>> *passPosition = new std::map<int,std::vector<int>>;
+        std::vector<int> *passPosition = new std::vector<int>;
 
         std::string chrName = chrIter->name;
         std::string chrSeq = chrIter->sequence;
         int chrLen = chrIter->length;
         
-        MethBamParser *methbamparser = new MethBamParser(params, chrSeq);
-        
-        methbamparser->detectMeth(chrName, chrLen, threadPool, readVariantVec);
+        MethBamParser *methbamparser = new MethBamParser(chrName, params, snpFile, chrSeq);
 
+        methbamparser->detectMeth(chrName, chrLen, threadPool, readVariantVec);
         //new new calculate depth
         methbamparser->calculateDepth();
         //judge methylation genotype
-        methbamparser->judgeMethGenotype(chrName, readVariantVec, fReadVariantVec, rReadVariantVec);
-        MethylationGraph *fGraph = new MethylationGraph(params);
-        MethylationGraph *rGraph = new MethylationGraph(params);
-        fGraph->addEdge(fReadVariantVec);
-        fGraph->connectResults(chrName, (*passPosition));
-        
-        rGraph->addEdge(rReadVariantVec);
-        rGraph->connectResults(chrName, (*passPosition));
-        
-        fGraph->destroy();
-        rGraph->destroy();
-        delete fGraph;
-        delete rGraph;
+        methbamparser->judgeMethGenotype(chrName, readVariantVec, modReadVariantVec);
+
+        MethylationGraph *modGraph = new MethylationGraph(params);
+        modGraph->addEdge(modReadVariantVec, chrName);
+
+        modGraph->connectResults(chrName, (*passPosition), snpFile.hasValidSnpData());
+        modGraph->destroy();
+        delete modGraph;
         
         //push result to ModCallResult
         methbamparser->exportResult(chrName, chrSeq, chrLen, (*passPosition), chrModCallResult[chrName]);
@@ -73,10 +71,8 @@ ModCallProcess::ModCallProcess(ModCallParameters params){
         
         readVariantVec.clear();
         readVariantVec.shrink_to_fit();
-        fReadVariantVec.clear();
-        fReadVariantVec.shrink_to_fit();
-        rReadVariantVec.clear();
-        rReadVariantVec.shrink_to_fit();
+        modReadVariantVec.clear();
+        modReadVariantVec.shrink_to_fit();
 
         std::cerr<< "(" << chrName << "," << difftime(time(NULL), chrbegin) << "s)";
     }

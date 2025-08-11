@@ -10,7 +10,7 @@
 #include <htslib/thread_pool.h>
 #include <htslib/vcf.h>
 #include <htslib/vcfutils.h>
-
+#include "ModCallProcess.h"
 #include <zlib.h>
 
 struct RefAlt{
@@ -70,7 +70,7 @@ class SnpParser : public BaseVairantParser{
     public:
     
         SnpParser(PhasingParameters &in_params);
-        ~SnpParser();
+        ~SnpParser();     
             
         std::map<int, RefAlt> getVariants(std::string chrName);  
 

@@ -11,7 +11,6 @@
 #include <htslib/vcf.h>
 #include <htslib/vcfutils.h>
 #include <htslib/kstring.h>
-
 #include "ParsingBam.h"
 #include "PhasingGraph.h"
 #include "PhasingProcess.h"
@@ -26,6 +25,7 @@ struct MethPosInfo{
     int depth;
     std::string heterstatus;
     int strand; //0: + , 1: -
+    VariantType variantType;
     std::vector<std::string> modReadVec;
     std::vector<std::string> nonModReadVec;
 };
@@ -66,6 +66,34 @@ struct AlignmentMethExtend: Alignment{
     std::vector<MethPosProb> queryMethVec;
 };
 
+class MethSnpParser : public BaseVairantParser {
+private:
+    ModCallParameters *params;  // Use ModCallParameters instead
+    //std::map<std::string, std::map<int, RefAlt>> *chrVariant;
+    std::vector<std::string> chrName;
+    std::map<std::string, std::map<int, bool>> chrVariantHomopolymer;
+    bool commandLine;
+    bool hasSnpData;  // 標示是否成功載入 SNP 資料
+
+    void parserProcess(std::string &input);
+    void writeLine(std::string &input, bool &ps_def, std::ofstream &resultVcf, PhasingResult &phasingResult);
+
+public:
+    MethSnpParser(ModCallParameters &in_params);  // New constructor
+    ~MethSnpParser();
+
+    std::map<std::string, std::map<int, RefAlt>> *chrVariant;
+
+    std::map<int, RefAlt> getVariants(std::string chrName);
+    std::map<int, RefAlt> getVariants_markindel(std::string chrName, const std::string &ref);
+    std::vector<std::string> getChrVec();
+    int getLastSNP(std::string chrName);
+    void writeResult(PhasingResult phasingResult);
+    bool findSNP(std::string chr, int position);
+    void filterSNP(std::string chr, std::vector<ReadVariant> &readVariantVec, std::string &chr_reference);
+    bool hasValidSnpData() const;  // 檢查是否有有效的 SNP 資料
+};
+
 class MethBamParser{
     private:
         ModCallParameters *params;
@@ -83,15 +111,17 @@ class MethBamParser{
         
         // record methylation position and probability from methylation tag
         void getmeth(AlignmentMethExtend &align);
+        std::map<int, RefAlt> *currentVariants;
+        std::map<int, RefAlt>::iterator firstVariantIter;
         
     public:
-        MethBamParser(ModCallParameters &params, std::string &refString);
+        MethBamParser(std::string inputChrName, ModCallParameters &in_params, MethSnpParser &snpMap, std::string &ref_string);
         ~MethBamParser();
-        void detectMeth(std::string chrName, int chr_len, htsThreadPool &threadPool, std::vector<ReadVariant> &readVariantVec);
-        void exportResult(std::string chrName, std::string chrSquence, int chrLen , std::map<int,std::vector<int>> &passPosition, std::ostringstream &methResult);
-        void judgeMethGenotype(std::string chrName, std::vector<ReadVariant> &readVariantVec, std::vector<ReadVariant> &fReadVariantVec, std::vector<ReadVariant> &rReadVariantVec );
+        void detectMeth(std::string chrName, int lastSNPPos, htsThreadPool &threadPool, std::vector<ReadVariant> &readVariantVec);
         void calculateDepth();
-        
+        void exportResult(std::string chrName, std::string chrSquence, int chrLen, std::vector<int> &passPosition, std::ostringstream &modCallResult);
+        void judgeMethGenotype(std::string chrName, std::vector<ReadVariant> &readVariantVec, std::vector<ReadVariant> &modReadVariantVec);
+        void exportPositionInfo(int position, std::string chrName, std::string chrSquence, int chrLen, std::ostringstream &modCallResult);
 };
 
 void writeResultVCF(ModCallParameters &params, std::vector<ReferenceChromosome> &chrInfo, std::map<std::string,std::ostringstream> &chrResult);
@@ -110,16 +140,23 @@ class MethylationGraph{
         // position, edge
         std::map<int,VariantEdge*> *edgeList;
         // record all variant position, include SNP and SV 
-        // position, quality
-        std::map<int,ReadBaseMap*> *nodeInfo;
+        // <position, <readID, VariantType>>
+        std::map<int, std::map<std::string, VariantType>> *nodeInfo;
+        //check if the position is a SNP
+        bool isSNP(int position);
+        //check if the position is a methylation
+        bool isMethylation(int position);
+        //store strong methylation position
+        std::set<int> strongMethylationPoints;
         
     public:
     
         MethylationGraph(ModCallParameters &params);
         ~MethylationGraph();
         
-        void addEdge(std::vector<ReadVariant> &readVariant);
-        void connectResults(std::string chrName, std::map<int,std::vector<int>> &passPosition);
+        void addEdge(std::vector<ReadVariant> &in_readVariant, std::string chrName);
+        void connectResults(std::string chrName, std::vector<int> &passPosition, bool hasValidSnpData = true);
+        void readCorrection(std::vector<int> &passPosition);
         
         void destroy();
 };
