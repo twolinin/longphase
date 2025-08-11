@@ -804,18 +804,17 @@ void MethylationGraph::addEdge(std::vector<ReadVariant> &in_readVariant, std::st
             while (variant2Iter != (*readIter).variantVec.end() && searchCount < 50) {
                 if (!(variant1Iter->type == VariantType::SNP && variant2Iter->type == VariantType::SNP) ) {
 
-                    int pos1 = variant1Iter->position;
-                    int pos2 = variant2Iter->position;
-                    auto edgeIter = edgeList->find(pos1);
+                    int pos = variant1Iter->position;
+                    auto edgeIter = edgeList->find(pos);
                     if (edgeIter == edgeList->end()) {
-                        (*edgeList)[pos1] = new VariantEdge(pos1);
+                        (*edgeList)[pos] = new VariantEdge(pos);
                     }
 
                     if (variant1Iter->allele == 0) {
-                        (*edgeList)[pos1]->ref->addSubEdge(variant1Iter->quality, *variant2Iter, readIter->read_name, 0, 1);
+                        (*edgeList)[pos]->ref->addSubEdge(variant1Iter->quality, *variant2Iter, readIter->read_name, 0, 1);
                     } 
                     else if (variant1Iter->allele == 1) {
-                        (*edgeList)[pos1]->alt->addSubEdge(variant1Iter->quality, *variant2Iter, readIter->read_name, 0, 1);
+                        (*edgeList)[pos]->alt->addSubEdge(variant1Iter->quality, *variant2Iter, readIter->read_name, 0, 1);
                     }
                 }
                 ++searchCount;
@@ -862,7 +861,6 @@ void MethylationGraph::connectResults(std::string chrName, std::vector<int> &pas
 
             if(isMethylation(currPos)){
                 auto searchNodeIter = nextNodeIter;
-                bool snpAround = false;
                 // Continue searching until we find a SNP or reach the end of nodeInfo
                 while (searchNodeIter != nodeInfo->end() && searchCount < params->connectAdjacent) {
                     std::pair<int, int> tmp = edgeIter->second->findNumberOfRead(searchNodeIter->first);
@@ -871,8 +869,7 @@ void MethylationGraph::connectResults(std::string chrName, std::vector<int> &pas
                     if(totalConnectReads <= minimumConnection){
                         break;
                     }
-                    if(isSNP(searchNodeIter->first)) {   
-                        snpAround = true;      
+                    if(isSNP(searchNodeIter->first)) {     
                         double majorRatio = (double)std::max(tmp.first, tmp.second) / (double)(tmp.first + tmp.second);
                         hasConnect.push_back(currPos);
                         if (majorRatio >= params->connectConfidence && totalConnectReads > minimumConnection && strongMethylationPoints.count(currPos) == 0) {
@@ -1074,11 +1071,10 @@ void MethylationGraph::connectResults(std::string chrName, std::vector<int> &pas
             }
             std::pair<int, int> tmp = edgeIter->second->findNumberOfRead(pos);
             int totalConnectReads = tmp.first + tmp.second;
-            double minimumConnection = std::max(((*nodeInfo)[pos].size() + (*nodeInfo)[prevPos].size()) / 4.0, 6.0); 
             double majorRatio = (double)std::max(tmp.first, tmp.second) / (double)(tmp.first + tmp.second);
             if(totalConnectReads != 0){
                 
-                if (majorRatio >= params->connectConfidence && totalConnectReads >= /*minimumConnection*/6 ) {
+                if (majorRatio >= params->connectConfidence && totalConnectReads >= 6 ) {
                     hasGoodPrevConnection = true;
                 }
             }
@@ -1093,7 +1089,6 @@ void MethylationGraph::connectResults(std::string chrName, std::vector<int> &pas
             }
             std::pair<int, int> tmp = edgeIter->second->findNumberOfRead(nextPos);
             int totalConnectReads = tmp.first + tmp.second;
-            double minimumConnection = std::max(((*nodeInfo)[pos].size() + (*nodeInfo)[nextPos].size()) / 4.0, 6.0); 
             double majorRatio = (double)std::max(tmp.first, tmp.second) / (double)(tmp.first + tmp.second);
             if(totalConnectReads != 0){
                 if (majorRatio >= params->connectConfidence && totalConnectReads >= 6 ) {
