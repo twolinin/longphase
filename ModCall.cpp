@@ -126,10 +126,6 @@ void ModCallOptions(int argc, char** argv)
             die = true;
         }
     }
-    // else{
-    //     std::cerr << SUBPROGRAM ": missing SNP file.\n";
-    //     die = true;
-    // }
     
 	if( opt::bamFileVec.size() != 0 )
     {
