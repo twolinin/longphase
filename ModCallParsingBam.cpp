@@ -596,7 +596,7 @@ void MethBamParser::exportResult(std::string chrName, std::string chrSquence, in
 
 void writeResultVCF( ModCallParameters &params, std::vector<ReferenceChromosome> &chrInfo, std::map<std::string,std::ostringstream> &chrModCallResult){
 
-    std::ofstream modCallResultVcf(params.resultPrefix+".vcf"/*, std::ios_base::app*/);
+    std::ofstream modCallResultVcf(params.resultPrefix+".vcf", std::ios_base::app);
     if(!modCallResultVcf.is_open()){
         std::cerr<<"Fail to open output file :\n";
     }

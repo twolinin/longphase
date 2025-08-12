@@ -65,7 +65,7 @@ namespace opt
     static std::vector<std::string> bamFileVec;
     static float modThreshold = 0.8;
     static float unModThreshold = 0.2;
-    static float heterRatio = 0.4;
+    static float heterRatio = 0.6;
     static float noiseRatio = 0.2;
     static int connectAdjacent = 20;
     static float connectConfidence = 0.9;
