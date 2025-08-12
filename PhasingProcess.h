@@ -31,6 +31,9 @@ struct PhasingParameters
     
     double edgeThreshold;
     double overlapThreshold;
+
+    int svWindow;
+    double svThreshold; 
     
     std::string version;
     std::string command;

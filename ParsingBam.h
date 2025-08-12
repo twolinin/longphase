@@ -96,7 +96,7 @@ class SVParser : public BaseVairantParser{
         SnpParser *snpFile;
 
         // chr , variant position (0-base), read
-        std::map<std::string, std::map<int, std::map<std::string ,bool> > > *chrVariant;
+        std::map<std::string, std::map<int, std::map<int, bool> > > *chrVariant;
         // chr, variant position (0-base)
         std::map<std::string, std::map<int, bool> > posDuplicate;
         
@@ -112,7 +112,7 @@ class SVParser : public BaseVairantParser{
         SVParser(PhasingParameters &params, SnpParser &snpFile);
         ~SVParser();
             
-        std::map<int, std::map<std::string ,bool> > getVariants(std::string chrName);  
+        std::map<int, std::map<int, bool> > getVariants(std::string chrName);
 
         void writeResult(PhasingResult phasingResult);
 
@@ -184,12 +184,13 @@ class BamParser{
         std::map<int, RefAlt> *currentVariants;
         std::map<int, RefAlt>::iterator firstVariantIter;
         // SV map and iter
-        std::map<int, std::map<std::string ,bool> > *currentSV;
-        std::map<int, std::map<std::string ,bool> >::iterator firstSVIter;
+        std::map<int, std::map<int, bool> > *currentSV;
+        std::vector<std::pair<int, int> >::iterator firstSVIter;
+        std::map<std::string, std::vector<std::pair<int, int> > > SV_map;
         // mod map and iter
-        std::map<int, std::map<std::string ,RefAlt> > *currentMod;
-        std::map<int, std::map<std::string ,RefAlt> >::iterator firstModIter;
-        void get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln, std::vector<ReadVariant> &readVariantVec, ClipCount &clipCount, const std::string &ref_string, bool isONT);
+        std::map<int, std::map<std::string, RefAlt> > *currentMod;
+        std::map<int, std::map<std::string, RefAlt> >::iterator firstModIter;
+        void get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln, std::vector<ReadVariant> &readVariantVec, ClipCount &clipCount, const std::string &ref_string, bool isONT, int svWindow, double svThreshold);
         void getClip(int pos, int clipFrontBack, int len, ClipCount &clipCount);
 
     public:
