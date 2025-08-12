@@ -53,6 +53,7 @@ static const struct option longopts[] = {
     { "noiseRatio",        required_argument,  NULL, 'i' },
     { "connectAdjacent",   required_argument,  NULL, 'a' },
     { "connectConfidence", required_argument,  NULL, 'c' },
+    { "iterCount",         required_argument,  NULL, 'k' },
     { NULL, 0, NULL, 0 }
 };
 
@@ -69,6 +70,7 @@ namespace opt
     static float noiseRatio = 0.2;
     static int connectAdjacent = 20;
     static float connectConfidence = 0.9;
+    static int iterCount = 2;
     static std::string command;
     
     bool outputAllMod = false;
@@ -94,6 +96,7 @@ void ModCallOptions(int argc, char** argv)
         case 'i': arg >> opt::noiseRatio; break;
         case 'a': arg >> opt::connectAdjacent; break;
         case 'c': arg >> opt::connectConfidence; break;
+        case 'k': arg >> opt::iterCount; break;
         case 'b': {
             std::string bamFile;
             arg >> bamFile;
@@ -191,7 +194,7 @@ int ModCallMain(int argc, char** argv, std::string in_version)
     ecParams.noiseRatio=opt::noiseRatio;
     ecParams.connectAdjacent=opt::connectAdjacent;
     ecParams.connectConfidence=opt::connectConfidence;
-    
+    ecParams.iterCount=opt::iterCount;
     ecParams.version=in_version;
     ecParams.command=opt::command;
     

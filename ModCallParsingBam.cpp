@@ -432,6 +432,7 @@ void MethBamParser::exportResult(std::string chrName, std::string chrSquence, in
 
     if(params->outputAllMod){
         for(const auto& [currPos, info] : *chrMethMap){
+            
             auto posinfoIter = chrMethMap->find(currPos);
             if (posinfoIter == chrMethMap->end()) return;
             std::string infostr = "";
@@ -477,17 +478,16 @@ void MethBamParser::exportResult(std::string chrName, std::string chrSquence, in
         }
     }
     else{
-        // 用於跟踪已處理過的位置，避免重複輸出
+        // used to track processed positions, avoid duplicate output
         std::set<int> processedPositions;
-        
-        // passPosition 已經有序，不需要額外排序
+        // passPosition is already sorted, no need to sort again
         for(const auto& pos : passPosition){
-            // 如果位置已經處理過，跳過
+            // if the position is already processed, skip
             if(processedPositions.count(pos) > 0) {
                 continue;
             }
-            
-            // 處理位置 pos
+
+            // process position pos
             auto posinfoIter = chrMethMap->find(pos);
             if (posinfoIter != chrMethMap->end()) {
                 std::string infostr = "";
@@ -496,10 +496,9 @@ void MethBamParser::exportResult(std::string chrName, std::string chrSquence, in
                 std::string strandinfo;
                 std::string ref;
                 
-                // 防止變異座標超出參考序列範圍
                 if (chrLen < pos) continue;
 
-                // 防止異常的 REF 等位基因
+                // avoid abnormal REF allele
                 ref = chrSquence.substr(pos, 1);
                 if (ref != "A" && ref != "T" && ref != "C" && ref != "G" &&
                     ref != "a" && ref != "t" && ref != "c" && ref != "g") continue;
@@ -508,7 +507,7 @@ void MethBamParser::exportResult(std::string chrName, std::string chrSquence, in
                 else if (posinfoIter->second.strand == 0) strandinfo = "RS=P;";
                 else continue;
 
-                // 添加修飾讀取
+                // add modified reads
                 if(posinfoIter->second.modReadVec.size() > 0) {
                     infostr += "MR=";
                     for(auto& readName : posinfoIter->second.modReadVec) {
@@ -517,7 +516,7 @@ void MethBamParser::exportResult(std::string chrName, std::string chrSquence, in
                     infostr.back() = ';';
                 }
                 
-                // 添加非修飾讀取
+                // add non-modified reads
                 if(posinfoIter->second.nonModReadVec.size() > 0) {
                     infostr += "NR=";
                     for(auto& readName : posinfoIter->second.nonModReadVec) {
@@ -526,7 +525,7 @@ void MethBamParser::exportResult(std::string chrName, std::string chrSquence, in
                     infostr.back() = ';';
                 }
                 
-                // 輸出所有修飾位置或只輸出異質性位置
+                // output all modified positions or only heterozygous positions
                 if(params->outputAllMod || posinfoIter->second.heterstatus == "0/1") {
                     int nonmethcnt = posinfoIter->second.canonreadcnt;
                     samplestr = posinfoIter->second.heterstatus + ":" + std::to_string(posinfoIter->second.methreadcnt) + ":" + std::to_string(nonmethcnt) + ":" + std::to_string(posinfoIter->second.depth);
@@ -538,7 +537,7 @@ void MethBamParser::exportResult(std::string chrName, std::string chrSquence, in
             }
             processedPositions.insert(pos);
             
-            // 處理位置 pos+1
+            // process position pos+1
             int nextPos = pos + 1;
             auto nextPosinfoIter = chrMethMap->find(nextPos);
             if (nextPosinfoIter != chrMethMap->end() && processedPositions.count(nextPos) == 0) {
@@ -548,10 +547,9 @@ void MethBamParser::exportResult(std::string chrName, std::string chrSquence, in
                 std::string strandinfo;
                 std::string ref;
                 
-                // 防止變異座標超出參考序列範圍
                 if (chrLen < nextPos) continue;
 
-                // 防止異常的 REF 等位基因
+                // avoid abnormal REF allele
                 ref = chrSquence.substr(nextPos, 1);
                 if (ref != "A" && ref != "T" && ref != "C" && ref != "G" &&
                     ref != "a" && ref != "t" && ref != "c" && ref != "g") continue;
@@ -560,7 +558,7 @@ void MethBamParser::exportResult(std::string chrName, std::string chrSquence, in
                 else if (nextPosinfoIter->second.strand == 0) strandinfo = "RS=P;";
                 else continue;
 
-                // 添加修飾讀取
+                // add modified reads
                 if(nextPosinfoIter->second.modReadVec.size() > 0) {
                     infostr += "MR=";
                     for(auto& readName : nextPosinfoIter->second.modReadVec) {
@@ -569,7 +567,7 @@ void MethBamParser::exportResult(std::string chrName, std::string chrSquence, in
                     infostr.back() = ';';
                 }
                 
-                // 添加非修飾讀取
+                // add non-modified reads
                 if(nextPosinfoIter->second.nonModReadVec.size() > 0) {
                     infostr += "NR=";
                     for(auto& readName : nextPosinfoIter->second.nonModReadVec) {
@@ -578,7 +576,7 @@ void MethBamParser::exportResult(std::string chrName, std::string chrSquence, in
                     infostr.back() = ';';
                 }
                 
-                // 輸出所有修飾位置或只輸出異質性位置
+                // output all modified positions or only heterozygous positions
                 if(params->outputAllMod || nextPosinfoIter->second.heterstatus == "0/1") {
                     int nonmethcnt = nextPosinfoIter->second.canonreadcnt;
                     samplestr = nextPosinfoIter->second.heterstatus + ":" + std::to_string(nextPosinfoIter->second.methreadcnt) + ":" + std::to_string(nonmethcnt) + ":" + std::to_string(nextPosinfoIter->second.depth);
@@ -828,13 +826,12 @@ void MethylationGraph::connectResults(std::string chrName, std::vector<int> &pas
     std::set<int> strongMethylationPoints;
     std::set<int> weakMethylationPoints;
     std::set<int> weakMethylationPoints2;
-    std::set<int> weakMethylationPoints3;
+    //std::set<int> weakMethylationPoints3;
     std::set<int> addedPositions;
     std::set<int> addedPositions2;
-    std::set<int> addedPositions3;
+    //std::set<int> addedPositions3;
     std::vector<int> prepassPosition;
     std::vector<int> hasConnect;
-    int noSnpAround = 0;
 
     // If no valid SNP data, skip the first pass and directly add all methylation sites to strongMethylationPoints
     if (!hasValidSnpData) {
@@ -882,7 +879,6 @@ void MethylationGraph::connectResults(std::string chrName, std::vector<int> &pas
                 }
                 if(std::find(hasConnect.begin(), hasConnect.end(), currPos) == hasConnect.end()){
                     weakMethylationPoints.insert(currPos);
-                    ++noSnpAround;
                 }
             }
             else if(isSNP(currPos)){
@@ -908,6 +904,7 @@ void MethylationGraph::connectResults(std::string chrName, std::vector<int> &pas
             }
         }
     } 
+    hasConnect.clear();
 
     // Second pass: Evaluate connections between strong methylation points
     for(auto it1 = strongMethylationPoints.begin(); it1 != strongMethylationPoints.end(); ++it1){
@@ -935,6 +932,7 @@ void MethylationGraph::connectResults(std::string chrName, std::vector<int> &pas
                 if(addedPositions.count(pos1) == 0) {
                     prepassPosition.push_back(pos1);
                     addedPositions.insert(pos1);
+                    passPosition.push_back(pos1);
                     // Only add positions to weakMethylationPoints if there is valid SNP data (for third pass)
                     if(hasValidSnpData) {
                         weakMethylationPoints.insert(pos1);
@@ -943,6 +941,7 @@ void MethylationGraph::connectResults(std::string chrName, std::vector<int> &pas
                 if(addedPositions.count(pos2) == 0) {
                     prepassPosition.push_back(pos2);
                     addedPositions.insert(pos2);
+                    passPosition.push_back(pos2);
                     // Only add positions to weakMethylationPoints if there is valid SNP data (for third pass)
                     if(hasValidSnpData) {
                         weakMethylationPoints.insert(pos2);
@@ -956,98 +955,66 @@ void MethylationGraph::connectResults(std::string chrName, std::vector<int> &pas
     strongMethylationPoints.clear();
 
     //third pass: evaluate connections between weak methylation points
-    if (hasValidSnpData) {
-        for(auto it1 = weakMethylationPoints.begin(); it1 != weakMethylationPoints.end(); ++it1){
-            int pos1 = *it1;
-
-            auto nextIter = it1;
-            int nextSearchCount = 0;
-            bool isAdded = false;
-            auto edgeIter = edgeList->find(pos1);
-            if (edgeIter == edgeList->end()) 
-                continue;
-            while(++nextIter != weakMethylationPoints.end() && nextSearchCount < params->connectAdjacent) {
-                int nextPos = *nextIter;
-                if(addedPositions.count(nextPos) == 0 && addedPositions.count(pos1) == 0){
-                    ++nextSearchCount;
+    for(int i = 0; i < params->iterCount; i++){
+        if (hasValidSnpData) {
+            // Use alternating sets for each iteration
+            auto& currentWeakPoints = (i % 2 == 0) ? weakMethylationPoints : weakMethylationPoints2;
+            auto& nextWeakPoints = (i % 2 == 0) ? weakMethylationPoints2 : weakMethylationPoints;
+            auto& currentAddedPositions = (i % 2 == 0) ? addedPositions : addedPositions2;
+            auto& nextAddedPositions = (i % 2 == 0) ? addedPositions2 : addedPositions;
+            
+            // Clear the target set for this iteration
+            nextWeakPoints.clear();
+            nextAddedPositions.clear();
+            
+            for(auto it1 = currentWeakPoints.begin(); it1 != currentWeakPoints.end(); ++it1){
+                int currPos = *it1;
+                auto nextIter = it1;
+                int nextSearchCount = 0;
+                bool isAdded = false;
+                auto edgeIter = edgeList->find(currPos);
+                if (edgeIter == edgeList->end()) 
                     continue;
-                }
-                isAdded = true;
-                std::pair<int, int> tmp = edgeIter->second->findNumberOfRead(nextPos);
-                int totalConnectReads = tmp.first + tmp.second;
-                float minimumConnection = std::max(((*nodeInfo)[pos1].size() + (*nodeInfo)[nextPos].size())/ 4.0, 6.0);
-                double majorRatio = (double)std::max(tmp.first, tmp.second) / (double)(tmp.first + tmp.second);
-                if(totalConnectReads <= minimumConnection){
-                    break;
-                }
-                if (majorRatio >= params->connectConfidence && totalConnectReads > minimumConnection ) {
-                    if(std::find(prepassPosition.begin(), prepassPosition.end(), pos1) == prepassPosition.end()){
-                        prepassPosition.push_back(pos1);
-                        weakMethylationPoints2.insert(pos1);
-                        addedPositions2.insert(pos1);
+                while(++nextIter != currentWeakPoints.end() && nextSearchCount < params->connectAdjacent) {
+                    int nextPos = *nextIter;
+                    if(currentAddedPositions.count(nextPos) == 0 && currentAddedPositions.count(currPos) == 0){
+                        ++nextSearchCount;
+                        continue;
                     }
-                    if(std::find(prepassPosition.begin(), prepassPosition.end(), nextPos) == prepassPosition.end()){
-                        prepassPosition.push_back(nextPos);
-                        weakMethylationPoints2.insert(nextPos);
-                        addedPositions2.insert(nextPos);
+                    isAdded = true;
+                    std::pair<int, int> tmp = edgeIter->second->findNumberOfRead(nextPos);
+                    int totalConnectReads = tmp.first + tmp.second;
+                    float minimumConnection = std::max(((*nodeInfo)[currPos].size() + (*nodeInfo)[nextPos].size())/ 4.0, 6.0);
+                    double majorRatio = (double)std::max(tmp.first, tmp.second) / (double)(tmp.first + tmp.second);
+                    if(totalConnectReads <= minimumConnection){
+                        break;
                     }
+                    if (majorRatio >= params->connectConfidence && totalConnectReads > minimumConnection ) {
+                        if(std::find(prepassPosition.begin(), prepassPosition.end(), currPos) == prepassPosition.end()){
+                            prepassPosition.push_back(currPos);
+                            nextWeakPoints.insert(currPos);
+                            nextAddedPositions.insert(currPos);
+                            passPosition.push_back(currPos);
+                        }
+                        if(std::find(prepassPosition.begin(), prepassPosition.end(), nextPos) == prepassPosition.end()){
+                            prepassPosition.push_back(nextPos);
+                            nextWeakPoints.insert(nextPos);
+                            nextAddedPositions.insert(nextPos);
+                            passPosition.push_back(nextPos);
+                        }
+                    }
+                    ++nextSearchCount;
                 }
-                ++nextSearchCount;
-            }
-            if(!isAdded){
-                weakMethylationPoints2.insert(pos1);
+                if(!isAdded){
+                    nextWeakPoints.insert(currPos);
+                }
             }
         }
-
-        weakMethylationPoints.clear();
-        addedPositions.clear();
     }
-    
-    //fourth pass: evaluate connections between weak methylation points2
-    if (hasValidSnpData) {
-        for(auto it1 = weakMethylationPoints2.begin(); it1 != weakMethylationPoints2.end(); ++it1){
-            int pos1 = *it1;
-            auto nextIter = it1;
-            int nextSearchCount = 0;
-            bool isAdded = false;
-            auto edgeIter = edgeList->find(pos1);
-            if (edgeIter == edgeList->end()) 
-                continue;
-            while(++nextIter != weakMethylationPoints2.end() && nextSearchCount < params->connectAdjacent) {
-                int nextPos = *nextIter;
-                if(addedPositions2.count(nextPos) == 0 && addedPositions2.count(pos1) == 0){
-                    ++nextSearchCount;
-                    continue;
-                }
-                isAdded = true;
-                std::pair<int, int> tmp = edgeIter->second->findNumberOfRead(nextPos);
-                int totalConnectReads = tmp.first + tmp.second;
-                float minimumConnection = std::max(((*nodeInfo)[pos1].size() + (*nodeInfo)[nextPos].size())/ 4.0, 6.0);
-                double majorRatio = (double)std::max(tmp.first, tmp.second) / (double)(tmp.first + tmp.second);
-                if(totalConnectReads <= minimumConnection){
-                    break;
-                }
-                if (majorRatio >= params->connectConfidence && totalConnectReads > minimumConnection ) {
-                    if(std::find(prepassPosition.begin(), prepassPosition.end(), pos1) == prepassPosition.end()){
-                        prepassPosition.push_back(pos1);
-                        weakMethylationPoints3.insert(pos1);
-                        addedPositions3.insert(pos1);
-                    }
-                    if(std::find(prepassPosition.begin(), prepassPosition.end(), nextPos) == prepassPosition.end()){
-                        prepassPosition.push_back(nextPos);
-                        weakMethylationPoints3.insert(nextPos);
-                        addedPositions3.insert(nextPos);
-                    }
-                }
-            }
-            if(!isAdded){
-                weakMethylationPoints3.insert(pos1);
-            }
-        }
-
-        weakMethylationPoints2.clear();
-        addedPositions2.clear();
-    }
+    weakMethylationPoints.clear();
+    weakMethylationPoints2.clear();
+    addedPositions.clear();
+    addedPositions2.clear();
 
     // Ensure passPosition is sorted by position
     std::sort(prepassPosition.begin(), prepassPosition.end());
@@ -1067,7 +1034,8 @@ void MethylationGraph::connectResults(std::string chrName, std::vector<int> &pas
             int prevPos = prepassPosition[i-1];
             auto edgeIter = edgeList->find(prevPos);
             if (edgeIter == edgeList->end()) {
-                continue; // Skip if no edge information
+                hasGoodPrevConnection = true;
+                continue;
             }
             std::pair<int, int> tmp = edgeIter->second->findNumberOfRead(pos);
             int totalConnectReads = tmp.first + tmp.second;
@@ -1085,7 +1053,8 @@ void MethylationGraph::connectResults(std::string chrName, std::vector<int> &pas
             int nextPos = prepassPosition[i+1];
             auto edgeIter = edgeList->find(pos);
             if (edgeIter == edgeList->end()) {
-                continue; // Skip if no edge information
+                hasGoodNextConnection = true;
+                continue;
             }
             std::pair<int, int> tmp = edgeIter->second->findNumberOfRead(nextPos);
             int totalConnectReads = tmp.first + tmp.second;
@@ -1103,7 +1072,6 @@ void MethylationGraph::connectResults(std::string chrName, std::vector<int> &pas
         }
     }
     prepassPosition.clear();
-
 }
 
 bool MethylationGraph::isSNP(int position){
@@ -1124,12 +1092,12 @@ bool MethylationGraph::isMethylation(int position){
     if (nodeIter != nodeInfo->end()) {
         // Iterate over the inner map to check each readID's type
         for (const auto& nodeType : nodeIter->second) {
-            if (nodeType.second == VariantType::SNP) {
-            return false; // Return true if any type is SNP
+            if(nodeType.second == VariantType::MOD){
+                return true; // Return true if any type is MOD
             }
         }
     }
-    return true;
+    return false;
 }
 
 void MethylationGraph::destroy(){

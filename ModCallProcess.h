@@ -16,6 +16,7 @@ struct ModCallParameters
     float noiseRatio;
     int connectAdjacent;
     float connectConfidence;
+    int iterCount;
     
     std::string version;
     std::string command;
