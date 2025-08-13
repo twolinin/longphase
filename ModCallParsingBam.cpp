@@ -835,7 +835,7 @@ void MethylationGraph::connectResults(std::string chrName, std::vector<int> &pas
     if (!hasValidSnpData) {
         for (auto nodeIter = nodeInfo->begin(); nodeIter != nodeInfo->end(); ++nodeIter) {
             int currPos = nodeIter->first;
-            if(checkVariantType(currPos) == 0){
+            if(checkVariantType(currPos) == VariantType::MOD){
                 strongMethylationPoints.insert(currPos);
             }
         }
@@ -864,7 +864,7 @@ void MethylationGraph::connectResults(std::string chrName, std::vector<int> &pas
                     if(totalConnectReads <= minimumConnection){
                         break;
                     }
-                    if(checkVariantType(searchNodeIter->first) == 1) {     
+                    if(checkVariantType(searchNodeIter->first) == VariantType::SNP) {     
                         double majorRatio = (double)std::max(tmp.first, tmp.second) / (double)(tmp.first + tmp.second);
                         hasConnect.push_back(currPos);
                         if (majorRatio >= params->connectConfidence && totalConnectReads > minimumConnection && strongMethylationPoints.count(currPos) == 0) {
@@ -879,7 +879,7 @@ void MethylationGraph::connectResults(std::string chrName, std::vector<int> &pas
                     weakMethylationPoints.insert(currPos);
                 }
             }
-            else if(checkVariantType(currPos) == 1){
+            else if(checkVariantType(currPos) == VariantType::SNP){
                 auto searchNodeIter = nextNodeIter;
                 prepassPosition.push_back(currPos);
                 while(searchNodeIter != nodeInfo->end()) {
@@ -889,7 +889,7 @@ void MethylationGraph::connectResults(std::string chrName, std::vector<int> &pas
                     if(totalConnectReads <= minimumConnection){
                         break;
                     }
-                    if (checkVariantType(searchNodeIter->first) == 0) {
+                    if (checkVariantType(searchNodeIter->first) == VariantType::MOD) {
                         double majorRatio = (double)std::max(tmp.first, tmp.second) / (double)(tmp.first + tmp.second);
                         hasConnect.push_back(searchNodeIter->first);
                         if (majorRatio >= params->connectConfidence && totalConnectReads > minimumConnection && strongMethylationPoints.count(nextNodeIter->first) == 0) {
@@ -1017,7 +1017,7 @@ void MethylationGraph::connectResults(std::string chrName, std::vector<int> &pas
         bool hasGoodPrevConnection = false;
         bool hasGoodNextConnection = false;
         if(nodeInfo->find(pos) != nodeInfo->end()){
-            if(checkVariantType(pos) == 1){
+            if(checkVariantType(pos) == VariantType::SNP){
                 continue;
             }
         }
@@ -1072,20 +1072,25 @@ int MethylationGraph::checkVariantType(int position){
     if (nodeIter != nodeInfo->end()) {
         for (const auto& nodeType : nodeIter->second) {
             if(nodeType.second == VariantType::MOD){
-                return 0; // Return true if any type is MOD
+                return VariantType::MOD; // Return true if any type is MOD
             }
             else if(nodeType.second == VariantType::SNP){
-                return 1; // Return true if any type is SNP
+                return VariantType::SNP; // Return true if any type is SNP
             }
             else if(nodeType.second == VariantType::INDEL){
-                return 2; // Return true if any type is INDEL
+                return VariantType::INDEL; // Return true if any type is INDEL
             }
             else if(nodeType.second == VariantType::SV){
-                return 3; // Return true if any type is SV
+                return VariantType::SV; // Return true if any type is SV
+            }
+            else{
+                return -1; // Return -1 if no variant type is found
             }
         }
     }
-    return 0;
+    else{
+        return -1; // Return -1 if the position is not in the nodeInfo
+    }
 }
 
 void MethylationGraph::destroy(){
