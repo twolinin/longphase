@@ -92,24 +92,17 @@ namespace opt
     static bool isONT=false;
     static bool isPB=false;
     static bool phaseIndel=false;
-    
     static int connectAdjacent = 35;
     static int mappingQuality = 1;
     static double mismatchRate = 3;
-    
     static int baseQuality = 12;
     static double edgeWeight = 0.1 ;
-
     static double snpConfidence  = 0.75;
     static double readConfidence = 0.65;
-    
     static double edgeThreshold = 0.7;
-
     static double overlapThreshold = 0.2;
-    
     static int svWindow = 20;
     static double svThreshold = 0.1;
-
     static std::string command;
 }
 

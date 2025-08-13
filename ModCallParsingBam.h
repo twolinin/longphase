@@ -142,10 +142,8 @@ class MethylationGraph{
         // record all variant position, include SNP and SV 
         // <position, <readID, VariantType>>
         std::map<int, std::map<std::string, VariantType>> *nodeInfo;
-        //check if the position is a SNP
-        bool isSNP(int position);
-        //check if the position is a methylation
-        bool isMethylation(int position);
+        // check the variant type of the position
+        int checkVariantType(int position);
         //store strong methylation position
         std::set<int> strongMethylationPoints;
         

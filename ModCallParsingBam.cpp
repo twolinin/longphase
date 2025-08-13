@@ -826,10 +826,8 @@ void MethylationGraph::connectResults(std::string chrName, std::vector<int> &pas
     std::set<int> strongMethylationPoints;
     std::set<int> weakMethylationPoints;
     std::set<int> weakMethylationPoints2;
-    //std::set<int> weakMethylationPoints3;
     std::set<int> addedPositions;
     std::set<int> addedPositions2;
-    //std::set<int> addedPositions3;
     std::vector<int> prepassPosition;
     std::vector<int> hasConnect;
 
@@ -837,7 +835,7 @@ void MethylationGraph::connectResults(std::string chrName, std::vector<int> &pas
     if (!hasValidSnpData) {
         for (auto nodeIter = nodeInfo->begin(); nodeIter != nodeInfo->end(); ++nodeIter) {
             int currPos = nodeIter->first;
-            if(isMethylation(currPos)){
+            if(checkVariantType(currPos) == 0){
                 strongMethylationPoints.insert(currPos);
             }
         }
@@ -856,7 +854,7 @@ void MethylationGraph::connectResults(std::string chrName, std::vector<int> &pas
             if (edgeIter == edgeList->end()) 
                 continue;
 
-            if(isMethylation(currPos)){
+            if(checkVariantType(currPos) == 0){
                 auto searchNodeIter = nextNodeIter;
                 // Continue searching until we find a SNP or reach the end of nodeInfo
                 while (searchNodeIter != nodeInfo->end() && searchCount < params->connectAdjacent) {
@@ -866,7 +864,7 @@ void MethylationGraph::connectResults(std::string chrName, std::vector<int> &pas
                     if(totalConnectReads <= minimumConnection){
                         break;
                     }
-                    if(isSNP(searchNodeIter->first)) {     
+                    if(checkVariantType(searchNodeIter->first) == 1) {     
                         double majorRatio = (double)std::max(tmp.first, tmp.second) / (double)(tmp.first + tmp.second);
                         hasConnect.push_back(currPos);
                         if (majorRatio >= params->connectConfidence && totalConnectReads > minimumConnection && strongMethylationPoints.count(currPos) == 0) {
@@ -881,7 +879,7 @@ void MethylationGraph::connectResults(std::string chrName, std::vector<int> &pas
                     weakMethylationPoints.insert(currPos);
                 }
             }
-            else if(isSNP(currPos)){
+            else if(checkVariantType(currPos) == 1){
                 auto searchNodeIter = nextNodeIter;
                 prepassPosition.push_back(currPos);
                 while(searchNodeIter != nodeInfo->end()) {
@@ -891,7 +889,7 @@ void MethylationGraph::connectResults(std::string chrName, std::vector<int> &pas
                     if(totalConnectReads <= minimumConnection){
                         break;
                     }
-                    if (isMethylation(searchNodeIter->first)) {
+                    if (checkVariantType(searchNodeIter->first) == 0) {
                         double majorRatio = (double)std::max(tmp.first, tmp.second) / (double)(tmp.first + tmp.second);
                         hasConnect.push_back(searchNodeIter->first);
                         if (majorRatio >= params->connectConfidence && totalConnectReads > minimumConnection && strongMethylationPoints.count(nextNodeIter->first) == 0) {
@@ -928,11 +926,9 @@ void MethylationGraph::connectResults(std::string chrName, std::vector<int> &pas
             }
 
             if (majorRatio >= params->connectConfidence && totalConnectReads > minimumConnection) {
-                // Add positions to passPosition to ensure order and no duplicates
                 if(addedPositions.count(pos1) == 0) {
                     prepassPosition.push_back(pos1);
                     addedPositions.insert(pos1);
-                    passPosition.push_back(pos1);
                     // Only add positions to weakMethylationPoints if there is valid SNP data (for third pass)
                     if(hasValidSnpData) {
                         weakMethylationPoints.insert(pos1);
@@ -941,7 +937,6 @@ void MethylationGraph::connectResults(std::string chrName, std::vector<int> &pas
                 if(addedPositions.count(pos2) == 0) {
                     prepassPosition.push_back(pos2);
                     addedPositions.insert(pos2);
-                    passPosition.push_back(pos2);
                     // Only add positions to weakMethylationPoints if there is valid SNP data (for third pass)
                     if(hasValidSnpData) {
                         weakMethylationPoints.insert(pos2);
@@ -994,13 +989,11 @@ void MethylationGraph::connectResults(std::string chrName, std::vector<int> &pas
                             prepassPosition.push_back(currPos);
                             nextWeakPoints.insert(currPos);
                             nextAddedPositions.insert(currPos);
-                            passPosition.push_back(currPos);
                         }
                         if(std::find(prepassPosition.begin(), prepassPosition.end(), nextPos) == prepassPosition.end()){
                             prepassPosition.push_back(nextPos);
                             nextWeakPoints.insert(nextPos);
                             nextAddedPositions.insert(nextPos);
-                            passPosition.push_back(nextPos);
                         }
                     }
                     ++nextSearchCount;
@@ -1024,7 +1017,7 @@ void MethylationGraph::connectResults(std::string chrName, std::vector<int> &pas
         bool hasGoodPrevConnection = false;
         bool hasGoodNextConnection = false;
         if(nodeInfo->find(pos) != nodeInfo->end()){
-            if(isSNP(pos)){
+            if(checkVariantType(pos) == 1){
                 continue;
             }
         }
@@ -1074,30 +1067,25 @@ void MethylationGraph::connectResults(std::string chrName, std::vector<int> &pas
     prepassPosition.clear();
 }
 
-bool MethylationGraph::isSNP(int position){
+int MethylationGraph::checkVariantType(int position){
     auto nodeIter = nodeInfo->find(position);
     if (nodeIter != nodeInfo->end()) {
-        // Iterate over the inner map to check each readID's type
-        for (const auto& nodeType : nodeIter->second) {
-            if (nodeType.second == VariantType::SNP) {
-                return true; // Return true if any type is SNP
-            }
-        }
-    }
-    return false;
-}
-
-bool MethylationGraph::isMethylation(int position){
-    auto nodeIter = nodeInfo->find(position);
-    if (nodeIter != nodeInfo->end()) {
-        // Iterate over the inner map to check each readID's type
         for (const auto& nodeType : nodeIter->second) {
             if(nodeType.second == VariantType::MOD){
-                return true; // Return true if any type is MOD
+                return 0; // Return true if any type is MOD
+            }
+            else if(nodeType.second == VariantType::SNP){
+                return 1; // Return true if any type is SNP
+            }
+            else if(nodeType.second == VariantType::INDEL){
+                return 2; // Return true if any type is INDEL
+            }
+            else if(nodeType.second == VariantType::SV){
+                return 3; // Return true if any type is SV
             }
         }
     }
-    return false;
+    return 0;
 }
 
 void MethylationGraph::destroy(){
