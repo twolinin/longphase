@@ -213,34 +213,31 @@ void HaplotagProcess::parserProcess(std::string &input){
             // sv file
             if( parseSVFile ){
                 // get read INFO
-                int read_pos = fields[7].find("RNAMES=");
-                read_pos = fields[7].find("=",read_pos);
-                read_pos++;
-                        
-                int next_field = fields[7].find(";",read_pos);
-                std::string totalRead = fields[7].substr(read_pos,next_field-read_pos);
-                std::stringstream totalReadStream(totalRead);
-                
-                int svHaplotype;
-                // In which haplotype does SV occur
-                if( fields[9][modifu_start] == '0' && fields[9][modifu_start+2] == '1' ){
-                    svHaplotype = 1;
-                }
-                else if( fields[9][modifu_start] == '1' && fields[9][modifu_start+2] == '0' ){
-                    svHaplotype = 0;
-                }
-                
-                std::string read;
-                while(std::getline(totalReadStream, read, ','))
+                // get SV regions
+                int start = std::stoi(fields[1]);
+                std::string info = fields[7];
+                size_t svlenPos = info.find("SVLEN=");  // get SV length
+                if (svlenPos != std::string::npos)
                 {
-                   auto readIter = readSVHapCount.find(read);
-                   if(readIter==readSVHapCount.end()){
-                       readSVHapCount[read][0]=0;
-                       readSVHapCount[read][1]=0;
-                   }
-                   readSVHapCount[read][svHaplotype]++;
+                    svlenPos += 6;
+                    size_t semiPos = info.find(';', svlenPos);
+                    int svlen = std::stoi(info.substr(svlenPos, semiPos - svlenPos));
+                    // Insert SV information into chrRegions
+                    // In which haplotype does SV occur
+                    int svHaplotype;
+
+                    if (fields[9][modifu_start] == '0' && fields[9][modifu_start + 2] == '1')
+                    {
+                        svHaplotype = 1;
+                        chrRegions[chr].push_back(std::make_tuple(start, svlen, svHaplotype));
+                    }
+                    else if (fields[9][modifu_start] == '1' && fields[9][modifu_start + 2] == '0')
+                    {
+                        svHaplotype = 0;
+                        chrRegions[chr].push_back(std::make_tuple(start, svlen, svHaplotype));
+                    }
                 }
-                
+
             }
             // mod file
             if( parseMODFile ){
@@ -365,6 +362,8 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
             (*tagResult) << "##qualityThreshold:"    << params.qualityThreshold    << "\n";
             (*tagResult) << "##percentageThreshold:" << params.percentageThreshold << "\n";
             (*tagResult) << "#tagSupplementary:"     << params.tagSupplementary    << "\n";
+            (*tagResult) << "#svWindowsize:"         << params.svWindow            << "\n";
+            (*tagResult) << "#svThreshold:"          << params.svThreshold         << "\n";
             (*tagResult) << "#Read\t"
                          << "Chr\t"
                          << "ReadStart\t"
@@ -405,6 +404,9 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
         // the tagging process will not be perform if the read's start coordinate are over than last variant.
         std::map<int, RefAlt>::reverse_iterator last = currentChrVariants.rbegin();
         
+        // get the current chromosome SV region
+        currentchrRegions = chrRegions[chr];
+        firstSVIter = currentchrRegions.begin();
         // fetch chromosome string
         std::string chr_reference = fastaParser.chrString.at(chr);
         
@@ -448,7 +450,7 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
                 }
 
                 int pqValue = 0;
-                int haplotype = judgeHaplotype(*bamHdr, *aln, chr, params.percentageThreshold, tagResult, pqValue, chr_reference);
+                int haplotype = judgeHaplotype(*bamHdr, *aln, chr, params.percentageThreshold, tagResult, pqValue, chr_reference, params.svWindow, params.svThreshold);
 
                 initFlag(aln, "HP");
                 initFlag(aln, "PS");
@@ -498,7 +500,7 @@ void HaplotagProcess::initFlag(bam1_t *aln, std::string flag){
     return;
 }
 
-int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, std::string chrName, double percentageThreshold, std::ofstream *tagResult, int &pqValue, const std::string &ref_string){
+int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, std::string chrName, double percentageThreshold, std::ofstream *tagResult, int &pqValue, const std::string &ref_string, int svWindow, double svThreshold){
 
     int hp1Count = 0;
     int hp2Count = 0;
@@ -511,6 +513,12 @@ int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, 
         firstVariantIter++;
     }
     
+    // Skip SVs that are to the left of this read
+    while (firstSVIter != currentchrRegions.end() && std::get<0>(*firstSVIter) < aln.core.pos)
+    {
+        firstSVIter++;
+    }
+
     if( firstVariantIter == currentChrVariants.end() ){
         return 0;
     }
@@ -521,6 +529,8 @@ int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, 
     int query_pos = 0;
     // set variant start for current alignment
     std::map<int, RefAlt>::iterator currentVariantIter = firstVariantIter;
+    // set first SV start for current alignment
+    std::vector<std::tuple<int, int, int> >::iterator currentchrRegionIter = firstSVIter;
 
     // reading cigar to detect snp on this read
     int aln_core_n_cigar = int(aln.core.n_cigar);
@@ -532,6 +542,39 @@ int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, 
         // iterator next variant
         while( currentVariantIter != currentChrVariants.end() && (*currentVariantIter).first < ref_pos ){
             currentVariantIter++;
+        }
+         // iterator next SV
+        while (currentchrRegionIter != currentchrRegions.end() && std::get<0>(*currentchrRegionIter) < ref_pos)
+        {
+            currentchrRegionIter++;
+        }
+
+        int window_size = svWindow;
+        double threshold = svThreshold;
+        // make sure is in the region
+        if (currentchrRegionIter != currentchrRegions.end())
+        {
+            int sv_start = std::get<0>(*currentchrRegionIter);
+            int sv_length = std::get<1>(*currentchrRegionIter);
+            int sv_end = sv_start + std::abs(sv_length);
+            int svHaplotype = std::get<2>(*currentchrRegionIter);
+            double sv_region = sv_end - sv_start + 1;
+
+            for (int j = std::max(i - window_size, 0); j < std::min(i + window_size, aln_core_n_cigar); j++) {
+                int cigar_op = bam_cigar_op(cigar[j]);
+                int cigar_oplen = bam_cigar_oplen(cigar[j]);
+                if (cigar_op == BAM_CDEL && std::abs(sv_region - cigar_oplen) / std::abs(sv_region) < threshold)
+                {
+                    readSVHapCount[bam_get_qname(&aln)][svHaplotype]++;
+                    break;
+                }
+
+                if (cigar_op == BAM_CINS && std::abs(sv_region - cigar_oplen) / std::abs(sv_region) < threshold)
+                {
+                    readSVHapCount[bam_get_qname(&aln)][svHaplotype]++;
+                    break;
+                }
+            }
         }
 
         // CIGAR operators: MIDNSHP=X correspond 012345678
@@ -819,20 +862,24 @@ int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, 
 HaplotagProcess::HaplotagProcess(HaplotagParameters params):
 totalAlignment(0),totalSupplementary(0),totalSecondary(0),totalUnmapped(0),totalTagCount(0),totalUnTagCount(0),processBegin(time(NULL)),integerPS(false)
 {
-    std::cerr<< "phased SNP file:   " << params.snpFile             << "\n";
-    std::cerr<< "phased SV file:    " << params.svFile              << "\n";
-    std::cerr<< "phased MOD file:   " << params.modFile             << "\n";
-    std::cerr<< "input bam file:    " << params.bamFile             << "\n";
-    std::cerr<< "input ref file:    " << params.fastaFile           << "\n";
-    std::cerr<< "output bam file:   " << params.resultPrefix + "." + params.outputFormat << "\n";
-    std::cerr<< "number of threads: " << params.numThreads          << "\n";
-    std::cerr<< "write log file:    " << (params.writeReadLog ? "true" : "false") << "\n";
-    std::cerr<< "log file:          " << (params.writeReadLog ? (params.resultPrefix+".out") : "") << "\n";
+    std::cerr<< "phased SNP file    : " << params.snpFile             << "\n";
+    std::cerr<< "phased SV file     : " << params.svFile              << "\n";
+    std::cerr<< "phased MOD file    : " << params.modFile             << "\n";
+    std::cerr<< "input bam file     : " << params.bamFile             << "\n";
+    std::cerr<< "input ref file     : " << params.fastaFile           << "\n";
+    std::cerr<< "output bam file    : " << params.resultPrefix + "." + params.outputFormat << "\n";
+    std::cerr<< "number of threads  : " << params.numThreads          << "\n";
+    std::cerr<< "write log file     : " << (params.writeReadLog ? "true" : "false") << "\n";
+    std::cerr<< "log file           : " << (params.writeReadLog ? (params.resultPrefix+".out") : "") << "\n";
     std::cerr<< "-------------------------------------------\n";
-    std::cerr<< "tag region:                    " << (!params.region.empty() ? params.region : "all") << "\n";
-    std::cerr<< "filter mapping quality below:  " << params.qualityThreshold    << "\n";
-    std::cerr<< "percentage threshold:          " << params.percentageThreshold << "\n";
-    std::cerr<< "tag supplementary:             " << (params.tagSupplementary ? "true" : "false") << "\n";
+    std::cerr<< "tag region                   : " << (!params.region.empty() ? params.region : "all") << "\n";
+    std::cerr<< "filter mapping quality below : " << params.qualityThreshold    << "\n";
+    std::cerr<< "percentage threshold         : " << params.percentageThreshold << "\n";
+    if (!params.svFile.empty()) {
+        std::cerr<< "SV windowsize                : " << params.svWindow    << "\n";
+        std::cerr<< "SV threshold                 : " << params.svThreshold << "\n";
+    }
+    std::cerr<< "tag supplementary            : " << (params.tagSupplementary ? "true" : "false") << "\n";
     std::cerr<< "-------------------------------------------\n";
 
     // load SNP vcf file

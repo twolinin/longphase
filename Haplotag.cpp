@@ -20,6 +20,8 @@ static const char *CORRECT_USAGE_MESSAGE =
 "      -q, --qualityThreshold=Num      not tag alignment if the mapping quality less than threshold. default:1\n"
 "      -p, --percentageThreshold=Num   the alignment will be tagged according to the haplotype corresponding to most alleles.\n"
 "                                      if the alignment has no obvious corresponding haplotype, it will not be tagged. default:0.6\n"
+"      -w, --sv-window=NUM             window size for evaluating surrounding CIGAR operations. default: 20\n"
+"      -h, --sv-threshold=[0~1]        relative difference threshold for read to support a SV. default: 0.10\n"
 "      -t, --threads=Num               number of thread. default:1\n"
 "      -o, --out-prefix=NAME           prefix of phasing result. default:result\n"
 "      --cram                          the output file will be in the cram format. default:bam\n"
@@ -30,7 +32,7 @@ static const char *CORRECT_USAGE_MESSAGE =
 "      --log                           an additional log file records the result of each read. default:false\n";
 
 
-static const char* shortopts = "s:b:o:t:q:p:r:";
+static const char* shortopts = "s:b:o:t:q:p:w:h:r:";
 
 enum { OPT_HELP = 1, TAG_SUP, SV_FILE, REGION, LOG, MOD_FILE, CRAM};
 
@@ -47,6 +49,8 @@ static const struct option longopts[] = {
     { "threads",              required_argument,  NULL, 't' },
     { "qualityThreshold",     required_argument,  NULL, 'q' },
     { "percentageThreshold",  required_argument,  NULL, 'p' },
+    { "svWindow",             required_argument,  NULL, 'w' },
+    { "svThreshold",          required_argument,  NULL, 'h' },
     { "region",               required_argument,  NULL, REGION },
     { "log",                  no_argument,        NULL, LOG },
     { NULL, 0, NULL, 0 }
@@ -57,6 +61,8 @@ namespace opt
     static int numThreads = 1;
     static int qualityThreshold = 1;
     static double percentageThreshold = 0.6;
+    static int svWindow = 20;
+    static double svThreshold = 0.1;
     static std::string snpFile="";
     static std::string svFile="";
     static std::string modFile="";
@@ -87,6 +93,8 @@ void HaplotagOptions(int argc, char** argv)
             case 'o': arg >> opt::resultPrefix; break;
             case 'q': arg >> opt::qualityThreshold; break;
             case 'p': arg >> opt::percentageThreshold; break;
+            case 'w': arg >> opt::svWindow; break;
+            case 'h': arg >> opt::svThreshold; break;
             case SV_FILE:  arg >> opt::svFile; break;
             case MOD_FILE: arg >> opt::modFile; break;     
             case REGION:   arg >> opt::region; break;        
@@ -186,6 +194,20 @@ void HaplotagOptions(int argc, char** argv)
                   << "\nthis value need: 0~1, please check -p, --percentageThreshold=Num\n";
         die = true;
     }
+
+    if ( opt::svWindow < 0 ){
+        std::cerr << SUBPROGRAM " invalid svWindow. value: " 
+                  << opt::svWindow
+                  << "\n please check -w, --sv-window=NUM\n";
+        die = true;
+    }
+    
+    if ( opt::svThreshold < 0 || opt::svThreshold > 1 ){
+        std::cerr << SUBPROGRAM " invalid svThreshold. value: " 
+                  << opt::svThreshold
+                  << "\n please check -h, --sv-threshold=[0~1]\n";
+        die = true;
+    }
     
     if (die)
     {
@@ -211,6 +233,8 @@ int HaplotagMain(int argc, char** argv, std::string in_version)
     ecParams.resultPrefix=opt::resultPrefix;
     ecParams.tagSupplementary=opt::tagSupplementary;
     ecParams.percentageThreshold=opt::percentageThreshold;
+    ecParams.svWindow=opt::svWindow;
+    ecParams.svThreshold=opt::svThreshold;
     ecParams.region=opt::region;
     ecParams.writeReadLog=opt::writeReadLog;
     ecParams.version=in_version;

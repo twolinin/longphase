@@ -7,13 +7,14 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
     std::cerr<< "LongPhase Ver " << params.version << "\n";
     std::cerr<< "\n";
     std::cerr<< "--- File Parameter --- \n";
-    std::cerr<< "SNP File      : " << params.snpFile      << "\n";
-    std::cerr<< "SV  File      : " << params.svFile       << "\n";
-    std::cerr<< "MOD File      : " << params.modFile      << "\n";
-    std::cerr<< "REF File      : " << params.fastaFile    << "\n";
-    std::cerr<< "Output Prefix : " << params.resultPrefix << "\n";
-    std::cerr<< "Generate Dot  : " << ( params.generateDot ? "True" : "False" ) << "\n";
-    std::cerr<< "BAM File      : ";
+    std::cerr<< "SNP File           : " << params.snpFile      << "\n";
+    std::cerr<< "SV  File           : " << params.svFile       << "\n";
+    std::cerr<< "MOD File           : " << params.modFile      << "\n";
+    std::cerr<< "REF File           : " << params.fastaFile    << "\n";
+    std::cerr<< "Output Prefix      : " << params.resultPrefix << "\n";
+    std::cerr<< "Number of Threads  : " << params.numThreads          << "\n";
+    std::cerr<< "Generate Dot       : " << ( params.generateDot ? "True" : "False" ) << "\n";
+    std::cerr<< "BAM File           : ";
     for( auto file : params.bamFile){
         std::cerr<< file <<" " ;   
     }
@@ -31,6 +32,10 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
     std::cerr<< "Mismatch Rate      : " << params.mismatchRate  << "\n";
     std::cerr<< "Variant Confidence : " << params.snpConfidence   << "\n";
     std::cerr<< "ReadTag Confidence : " << params.readConfidence  << "\n";
+    if (!params.svFile.empty()) {
+        std::cerr<< "SV Windowsize      : " << params.svWindow << "\n";
+        std::cerr<< "SV Threshold       : " << params.svThreshold << "\n";
+    }
     std::cerr<< "\n";
     
     std::time_t processBegin = time(NULL);
