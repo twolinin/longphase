@@ -1088,9 +1088,7 @@ int MethylationGraph::checkVariantType(int position){
             }
         }
     }
-    else{
-        return -1; // Return -1 if the position is not in the nodeInfo
-    }
+    return -1; // Return -1 if the position is not in the nodeInfo
 }
 
 void MethylationGraph::destroy(){
@@ -1455,73 +1453,3 @@ void MethSnpParser::writeResult(PhasingResult phasingResult) {
     }
     return;
 }
-
-bool MethSnpParser::findSNP(std::string chr, int position) {
-    std::map<std::string, std::map<int, RefAlt> >::iterator chrIter = chrVariant->find(chr);
-    // empty chromosome
-    if( chrIter == chrVariant->end() )
-        return false;
-    
-    std::map<int, RefAlt>::iterator posIter = (*chrVariant)[chr].find(position);
-    // empty position
-    if( posIter == (*chrVariant)[chr].end() )
-        return false;
-        
-    return true;
-}
-
-void MethSnpParser::filterSNP(std::string chr, std::vector<ReadVariant> &readVariantVec, std::string &chr_reference) {
-    // pos, <allele, <strand, True>
-    std::map<int, std::map<int, std::map<int, bool> > > posAlleleStrand;
-    std::map< int, bool > methylation;
-
-    // Filter SNPs that are not easy to phasing due to homopolymer
-    // get variant list
-    std::map<std::string, std::map<int, RefAlt> >::iterator chrIter =  chrVariant->find(chr);
-    std::map< int, bool > errorProneSNP;
-    
-    if( chrIter != chrVariant->end() ){
-        std::map<int, int> consecutiveAllele;
-        // iter all SNP and tag homopolymer
-        for(std::map<int, RefAlt>::iterator posIter = (*chrIter).second.begin(); posIter != (*chrIter).second.end(); posIter++ ){
-            consecutiveAllele[(*posIter).first] = homopolymerLength((*posIter).first, chr_reference);
-        }
-        std::map<int, RefAlt>::iterator currSNPIter = (*chrIter).second.begin();
-        std::map<int, RefAlt>::iterator nextSNPIter = std::next(currSNPIter,1);
-        // check whether each SNP pair falls in an area that is not easy to phasing
-        while( currSNPIter != (*chrIter).second.end() && nextSNPIter != (*chrIter).second.end() ){
-            int currPos = (*currSNPIter).first;
-            int nextPos = (*nextSNPIter).first;
-            // filter one of SNP if this SNP pair falls in homopolymer and distance<=2
-            if( consecutiveAllele[currPos] >= 3 && consecutiveAllele[nextPos] >= 3 && std::abs(currPos-nextPos)<=2 ){
-                errorProneSNP[nextPos]=true;
-                nextSNPIter = (*chrIter).second.erase(nextSNPIter);
-                continue;
-            }
-            
-            currSNPIter++;
-            nextSNPIter++;
-        }
-        
-    }
-    
-    // iter all reads
-    for( std::vector<ReadVariant>::iterator readSNPVecIter = readVariantVec.begin() ; readSNPVecIter != readVariantVec.end() ; readSNPVecIter++ ){
-        // iter all SNPs in this read
-        for(std::vector<Variant>::iterator variantIter = (*readSNPVecIter).variantVec.begin() ; variantIter != (*readSNPVecIter).variantVec.end() ; ){
-            std::map< int, bool >::iterator delSNPIter = methylation.find((*variantIter).position);
-            std::map< int, bool >::iterator homoIter = errorProneSNP.find((*variantIter).position);
-            
-            if( delSNPIter != methylation.end() ){
-                variantIter = (*readSNPVecIter).variantVec.erase(variantIter);
-            }
-            else if( homoIter != errorProneSNP.end() ){
-                variantIter = (*readSNPVecIter).variantVec.erase(variantIter);
-            }
-            else{
-                variantIter++;
-            }
-        }
-    }
-}
-

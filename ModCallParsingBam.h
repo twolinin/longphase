@@ -73,7 +73,7 @@ private:
     std::vector<std::string> chrName;
     std::map<std::string, std::map<int, bool>> chrVariantHomopolymer;
     bool commandLine;
-    bool hasSnpData;  // 標示是否成功載入 SNP 資料
+    bool hasSnpData;  // indicate if the SNP data is loaded successfully
 
     void parserProcess(std::string &input);
     void writeLine(std::string &input, bool &ps_def, std::ofstream &resultVcf, PhasingResult &phasingResult);
@@ -89,9 +89,7 @@ public:
     std::vector<std::string> getChrVec();
     int getLastSNP(std::string chrName);
     void writeResult(PhasingResult phasingResult);
-    bool findSNP(std::string chr, int position);
-    void filterSNP(std::string chr, std::vector<ReadVariant> &readVariantVec, std::string &chr_reference);
-    bool hasValidSnpData() const;  // 檢查是否有有效的 SNP 資料
+    bool hasValidSnpData() const;  // check if the SNP data is loaded successfully
 };
 
 class MethBamParser{
@@ -121,7 +119,6 @@ class MethBamParser{
         void calculateDepth();
         void exportResult(std::string chrName, std::string chrSquence, int chrLen, std::vector<int> &passPosition, std::ostringstream &modCallResult);
         void judgeMethGenotype(std::string chrName, std::vector<ReadVariant> &readVariantVec, std::vector<ReadVariant> &modReadVariantVec);
-        void exportPositionInfo(int position, std::string chrName, std::string chrSquence, int chrLen, std::ostringstream &modCallResult);
 };
 
 void writeResultVCF(ModCallParameters &params, std::vector<ReferenceChromosome> &chrInfo, std::map<std::string,std::ostringstream> &chrResult);
@@ -154,8 +151,6 @@ class MethylationGraph{
         
         void addEdge(std::vector<ReadVariant> &in_readVariant, std::string chrName);
         void connectResults(std::string chrName, std::vector<int> &passPosition, bool hasValidSnpData = true);
-        void readCorrection(std::vector<int> &passPosition);
-        
         void destroy();
 };
 
