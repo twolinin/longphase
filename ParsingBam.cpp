@@ -342,7 +342,7 @@ std::map<int, RefAlt> SnpParser::getVariants_markindel(std::string chrName, cons
             int variant_pos = innerIter->first;      // Accessing the variant_pos of the inner map
             RefAlt variant_info = innerIter->second; // Accessing the variant_info of the inner map
             int ref_pos = variant_pos ;
-	    bool danger = false ;
+	        bool danger = false ;
 
             std::string repeat = ref.substr(ref_pos + 1, 2) ; // get the 2 words string in the reference which behind the indel position
             int i = 0 ;
@@ -976,7 +976,6 @@ BamParser::BamParser(std::string inputChrName, std::vector<std::string> inputBam
     // set current chromosome MOD map
     (*currentMod) = modFile.getVariants(chrName);
     firstModIter = currentMod->begin();
-    
 }
 
 BamParser::~BamParser(){
@@ -1129,7 +1128,7 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln, std::vector<
                         // -3 : reverse strand
                         int strand = ( bam_is_rev(&aln) ? -3 : -2);
                         int allele = ((*readIter).second.is_modify ? 0 : 1) ;
-                        Variant *tmpVariant = new Variant(modPos, allele, strand );
+                        Variant *tmpVariant = new Variant(modPos, allele, strand, VariantType::MOD);
                         // push mod into result vector
                         (*tmpReadResult).variantVec.push_back( (*tmpVariant) );
                         delete tmpVariant;
@@ -1169,7 +1168,7 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln, std::vector<
                 
                 // use quality -1 to identify SVs
                 // push this SV to vector
-                Variant *tmpVariant = new Variant(svPos, allele, -1);
+                Variant *tmpVariant = new Variant(svPos, allele, -1, VariantType::SV);
                 (*tmpReadResult).variantVec.push_back( (*tmpVariant) );
                 delete tmpVariant;
                 // next SV iter
@@ -1256,7 +1255,7 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln, std::vector<
             
                     if( allele != -1 ){
                         // record snp result
-                        Variant *tmpVariant = new Variant(variantPos, allele, base_q);
+                        Variant *tmpVariant = new Variant(variantPos, allele, base_q, VariantType::SNP);
                         (*tmpReadResult).variantVec.push_back( (*tmpVariant) );
                         delete tmpVariant;                        
                     }
@@ -1339,7 +1338,7 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln, std::vector<
                         }
                         
                         if(allele != -1){
-                            Variant *tmpVariant = new Variant((*currentVariantIter).first, allele, base_q);
+                            Variant *tmpVariant = new Variant((*currentVariantIter).first, allele, base_q, VariantType::SNP);
                             (*tmpReadResult).variantVec.push_back( (*tmpVariant) );
                             currentVariantIter++;
                             delete tmpVariant;
@@ -1360,11 +1359,11 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln, std::vector<
             getClip(ref_pos, i, cigar_oplen, clipCount);
         }
         // 5: hard clipping (clipped sequences NOT present in SEQ)
-	else if( cigar_op == 5 ){
+	    else if( cigar_op == 5 ){
             getClip(ref_pos, i, cigar_oplen, clipCount);
         }
-	// 6: padding (silent deletion from padded reference)
-	else if(cigar_op == 6 ){
+	    // 6: padding (silent deletion from padded reference)
+	    else if(cigar_op == 6 ){
 
         }
         else{
@@ -1375,7 +1374,6 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln, std::vector<
 
     if( (*tmpReadResult).variantVec.size() > 0 )
       readVariantVec.push_back((*tmpReadResult));
-    
     delete tmpReadResult;
 }
 

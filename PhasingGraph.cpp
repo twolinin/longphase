@@ -473,7 +473,7 @@ void VairiantGraph::edgeConnectResult(){
     delete phasedBlocks;
 }
 
-VairiantGraph::VairiantGraph(std::string &in_ref, PhasingParameters &in_params){
+VairiantGraph::VairiantGraph(std::string &in_ref, PhasingParameters &in_params, std::string &in_chrName){
     params=&in_params;
     ref=&in_ref;
     totalVariantInfo = new std::map<int,ReadBaseMap*>;
@@ -482,6 +482,7 @@ VairiantGraph::VairiantGraph(std::string &in_ref, PhasingParameters &in_params){
     subNodeHP = new std::map<PosAllele,int>;
     variantType = new std::map<int,int>;
     readHpMap = new std::map<std::string,int>;
+    chrName = &in_chrName;
 }
 
 VairiantGraph::~VairiantGraph(){
@@ -777,7 +778,7 @@ void VairiantGraph::addEdge(std::vector<ReadVariant> &in_readVariant, Clip &clip
             in_readVariant[saveIter++]=in_readVariant[nowDelIter++];
         }
     }
-    in_readVariant.erase( std::next(in_readVariant.begin(), saveIter), in_readVariant.end());
+    in_readVariant.erase( std::next(in_readVariant.begin(), saveIter), in_readVariant.end()); 
     
     CnvStatistics cnvStats;
     //calculate the mismatch rate of the cnv
@@ -1101,7 +1102,7 @@ void VairiantGraph::phasingProcess(){
 
 Clip::Clip(std::string &chr, ClipCount &clipCount){
     this->chr = chr;
-    getCNVInterval(clipCount);
+    getCNVInterval(clipCount, chr);
 }
 
 Clip::~Clip(){
@@ -1124,7 +1125,7 @@ void Clip::updateThreshold(int upCount){
     }
 }
 
-void Clip::getCNVInterval(ClipCount &clipCount){
+void Clip::getCNVInterval(ClipCount &clipCount, std::string &chrName){
     int upCount = 0;
     int downCount = 0;
     int AreaSize = 30000;

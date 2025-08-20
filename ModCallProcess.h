@@ -7,6 +7,7 @@ struct ModCallParameters
 {
     int numThreads;
     std::string fastaFile;
+    std::string snpFile;
     std::string resultPrefix;
     std::vector<std::string> bamFileVec;
     float modThreshold;
@@ -15,6 +16,7 @@ struct ModCallParameters
     float noiseRatio;
     int connectAdjacent;
     float connectConfidence;
+    int iterCount;
     
     std::string version;
     std::string command;

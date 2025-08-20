@@ -13,6 +13,7 @@
 #include <vector>
 #include <omp.h>
 #include <numeric> 
+#include <set>
 
 struct PhasingElement{
     // i.e. 0|1  or   1|0
@@ -51,17 +52,25 @@ void setPhasingNumThreads(const int& defaultChrThreads,const int& availableThrea
  */
 void setModcallNumThreads(const int& availableThreads,  int& chrNumThreads, int& bamParserNumThreads);
 
+enum VariantType{
+    MOD = 0,
+    SNP = 1,
+    INDEL = 2,
+    SV = 3
+};
 
 // use for parsing
 struct Variant{
-    Variant(int position, int allele, int quality):
+    Variant(int position, int allele, int quality, VariantType type):
     position(position), 
     allele(allele), 
-    quality(quality){};
+    quality(quality),
+    type(type){};
     
     int position;
     int allele;
     int quality;
+    VariantType type;
     bool underHomopolymer;
 };
 
