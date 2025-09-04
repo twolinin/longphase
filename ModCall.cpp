@@ -11,11 +11,11 @@ static const char *CORRECT_USAGE_MESSAGE =
 "Usage: "  " " SUBPROGRAM " [OPTION] ... READSFILE\n"
 "      --help                        display this help and exit.\n"
 "require arguments:\n"
-"      -s, --snp-file=NAME           input SNP vcf file.\n"
 "      -b, --bam-file=NAME           modified sorted bam file.\n"
 "      -r, --reference=NAME          reference fasta.\n"
 
 "optional arguments:\n"
+"      -s, --snp-file=NAME           input SNP vcf file.\n"
 "      -o, --out-prefix=NAME         prefix of phasing result. default: modcall_result\n"
 "      -t, --threads=Num             number of thread. default:1\n"
 "      --all                         output all coordinates where modifications have been detected.\n"

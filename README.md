@@ -251,10 +251,10 @@ chr1    11435   .       G       .       .       .       RS=N;MR=7f505676-704b-41
 Usage:  modcall [OPTION] ... READSFILE
       --help                        display this help and exit.
 require arguments:
-      -s, --snp-file=NAME           input SNP vcf file.
       -b, --bam-file=NAME           modified sorted bam file.
       -r, --reference=NAME          reference fasta.
 optional arguments:
+      -s, --snp-file=NAME           input SNP vcf file.
       -o, --out-prefix=NAME         prefix of phasing result. default: modcall_result
       -t, --threads=Num             number of thread. default:1
       --all                         output all coordinates where modifications have been detected.
