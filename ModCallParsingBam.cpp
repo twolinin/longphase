@@ -431,7 +431,9 @@ void MethBamParser::parse_CIGAR(const bam_hdr_t &bamHdr,const bam1_t &aln, std::
 void MethBamParser::exportResult(std::string chrName, std::string chrSquence, int chrLen, std::vector<int> &passPosition, std::ostringstream &modCallResult){
 
     if(params->outputAllMod){
-        for(const auto& [currPos, info] : *chrMethMap){
+        for(const auto& pair : *chrMethMap){
+            int currPos = pair.first;
+            const auto& info = pair.second;
             
             auto posinfoIter = chrMethMap->find(currPos);
             if (posinfoIter == chrMethMap->end()) return;
@@ -441,10 +443,8 @@ void MethBamParser::exportResult(std::string chrName, std::string chrSquence, in
             std::string strandinfo;
             std::string ref;
             
-            // 防止变异坐标超出参考序列范围
             if (chrLen < currPos) return;
 
-            // 防止异常的 REF 等位基因
             ref = chrSquence.substr(currPos, 1);
             if (ref != "A" && ref != "T" && ref != "C" && ref != "G" &&
                 ref != "a" && ref != "t" && ref != "c" && ref != "g") return;
