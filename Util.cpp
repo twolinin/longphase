@@ -51,3 +51,14 @@ int homopolymerLength(int snp_pos, const std::string &ref_string){
 
     return homopolymer_length;
 }
+
+template <typename T>
+double calculateMean(const std::vector<T>& data) {
+    if(data.empty()) {
+        return 0;
+    }
+    double sum = std::accumulate(data.begin(), data.end(), 0.0);
+    return sum / data.size();
+}
+template double calculateMean<int>(const std::vector<int>& data);
+template double calculateMean<double>(const std::vector<double>& data);

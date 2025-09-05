@@ -21,15 +21,19 @@ struct PhasingParameters
     
     int connectAdjacent;
     int mappingQuality;
-
+    double mismatchRate;
+    
     int baseQuality;
     double edgeWeight;
-
+    
     double snpConfidence;
     double readConfidence;
     
     double edgeThreshold;
     double overlapThreshold;
+
+    int svWindow;
+    double svThreshold; 
     
     std::string version;
     std::string command;

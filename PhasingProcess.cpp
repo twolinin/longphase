@@ -7,13 +7,14 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
     std::cerr<< "LongPhase Ver " << params.version << "\n";
     std::cerr<< "\n";
     std::cerr<< "--- File Parameter --- \n";
-    std::cerr<< "SNP File      : " << params.snpFile      << "\n";
-    std::cerr<< "SV  File      : " << params.svFile       << "\n";
-    std::cerr<< "MOD File      : " << params.modFile      << "\n";
-    std::cerr<< "REF File      : " << params.fastaFile    << "\n";
-    std::cerr<< "Output Prefix : " << params.resultPrefix << "\n";
-    std::cerr<< "Generate Dot  : " << ( params.generateDot ? "True" : "False" ) << "\n";
-    std::cerr<< "BAM File      : ";
+    std::cerr<< "SNP File           : " << params.snpFile      << "\n";
+    std::cerr<< "SV  File           : " << params.svFile       << "\n";
+    std::cerr<< "MOD File           : " << params.modFile      << "\n";
+    std::cerr<< "REF File           : " << params.fastaFile    << "\n";
+    std::cerr<< "Output Prefix      : " << params.resultPrefix << "\n";
+    std::cerr<< "Number of Threads  : " << params.numThreads          << "\n";
+    std::cerr<< "Generate Dot       : " << ( params.generateDot ? "True" : "False" ) << "\n";
+    std::cerr<< "BAM File           : ";
     for( auto file : params.bamFile){
         std::cerr<< file <<" " ;   
     }
@@ -28,8 +29,13 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
     std::cerr<< "Edge Threshold     : " << params.edgeThreshold   << "\n";
     std::cerr<< "Overlap Threshold  : " << params.overlapThreshold   << "\n";
     std::cerr<< "Mapping Quality    : " << params.mappingQuality  << "\n";
+    std::cerr<< "Mismatch Rate      : " << params.mismatchRate  << "\n";
     std::cerr<< "Variant Confidence : " << params.snpConfidence   << "\n";
     std::cerr<< "ReadTag Confidence : " << params.readConfidence  << "\n";
+    if (!params.svFile.empty()) {
+        std::cerr<< "SV Windowsize      : " << params.svWindow << "\n";
+        std::cerr<< "SV Threshold       : " << params.svThreshold << "\n";
+    }
     std::cerr<< "\n";
     
     std::time_t processBegin = time(NULL);
@@ -89,21 +95,23 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
         
         std::time_t chrbegin = time(NULL);
         
-        // get lase SNP variant position
+        // get last SNP variant position
         int lastSNPpos = snpFile.getLastSNP((*chrIter));
         // therer is no variant on SNP file. 
         if( lastSNPpos == -1 ){
             continue;
         }
 
-        // create a bam parser object and prepare to fetch varint from each vcf file
-        BamParser *bamParser = new BamParser((*chrIter), params.bamFile, snpFile, svFile, modFile);
-        // fetch chromosome string
+	    // fetch chromosome string
         std::string chr_reference = fastaParser.chrString.at(*chrIter);
+        // create a bam parser object and prepare to fetch varint from each vcf file
+	    BamParser *bamParser = new BamParser((*chrIter), params.bamFile, snpFile, svFile, modFile, chr_reference);
         // use to store variant
         std::vector<ReadVariant> readVariantVec;
+        // use to store clip count
+        ClipCount clipCount;
         // run fetch variant process
-        bamParser->direct_detect_alleles(lastSNPpos, threadPool, params, readVariantVec , chr_reference);
+        bamParser->direct_detect_alleles(lastSNPpos, threadPool, params, readVariantVec, clipCount, chr_reference);
         // free memory
         delete bamParser;
         
@@ -116,11 +124,14 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
         if( readVariantVec.size() == 0 ){
             continue;
         }
+        Clip *clip = new Clip((*chrIter), clipCount);
+        clip->getCNVInterval(clipCount, (*chrIter));
         
+
         // create a graph object and prepare to phasing.
-        VairiantGraph *vGraph = new VairiantGraph(chr_reference, params);
+        VairiantGraph *vGraph = new VairiantGraph(chr_reference, params, (*chrIter));
         // trans read-snp info to edge info
-        vGraph->addEdge(readVariantVec);
+        vGraph->addEdge(readVariantVec, *clip);
         // run main algorithm
         vGraph->phasingProcess();
         // push result to phasingResult

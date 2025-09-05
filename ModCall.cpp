@@ -15,6 +15,7 @@ static const char *CORRECT_USAGE_MESSAGE =
 "      -r, --reference=NAME          reference fasta.\n"
 
 "optional arguments:\n"
+"      -s, --snp-file=NAME           input SNP vcf file.\n"
 "      -o, --out-prefix=NAME         prefix of phasing result. default: modcall_result\n"
 "      -t, --threads=Num             number of thread. default:1\n"
 "      --all                         output all coordinates where modifications have been detected.\n"
@@ -34,7 +35,7 @@ static const char *CORRECT_USAGE_MESSAGE =
 
 "\n";
 
-static const char* shortopts = "o:t:r:b:m:u:e:i:";
+static const char* shortopts = "s:o:t:r:b:m:u:e:i:";
 
 enum { OPT_HELP = 1, ALL_MOD };
 
@@ -42,6 +43,7 @@ static const struct option longopts[] = {
     { "help",              no_argument,        NULL, OPT_HELP }, 
     { "all",               no_argument,        NULL, ALL_MOD },
     { "reference",         required_argument,  NULL, 'r' },
+    { "snp-file",          required_argument,  NULL, 's' },
     { "out-prefix",        required_argument,  NULL, 'o' },
     { "threads",           required_argument,  NULL, 't' },
 	{ "methylbamfile",     required_argument,  NULL, 'b' },
@@ -51,6 +53,7 @@ static const struct option longopts[] = {
     { "noiseRatio",        required_argument,  NULL, 'i' },
     { "connectAdjacent",   required_argument,  NULL, 'a' },
     { "connectConfidence", required_argument,  NULL, 'c' },
+    { "iterCount",         required_argument,  NULL, 'k' },
     { NULL, 0, NULL, 0 }
 };
 
@@ -58,15 +61,16 @@ namespace opt
 {
     static int numThreads = 1;
     static std::string fastaFile = "";
+    static std::string snpFile="";
     static std::string resultPrefix = "modcall_result";
     static std::vector<std::string> bamFileVec;
     static float modThreshold = 0.8;
     static float unModThreshold = 0.2;
     static float heterRatio = 0.6;
     static float noiseRatio = 0.2;
-    static int connectAdjacent = 6;
+    static int connectAdjacent = 20;
     static float connectConfidence = 0.9;
-    
+    static int iterCount = 2;
     static std::string command;
     
     bool outputAllMod = false;
@@ -82,6 +86,7 @@ void ModCallOptions(int argc, char** argv)
         std::istringstream arg(optarg != NULL ? optarg : "");
         switch (c)
         {
+        case 's': arg >> opt::snpFile; break;
         case 't': arg >> opt::numThreads; break;
         case 'o': arg >> opt::resultPrefix; break;
         case 'r': arg >> opt::fastaFile; break;  
@@ -91,6 +96,7 @@ void ModCallOptions(int argc, char** argv)
         case 'i': arg >> opt::noiseRatio; break;
         case 'a': arg >> opt::connectAdjacent; break;
         case 'c': arg >> opt::connectConfidence; break;
+        case 'k': arg >> opt::iterCount; break;
         case 'b': {
             std::string bamFile;
             arg >> bamFile;
@@ -112,6 +118,16 @@ void ModCallOptions(int argc, char** argv)
     {
         std::cerr << SUBPROGRAM ": missing arguments\n";
         die = true;
+    }
+
+    if( opt::snpFile != "")
+    {
+        std::ifstream openFile( opt::snpFile.c_str() );
+        if( !openFile.is_open() )
+        {
+            std::cerr<< "File " << opt::snpFile << " not exist.\n\n";
+            die = true;
+        }
     }
     
 	if( opt::bamFileVec.size() != 0 )
@@ -169,6 +185,7 @@ int ModCallMain(int argc, char** argv, std::string in_version)
 
     ecParams.numThreads=opt::numThreads;
     ecParams.fastaFile=opt::fastaFile;
+    ecParams.snpFile=opt::snpFile;
     ecParams.resultPrefix=opt::resultPrefix;
     ecParams.bamFileVec=opt::bamFileVec;
     ecParams.modThreshold=opt::modThreshold;
@@ -177,7 +194,7 @@ int ModCallMain(int argc, char** argv, std::string in_version)
     ecParams.noiseRatio=opt::noiseRatio;
     ecParams.connectAdjacent=opt::connectAdjacent;
     ecParams.connectConfidence=opt::connectConfidence;
-    
+    ecParams.iterCount=opt::iterCount;
     ecParams.version=in_version;
     ecParams.command=opt::command;
     

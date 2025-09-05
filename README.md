@@ -27,10 +27,10 @@ LongPhase is an ultra-fast program for simultaneously co-phasing SNPs, small ind
 - [Contact](#contact)
 ---
 ## Installation
-You are recommended to download a [linux 64bit binary release](https://github.com/twolinin/longphase/releases/download/v1.7.3/longphase_linux-x64.tar.xz) without compilation. 
+You are recommended to download a [linux 64bit binary release](https://github.com/twolinin/longphase/releases/download/v2.0/longphase_linux-x64.tar.xz) without compilation. 
 
 ```
-wget https://github.com/twolinin/longphase/releases/download/v1.7.3/longphase_linux-x64.tar.xz
+wget https://github.com/twolinin/longphase/releases/download/v2.0/longphase_linux-x64.tar.xz
 tar -xJf longphase_linux-x64.tar.xz
 ```
 
@@ -119,18 +119,24 @@ optional arguments:
 
 parse alignment arguments:
    -q, --mappingQuality=Num               filter alignment if mapping quality is lower than threshold. default:1
+   -x, --mismatchRate=Num                 mark reads as false if mismatchRate of them are higher than threshold. default:3
 
 phasing graph arguments:
    -p, --baseQuality=[0~90]               change edge's weight to --edgeWeight if base quality is lower than the threshold. default:12
    -e, --edgeWeight=[0~1]                 if one of the bases connected by the edge has a quality lower than --baseQuality
                                           its weight is reduced from the normal 1. default:0.1
-   -a, --connectAdjacent=Num              connect adjacent N SNPs. default:20
+   -a, --connectAdjacent=Num              connect adjacent N SNPs. default:35
    -d, --distance=Num                     phasing two variant if distance less than threshold. default:300000
-   -1, --edgeThreshold=[0~1]              give up SNP-SNP phasing pair if the number of reads of the 
+   -1, --edgeThreshold=[0~1]              give up SNP-SNP phasing pair if the number of reads of the
                                           two combinations are similar. default:0.7
+   -L, --overlapThreshold=[0~1]           filtering different alignments of the same read if there is overlap. default:0.2
+   -w, --sv-window=NUM                    window size for evaluating surrounding CIGAR operations. default:20
+   -h, --sv-threshold=[0~1]               relative difference threshold for read to support a SV. default:0.10
+
 haplotag read correction arguments:
    -m, --readConfidence=[0.5~1]           The confidence of a read being assigned to any haplotype. default:0.65
    -n, --snpConfidence=[0.5~1]            The confidence of assigning two alleles of a SNP to different haplotypes. default:0.75
+
 
 ```
 ---
@@ -201,9 +207,12 @@ optional arguments:
       -q, --qualityThreshold=Num      not tag alignment if the mapping quality less than threshold. default:1
       -p, --percentageThreshold=Num   the alignment will be tagged according to the haplotype corresponding to most alleles.
                                       if the alignment has no obvious corresponding haplotype, it will not be tagged. default:0.6
+      -w, --sv-window=NUM             window size for evaluating surrounding CIGAR operations. default: 20
+      -h, --sv-threshold=[0~1]        relative difference threshold for read to support a SV. default: 0.10
       -t, --threads=Num               number of thread. default:1
       -o, --out-prefix=NAME           prefix of phasing result. default:result
-      --region=REGION                 tagging include only reads/variants overlapping those regions. default:(all regions)
+      --cram                          the output file will be in the cram format. default:bam
+      --region=REGION                 tagging include only reads/variants overlapping those regions. default:""(all regions)
                                       input format:chrom (consider entire chromosome)
                                                    chrom:start (consider region from this start to end of chromosome)
                                                    chrom:start-end
@@ -245,8 +254,10 @@ require arguments:
       -b, --bam-file=NAME           modified sorted bam file.
       -r, --reference=NAME          reference fasta.
 optional arguments:
+      -s, --snp-file=NAME           input SNP vcf file.
       -o, --out-prefix=NAME         prefix of phasing result. default: modcall_result
       -t, --threads=Num             number of thread. default:1
+      --all                         output all coordinates where modifications have been detected.
 phasing arguments:
       -m, --modThreshold=[0~1]      value extracted from MM tag and ML tag.
                                     above the threshold means modification occurred. default: 0.8

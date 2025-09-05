@@ -8,6 +8,49 @@
 
 typedef std::pair<int, int> PosAllele;
 typedef std::map<std::string, int> ReadBaseMap;
+using PosVec = std::vector<int>;
+
+class Clip{
+    private:
+        std::string chr;
+        PosVec CNVtoLOHInterval(SnpParser &snpMap);
+
+        struct cnvState{
+            cnvState():push(false),slowUp(false),slowDown(false),currCount(0),rejectCount(0),pullDownCount(0),slowDownCount(0),candidateStartPos(-1),candidateEndPos(-1){}
+            
+            bool push;
+            bool slowUp;
+            bool slowDown;
+            int currCount;
+            int rejectCount;
+            int pullDownCount;
+            int slowDownCount;
+            int candidateStartPos;
+            int candidateEndPos;
+            
+            void reset(){
+                push = false;
+                slowUp = false;
+                slowDown = false;
+                currCount = 0;
+                rejectCount = 0;
+                pullDownCount = 0;
+                slowDownCount = 0;
+                candidateStartPos = -1;
+                candidateEndPos = -1;
+            }
+        };
+        cnvState state;
+        void updateThreshold(int upCount);
+
+    public:
+        Clip(std::string &chr, ClipCount &inClipCount);
+        ~Clip();
+        std::vector<std::pair<int, int>> cnvVec;
+        void getCNVInterval(ClipCount &clipCount, std::string &chr);
+        PosVec detectLOH(SnpParser &snpMap);
+        std::string getChr() const { return chr;}
+};
 
 class SubEdge{
     
@@ -45,17 +88,28 @@ class SubEdge{
 
 };
 
+//use to store the voting info from the previous variants
+struct VoteResult{
+    int Pos;		//who votes
+    float para;		//rr+aa
+    float cross;	//ra+ar
+    float weight;	//how much weight
+    int hap;		//which haplotype 
+    double ESR;		//similarity of para and cross
+
+    VoteResult( int currPos, float weight ) ;
+};
 
 struct VariantEdge{
+    std::string chrName;
     int currPos;
     SubEdge* alt;
     SubEdge* ref;
-
     VariantEdge(int currPos);
     // node pair 
-    std::pair<PosAllele,PosAllele> findBestEdgePair(int targetPos, bool isONT, double diffRatioThreshold, bool debug);
+    std::pair<PosAllele,PosAllele> findBestEdgePair(int targetPos, bool isONT, double diffRatioThreshold, bool debug, std::map<int,int> &variantType, VoteResult &vote);
     // number of read of two node. AA and AB combination
-    std::pair<int,int> findNumberOfRead(int targetPos);
+    std::pair<float,float> findNumberOfRead(int targetPos);
 };
 
 
@@ -72,9 +126,16 @@ struct EdgeResult{
     int aa;
 };
 
+struct CnvStatistics{
+    std::map<int, double> missRateMap;
+    std::map<int, std::map<int, std::vector<int>>> cnvReadMmrate;
+    std::map<int, std::map<int, double>> AvgCnvReadMiss;
+};
+
 class VairiantGraph{
     
     private:
+        std::string *chrName;
         PhasingParameters *params;
         std::string *ref;
         std::vector<std::string> dotResult;
@@ -83,12 +144,15 @@ class VairiantGraph{
         // By default, a Map in C++ is sorted in increasing order based on its key.
         // position, edge
         std::map<int,VariantEdge*> *edgeList;
+
         // Each position will record the included reads and their corresponding base qualities.
         // position, < read name, quality>
         std::map<int,ReadBaseMap*> *totalVariantInfo;
         // position, type < 0=SNP 1=SV 2=MOD 3=INDEL >
         std::map<int,int> *variantType;
-        
+
+        std::pair<float,float> Onelongcase( std::vector<VoteResult> vote ) ;
+
         // phasing result     
         // PosAllele , block_start    
         std::map<PosAllele,int> *bkResult;
@@ -103,14 +167,24 @@ class VairiantGraph{
         void readCorrection();
 
         void edgeConnectResult();
+
+        void calculateCnvMismatchRate(std::vector<ReadVariant>& in_readVariant, Clip &clip);
+
+        void aggregateCnvReadMismatchRate(const std::vector<ReadVariant>& in_readVariant, const Clip &clip, std::map<int, std::map<int, std::vector<int>>>& cnvReadMmrate);
+
+        void calculateAverageMismatchRate(const Clip& clip, const std::map<int, std::map<int, std::vector<int>>>& cnvReadMmrate, std::map<int, double>& missRateMap);
+
+        void filterHighMismatchVariants(std::vector<ReadVariant>& in_readVariant, const Clip& clip, const std::map<int, double>& missRateMap);
+
+        bool isPositionInRange(int position, int start, int end);
         
 
     public:
     
-        VairiantGraph(std::string &ref, PhasingParameters &params);
+        VairiantGraph(std::string &ref, PhasingParameters &params, std::string &chrName);
         ~VairiantGraph();
     
-        void addEdge(std::vector<ReadVariant> &in_readVariant);
+        void addEdge(std::vector<ReadVariant> &in_readVariant, Clip &clip);
         
         void phasingProcess();
         void writingDotFile(std::string dotPrefix);
@@ -121,7 +195,6 @@ class VairiantGraph{
         void destroy();
         
 };
-
 
 
 

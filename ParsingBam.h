@@ -10,7 +10,7 @@
 #include <htslib/thread_pool.h>
 #include <htslib/vcf.h>
 #include <htslib/vcfutils.h>
-
+#include "ModCallProcess.h"
 #include <zlib.h>
 
 struct RefAlt{
@@ -18,6 +18,7 @@ struct RefAlt{
     std::string Alt;
     bool is_reverse;
     bool is_modify;
+    bool is_danger;
 };
 
 class FastaParser{
@@ -69,9 +70,11 @@ class SnpParser : public BaseVairantParser{
     public:
     
         SnpParser(PhasingParameters &in_params);
-        ~SnpParser();
+        ~SnpParser();     
             
         std::map<int, RefAlt> getVariants(std::string chrName);  
+
+	    std::map<int, RefAlt> getVariants_markindel(std::string chrName, const std::string &ref);
 
         std::vector<std::string> getChrVec();
         
@@ -93,7 +96,7 @@ class SVParser : public BaseVairantParser{
         SnpParser *snpFile;
 
         // chr , variant position (0-base), read
-        std::map<std::string, std::map<int, std::map<std::string ,bool> > > *chrVariant;
+        std::map<std::string, std::map<int, std::map<int, bool> > > *chrVariant;
         // chr, variant position (0-base)
         std::map<std::string, std::map<int, bool> > posDuplicate;
         
@@ -109,7 +112,7 @@ class SVParser : public BaseVairantParser{
         SVParser(PhasingParameters &params, SnpParser &snpFile);
         ~SVParser();
             
-        std::map<int, std::map<std::string ,bool> > getVariants(std::string chrName);  
+        std::map<int, std::map<int, bool> > getVariants(std::string chrName);
 
         void writeResult(PhasingResult phasingResult);
 
@@ -163,6 +166,15 @@ struct Alignment{
     bool is_reverse;
 };
 
+
+enum ClipFrontBack {
+    FRONT = 0,
+    BACK = 1
+};
+
+// pos<read start|read end ,count >
+using ClipCount = std::map<int, std::map<ClipFrontBack, int>>;
+
 class BamParser{
     
     private:
@@ -172,20 +184,20 @@ class BamParser{
         std::map<int, RefAlt> *currentVariants;
         std::map<int, RefAlt>::iterator firstVariantIter;
         // SV map and iter
-        std::map<int, std::map<std::string ,bool> > *currentSV;
-        std::map<int, std::map<std::string ,bool> >::iterator firstSVIter;
+        std::map<int, std::map<int, bool> > *currentSV;
+        std::vector<std::pair<int, int> >::iterator firstSVIter;
+        std::map<std::string, std::vector<std::pair<int, int> > > SV_map;
         // mod map and iter
-        std::map<int, std::map<std::string ,RefAlt> > *currentMod;
-        std::map<int, std::map<std::string ,RefAlt> >::iterator firstModIter;
-        void get_snp(const  bam_hdr_t &bamHdr,const bam1_t &aln, std::vector<ReadVariant> &readVariantVec, const std::string &ref_string, bool isONT);
-   
+        std::map<int, std::map<std::string, RefAlt> > *currentMod;
+        std::map<int, std::map<std::string, RefAlt> >::iterator firstModIter;
+        void get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln, std::vector<ReadVariant> &readVariantVec, ClipCount &clipCount, const std::string &ref_string, bool isONT, int svWindow, double svThreshold);
+        void getClip(int pos, int clipFrontBack, int len, ClipCount &clipCount);
+
     public:
-        BamParser(std::string chrName, std::vector<std::string> inputBamFileVec, SnpParser &snpMap, SVParser &svFile, METHParser &modFile);
+        BamParser(std::string chrName, std::vector<std::string> inputBamFileVec, SnpParser &snpMap, SVParser &svFile, METHParser &modFile, const std::string &ref_string);
         ~BamParser();
         
-        void direct_detect_alleles(int lastSNPPos, htsThreadPool &threadPool, PhasingParameters params, std::vector<ReadVariant> &readVariantVec , const std::string &ref_string);
-
+        void direct_detect_alleles(int lastSNPPos, htsThreadPool &threadPool, PhasingParameters params, std::vector<ReadVariant> &readVariantVec, ClipCount &clipCount, const std::string &ref_string);
 };
-
 
 #endif
