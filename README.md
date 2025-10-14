@@ -1,6 +1,10 @@
 # LongPhase
 LongPhase is an ultra-fast program for simultaneously co-phasing SNPs, small indels, large SVs, and (5mC) modifications for Nanopore and PacBio platforms. It can produce nearly chromosome-scale haplotype blocks by using Nanpore ultra-long reads without the need for additional trios, chromosome conformation, and strand-seq data. LongPhase can phase a 30x human genome in ~1 minute (see [Speed](#speed)).
 
+For somatic phasing using paired tumor/normal samples, please try [longphase-s](https://github.com/ming-en-ho/longphase-s)
+
+For somatic phasing using tumor-only samples, please try [longphase-to](https://github.com/sloth-eat-pudding/longphase-to)
+
 ---
 - [Installation](#installation)
 - [Usage](#usage)
@@ -348,8 +352,11 @@ minimap2 -ax map-ont -y reference.fasta methylcall.raw.fastq
 
 ---
 ## Comparison with other SNP-phasing programs
-LongPhase is >30x faster than WhatsHap and Margin and produces much larger blocks when tested on HG002, HG003,and HG004.
-![btac058f3](https://github.com/twolinin/longphase/assets/6086073/af3a75a1-6268-4700-9dcc-4a6f34e86f7a)
+- SNP-only (program comparison): v2.0 maintains ~0.055–0.056% switch error; N50 is consistently higher than WhatsHap.
+<img width="3789" height="1988" alt="snp_phasing_comparison_new" src="https://github.com/user-attachments/assets/1bfbbed8-1417-4023-90c9-bae71d65d94f" />
+
+- SNP+INDEL (program comparison): v2.0 achieves lower error and higher N50 than WhatsHap.
+<img width="3789" height="1988" alt="snp_indel_phasing_comparison_new" src="https://github.com/user-attachments/assets/b4c00074-ec49-45bd-a67b-d508b2c5a8ce" />
 
 ## Speed
 LongPhase can phase a human genome within 1-2 minutes.
