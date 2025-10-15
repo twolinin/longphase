@@ -18,6 +18,7 @@ struct PhasingParameters
     bool isONT;
     bool isPB;
     bool phaseIndel;
+    int indelQuality;  // 新增：indel 品質過濾門檻，預設 0（停用）
     
     int connectAdjacent;
     int mappingQuality;

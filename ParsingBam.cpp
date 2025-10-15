@@ -2,6 +2,7 @@
 
 #include <string.h>
 #include <sstream>
+#include <cmath>
 
 
 // vcf parser modify from 
@@ -216,6 +217,16 @@ SnpParser::SnpParser(PhasingParameters &in_params):commandLine(false){
     chrVariant = new std::map<std::string, std::map<int, RefAlt> >;
     
     params = &in_params;
+        
+    // 初始化 rmoved indels log 檔案
+    if (params->phaseIndel && params->indelQuality > 0) {
+        std::string logFileName = params->resultPrefix + "_removed_indels.log";
+        removedIndelsLog.open(logFileName.c_str());
+        if (removedIndelsLog.is_open()) {
+            removedIndelsLog << "#CHROM\tPOS\tREF\tALT\tQUAL\n";
+        }
+    }
+
     // open vcf file
     htsFile * inf = bcf_open(params->snpFile.c_str(), "r");
     // read header
@@ -305,6 +316,23 @@ SnpParser::SnpParser(PhasingParameters &in_params):commandLine(false){
                 tmp.Ref = rec->d.allele[0]; 
                 tmp.Alt = rec->d.allele[1];
                 
+                float qual = rec->qual;
+                if (std::isnan(qual)) {
+                    qual = 0.0;
+                }
+                if (params->indelQuality > 0 && qual < params->indelQuality){
+                    if (removedIndelsLog.is_open()) {
+                        removedIndelsLog << chr << "\t" << (variantPos + 1) << "\t" 
+                                        << tmp.Ref << "\t" << tmp.Alt << "\t" 
+                                        << (std::isnan(rec->qual) ? "." : std::to_string(rec->qual)) << "\n";
+                    }
+                    // 記錄被過濾掉的 indel 位置（0-based）
+                    filteredIndelPositions[chr].insert(variantPos);
+                    continue;
+                }
+
+
+                
                 //prevent the MAVs calling error which makes the GT=0/1
                 if ( rec->d.allele[1][tmp.Alt.size()+1] != '\0' ){
                    continue ;
@@ -318,6 +346,9 @@ SnpParser::SnpParser(PhasingParameters &in_params):commandLine(false){
 }
 
 SnpParser::~SnpParser(){
+    if (removedIndelsLog.is_open()) {
+        removedIndelsLog.close();
+    }
     delete chrVariant;
 }
 
@@ -420,7 +451,16 @@ void SnpParser::writeLine(std::string &input, bool &ps_def, std::ofstream &resul
         if( input.substr(0, 16) == "##FORMAT=<ID=PS," ){
             ps_def = true;
         }
-        resultVcf << input << "\n";
+                // 添加新的 FILTER 定義
+        if( input.substr(0, 17) == "##FILTER=<ID=PASS" ){
+            resultVcf << input << "\n";
+            // 添加 indel 品質過濾的 FILTER 定義
+            if (params->phaseIndel && params->indelQuality > 0) {
+                resultVcf << "##FILTER=<ID=INDEL_QUAL_FILTERED,Description=\"Indel filtered due to QUAL below threshold (" << params->indelQuality << ")\">\n";
+            }
+        } else {
+            resultVcf << input << "\n";
+        }
     }
     else if ( input.substr(0, 6) == "#CHROM" || input.substr(0, 6) == "#chrom" ){
         // format line 
@@ -520,6 +560,17 @@ void SnpParser::writeLine(std::string &input, bool &ps_def, std::ofstream &resul
         // Check if the variant is extracted from this VCF
         auto posIter = (*chrVariant)[fields[0]].find(posIdx);
         
+        // Check if this indel was filtered out due to quality
+        bool isFilteredIndel = false;
+        if (params->phaseIndel && params->indelQuality > 0) {
+            auto filteredIter = filteredIndelPositions.find(fields[0]);
+            if (filteredIter != filteredIndelPositions.end()) {
+                if (filteredIter->second.find(posIdx) != filteredIter->second.end()) {
+                    isFilteredIndel = true;
+                }
+            }
+        }
+        
         // this pos is phase
         if( psElementIter != phasingResult.end() && posIter != (*chrVariant)[fields[0]].end() ){
             // add PS flag and value
@@ -553,6 +604,12 @@ void SnpParser::writeLine(std::string &input, bool &ps_def, std::ofstream &resul
             // add PS flag and value
             fields[8] = fields[8] + ":PS";
             fields[9] = fields[9] + ":.";
+        }
+
+        // 為被過濾掉的 indel 添加 FILTER 標記
+        if (isFilteredIndel) {
+            // 直接覆蓋為 INDEL_QUAL_FILTERED，不保留原有標記
+            fields[6] = "INDEL_QUAL_FILTERED";
         }
                     
         for(std::vector<std::string>::iterator fieldIter = fields.begin(); fieldIter != fields.end(); ++fieldIter){
