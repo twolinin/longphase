@@ -24,6 +24,9 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
     std::cerr<< "--- Phasing Parameter --- \n";
     std::cerr<< "Seq Platform       : " << ( params.isONT ? "ONT" : "PB" ) << "\n";
     std::cerr<< "Phase Indel        : " << ( params.phaseIndel ? "True" : "False" )  << "\n";
+    if (params.phaseIndel) {
+        std::cerr<< "Indel Quality      : " << params.indelQuality << "\n";
+    }
     std::cerr<< "Distance Threshold : " << params.distance        << "\n";
     std::cerr<< "Connect Adjacent   : " << params.connectAdjacent << "\n";
     std::cerr<< "Edge Threshold     : " << params.edgeThreshold   << "\n";

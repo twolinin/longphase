@@ -18,6 +18,7 @@ struct PhasingParameters
     bool isONT;
     bool isPB;
     bool phaseIndel;
+    int indelQuality;  // Indel quality filter threshold, default is 0 (disabled)
     
     int connectAdjacent;
     int mappingQuality;
