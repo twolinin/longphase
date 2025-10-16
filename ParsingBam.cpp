@@ -218,7 +218,7 @@ SnpParser::SnpParser(PhasingParameters &in_params):commandLine(false){
     
     params = &in_params;
         
-    // 初始化 rmoved indels log 檔案
+    // Initialize removed indels log file
     if (params->phaseIndel && params->indelQuality > 0) {
         std::string logFileName = params->resultPrefix + "_removed_indels.log";
         removedIndelsLog.open(logFileName.c_str());
@@ -326,7 +326,7 @@ SnpParser::SnpParser(PhasingParameters &in_params):commandLine(false){
                                         << tmp.Ref << "\t" << tmp.Alt << "\t" 
                                         << (std::isnan(rec->qual) ? "." : std::to_string(rec->qual)) << "\n";
                     }
-                    // 記錄被過濾掉的 indel 位置（0-based）
+                    // Record the position of filtered indels (0-based)
                     filteredIndelPositions[chr].insert(variantPos);
                     continue;
                 }
@@ -451,10 +451,10 @@ void SnpParser::writeLine(std::string &input, bool &ps_def, std::ofstream &resul
         if( input.substr(0, 16) == "##FORMAT=<ID=PS," ){
             ps_def = true;
         }
-                // 添加新的 FILTER 定義
+                // Add  FILTER definition
         if( input.substr(0, 17) == "##FILTER=<ID=PASS" ){
             resultVcf << input << "\n";
-            // 添加 indel 品質過濾的 FILTER 定義
+            // Add FILTER definition for indel quality filtering
             if (params->phaseIndel && params->indelQuality > 0) {
                 resultVcf << "##FILTER=<ID=INDEL_QUAL_FILTERED,Description=\"Indel filtered due to QUAL below threshold (" << params->indelQuality << ")\">\n";
             }
@@ -606,9 +606,9 @@ void SnpParser::writeLine(std::string &input, bool &ps_def, std::ofstream &resul
             fields[9] = fields[9] + ":.";
         }
 
-        // 為被過濾掉的 indel 添加 FILTER 標記
+        // Add FILTER tag for filtered indels
         if (isFilteredIndel) {
-            // 直接覆蓋為 INDEL_QUAL_FILTERED，不保留原有標記
+            // Overwrite to INDEL_QUAL_FILTERED, do not keep the original tag
             fields[6] = "INDEL_QUAL_FILTERED";
         }
                     

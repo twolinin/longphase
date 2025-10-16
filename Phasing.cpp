@@ -94,7 +94,7 @@ namespace opt
     static bool isONT=false;
     static bool isPB=false;
     static bool phaseIndel=false;
-    static int indelQuality = 0;  // 新增：indel 品質過濾門檻，預設 0（停用）
+    static int indelQuality = 0;  // Indel quality filter threshold, default is 0 (disabled)
     static int connectAdjacent = 35;
     static int mappingQuality = 1;
     static double mismatchRate = 3;
