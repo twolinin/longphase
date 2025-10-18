@@ -1,9 +1,9 @@
 # LongPhase
 LongPhase is an ultra-fast program for simultaneously co-phasing SNPs, small indels, large SVs, and (5mC) modifications for Nanopore and PacBio platforms. It can produce nearly chromosome-scale haplotype blocks by using Nanpore ultra-long reads without the need for additional trios, chromosome conformation, and strand-seq data. LongPhase can phase a 30x human genome in ~1 minute (see [Speed](#speed)).
 
-For somatic phasing using paired tumor/normal samples, please try [longphase-s](https://github.com/ming-en-ho/longphase-s)
+For somatic phasing using paired tumor/normal samples, please try [longphase-s](https://github.com/ming-en-ho/longphase-s).
 
-For somatic phasing using tumor-only samples, please try [longphase-to](https://github.com/sloth-eat-pudding/longphase-to)
+For somatic phasing using tumor-only samples, please try [longphase-to](https://github.com/sloth-eat-pudding/longphase-to).
 
 ---
 - [Installation](#installation)
@@ -359,16 +359,17 @@ minimap2 -ax map-ont -y reference.fasta methylcall.raw.fastq
 <img width="3789" height="1988" alt="snp_indel_phasing_comparison_new" src="https://github.com/user-attachments/assets/b4c00074-ec49-45bd-a67b-d508b2c5a8ce" />
 
 ## Speed
-LongPhase can phase a human genome within 1-2 minutes.
-phase (-t 24) | v1.6 (Time) | v1.6 (Memory)
+LongPhase can phase a human genome within 1-3 minutes.
+phase (-t 24) | v2.0 (Time) | v2.0 (Memory)
 -- | -- | -- 
-HG002 ONT R10.4.1 10x |  39s | 15.1G
-HG002 ONT R10.4.1 20x |  53s | 15.6G
-HG002 ONT R10.4.1 30x |  68s | 24.4G
-HG002 ONT R10.4.1 40x |  217s | 26.6G
-HG002 ONT R10.4.1 50x |  262s | 22.2G
-HG002 ONT R10.4.1 60x |  113s | 33.4G
+HG002 ONT R10.4.1 10x |  39s | 26.9G
+HG002 ONT R10.4.1 20x |  75s | 33.8G
+HG002 ONT R10.4.1 30x |  102s | 39.3G
+HG002 ONT R10.4.1 40x |  124s | 44.5G
+HG002 ONT R10.4.1 50x |  171s | 47.6G
+HG002 ONT R10.4.1 60x |  180s | 52.8G
 
+*If the device is running low on memory, you can control memory usage by reducing the number of threads (-t).
 
 ---
 ## Citation
