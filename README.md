@@ -358,6 +358,12 @@ minimap2 -ax map-ont -y reference.fasta methylcall.raw.fastq
 - SNP+INDEL (program comparison): v2.0 achieves lower error and higher N50 than WhatsHap.
 <img width="3789" height="1988" alt="snp_indel_phasing_comparison_new" src="https://github.com/user-attachments/assets/b4c00074-ec49-45bd-a67b-d508b2c5a8ce" />
 
+- SNP-Methylation (program comparison): v2.0 ModCall-only yields higher N50 than both v2.0 SNP-based and MethPhaser.
+<img width="4800" height="2400" alt="477704574-45001492-2e2f-4370-a533-83146560502d" src="https://github.com/user-attachments/assets/f9785ef9-2643-4bc3-95bf-e5723a75e099" />
+
+- Strategy comparison (SNP / SNP+INDEL / SNP+Methylation / SNP+INDEL+Methylation): adding Methylation—especially tri-modal—markedly raises N50 while keeping switch error low.
+<img width="4800" height="2400" alt="Strategy comparison" src="https://github.com/user-attachments/assets/8364cb36-546a-4e78-8724-8ff09136828f" />
+
 ## Speed
 LongPhase can phase a human genome within 1-3 minutes.
 phase (-t 24) | v2.0 (Time) | v2.0 (Memory)
