@@ -1,9 +1,9 @@
 # LongPhase
 LongPhase is an ultra-fast program for simultaneously co-phasing SNPs, small indels, large SVs, and (5mC) modifications for Nanopore and PacBio platforms. It can produce nearly chromosome-scale haplotype blocks by using Nanpore ultra-long reads without the need for additional trios, chromosome conformation, and strand-seq data. LongPhase can phase a 30x human genome in ~1 minute (see [Speed](#speed)).
 
-For somatic phasing using paired tumor/normal samples, please try [longphase-s](https://github.com/ming-en-ho/longphase-s).
+For somatic phasing using paired tumor/normal samples, please use [longphase-s](https://github.com/CCU-Bioinformatics-Lab/longphase-s).
 
-For somatic phasing using tumor-only samples, please try [longphase-to](https://github.com/sloth-eat-pudding/longphase-to).
+For somatic phasing using tumor-only samples, please use [longphase-to](https://github.com/CCU-Bioinformatics-Lab/longphase-to).
 
 ---
 - [Installation](#installation)
