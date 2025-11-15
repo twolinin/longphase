@@ -475,8 +475,36 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
             // write this alignment to result bam file
             result = sam_write1(out, bamHdr, aln);
         }
+        hts_itr_destroy(iter);
         std::cerr<< difftime(time(NULL), begin) << "s\n";
     }
+
+    // Use '*' to create an iterator, capturing unmapped trailing segments
+    hts_itr_t *iter_unmap = sam_itr_querys(idx, bamHdr, "*");
+    if (iter_unmap == NULL) {
+        std::cerr << "WARN: Cannot create iterator for '*' (unmapped tail)\n";
+    } else {
+        bam1_t *aln_unmap = bam_init1();
+        int r = 0;
+        while ((r = sam_itr_multi_next(in, iter_unmap, aln_unmap)) >= 0) {
+            initFlag(aln_unmap, "HP");
+            initFlag(aln_unmap, "PS");
+            initFlag(aln_unmap, "PQ");
+
+            totalAlignment++;
+            totalUnmapped++;
+            totalUnTagCount++;
+
+            int wr = sam_write1(out, bamHdr, aln_unmap);
+            if (wr < 0) {
+                std::cerr << "ERROR: Failed to write unmapped read: "
+                          << bam_get_qname(aln_unmap) << "\n";
+            }
+        }
+        bam_destroy1(aln_unmap);
+        hts_itr_destroy(iter_unmap);
+    }
+
     if(tagResult!=NULL){
         (*tagResult).close();
     }
