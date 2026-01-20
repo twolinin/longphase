@@ -1126,6 +1126,9 @@ void Clip::updateThreshold(int upCount){
 }
 
 void Clip::getCNVInterval(ClipCount &clipCount, std::string &chrName){
+    if (clipCount.empty()) {
+        return;
+    }
     int upCount = 0;
     int downCount = 0;
     int AreaSize = 30000;
