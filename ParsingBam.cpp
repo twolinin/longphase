@@ -1149,7 +1149,7 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln, std::vector<
         int cigar_oplen = bam_cigar_oplen(cigar[i]);
         
         // get the starting position of each variant currently.
-        int modPos = (*currentModIter).first;
+        int modPos = (currentModIter != currentMod->end()) ? (*currentModIter).first : INT_MAX;
         int svPos = (*currentSVIter).first;
         if(currentSVIter != SV_map[chrName].end()){
             svPos = (*currentSVIter).first - 1;
@@ -1161,7 +1161,9 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln, std::vector<
         // get the first variant detected by the alignment.
         while( currentVariantIter != currentVariants->end() && variantPos < ref_pos ){
             currentVariantIter++;
-            variantPos = (*currentVariantIter).first;
+            if (currentVariantIter != currentVariants->end()) {
+                variantPos = (*currentVariantIter).first;
+            }
         }
         
         // Processing the region covered by the current CIGAR operator
@@ -1170,14 +1172,14 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln, std::vector<
                ( currentSVIter      != SV_map[chrName].end()       && svPos      < ref_pos + cigar_oplen ) || 
                ( currentVariantIter != currentVariants->end() && variantPos < ref_pos + cigar_oplen )){
             
-            // modification's position is minimal
-            if( ( currentVariantIter == currentVariants->end() || modPos < variantPos ) &&
-                ( currentSVIter      == SV_map[chrName].end()       || modPos < svPos ) &&
+            // modification's position is minimal (or equal, MOD takes priority)
+            if( ( currentVariantIter == currentVariants->end() || modPos <= variantPos ) &&
+                ( currentSVIter      == SV_map[chrName].end()       || modPos <= svPos ) &&
                   currentModIter     != currentMod->end() ){
                 
                 // check this read contain modification
                 std::map<std::string ,RefAlt>::iterator readIter = (*currentModIter).second.find(bam_get_qname(&aln));
-                if( readIter != (*currentModIter).second.end() && modPos < variantPos ){
+                if( readIter != (*currentModIter).second.end() && modPos <= variantPos ){
                     
                     // check varaint strand in vcf file is same as bam file
                     if( (*readIter).second.is_reverse == bam_is_rev(&aln) ){
@@ -1192,10 +1194,14 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln, std::vector<
                     }
                 }
                 currentModIter++;
-                modPos = (*currentModIter).first;
+                if (currentModIter != currentMod->end()) {
+                    modPos = (*currentModIter).first;
+                } else {
+                    modPos = INT_MAX;
+                }
             }
-            // SV's position is minimal
-            else if( ( currentVariantIter == currentVariants->end() || svPos < variantPos ) &&
+            // SV's position is minimal (or equal to SNP, SV takes priority over SNP)
+            else if( ( currentVariantIter == currentVariants->end() || svPos <= variantPos ) &&
                      ( currentModIter     == currentMod->end()      || svPos < modPos ) &&
                        currentSVIter      != SV_map[chrName].end()){
                 // If this read not contain SV, it means this read is the same as reference genome.
@@ -1231,7 +1237,11 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln, std::vector<
                 // next SV iter
                 previousSVIter = currentSVIter;
                 currentSVIter++;
-                svPos = (*currentSVIter).first - 1;
+                if (currentSVIter != SV_map[chrName].end()) {
+                    svPos = (*currentSVIter).first - 1;
+                } else {
+                    svPos = INT_MAX;
+                }
             }
 
             // SNP's position is minimal
@@ -1317,7 +1327,11 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln, std::vector<
                         delete tmpVariant;                        
                     }
                     currentVariantIter++;
-                    variantPos = (*currentVariantIter).first;
+                    if (currentVariantIter != currentVariants->end()) {
+                        variantPos = (*currentVariantIter).first;
+                    } else {
+                        variantPos = INT_MAX;
+                    }
                 }
                 else break;
             }
