@@ -1149,14 +1149,12 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln, std::vector<
         int cigar_oplen = bam_cigar_oplen(cigar[i]);
         
         // get the starting position of each variant currently.
+        // Use INT_MAX as sentinel when iterator reaches end(), to avoid dereferencing
+        // end() (undefined behavior) and to ensure exhausted variant types never "win"
+        // the min-position comparison in the processing loop below.
         int modPos = (currentModIter != currentMod->end()) ? (*currentModIter).first : INT_MAX;
-        int svPos = (*currentSVIter).first;
-        if(currentSVIter != SV_map[chrName].end()){
-            svPos = (*currentSVIter).first - 1;
-        }else{
-            svPos = 0;
-        }
-        int variantPos = (*currentVariantIter).first;
+        int svPos = (currentSVIter != SV_map[chrName].end()) ? (*currentSVIter).first - 1 : INT_MAX; // -1: convert 1-based to 0-based coordinate
+        int variantPos = (currentVariantIter != currentVariants->end()) ? (*currentVariantIter).first : INT_MAX;
         
         // get the first variant detected by the alignment.
         while( currentVariantIter != currentVariants->end() && variantPos < ref_pos ){
