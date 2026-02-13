@@ -6,7 +6,7 @@
 
 
 #define PROGRAM_BIN "main"
-#define VERSION "2.0"
+#define VERSION "2.0.1"
 
 
 
