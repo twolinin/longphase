@@ -21,6 +21,7 @@ static const char *CORRECT_USAGE_MESSAGE =
 "   -t, --threads=Num                      number of thread. default:1\n"
 "   -o, --out-prefix=NAME                  prefix of phasing result. default: result\n"
 "   --indels                               phase small indel. default: False\n"
+"   --indelQuality=Num                     filter indels with QUAL less than threshold (only effective when --indels is enabled). default: 0\n"
 "   --dot                                  each contig/chromosome will generate dot file. \n\n"
 
 "parse alignment arguments:\n"
@@ -47,7 +48,7 @@ static const char *CORRECT_USAGE_MESSAGE =
 
 static const char* shortopts = "s:b:o:t:r:d:1:a:q:x:p:e:n:m:L:w:h:";
 
-enum { OPT_HELP = 1 , DOT_FILE, SV_FILE, MOD_FILE, IS_ONT, IS_PB, PHASE_INDEL, VERSION};
+enum { OPT_HELP = 1 , DOT_FILE, SV_FILE, MOD_FILE, IS_ONT, IS_PB, PHASE_INDEL, INDEL_QUALITY, VERSION};
 
 static const struct option longopts[] = { 
     { "help",                 no_argument,        NULL, OPT_HELP },
@@ -56,6 +57,7 @@ static const struct option longopts[] = {
     { "pb",                   no_argument,        NULL, IS_PB }, 
     { "version",              no_argument,        NULL, VERSION }, 
     { "indels",               no_argument,        NULL, PHASE_INDEL },   
+    { "indelQuality",         required_argument,  NULL, INDEL_QUALITY },
     { "sv-file",              required_argument,  NULL, SV_FILE },  
     { "mod-file",             required_argument,  NULL, MOD_FILE },
     { "reference",            required_argument,  NULL, 'r' },
@@ -92,6 +94,7 @@ namespace opt
     static bool isONT=false;
     static bool isPB=false;
     static bool phaseIndel=false;
+    static int indelQuality = 0;  // Indel quality filter threshold, default is 0 (disabled)
     static int connectAdjacent = 35;
     static int mappingQuality = 1;
     static double mismatchRate = 3;
@@ -140,6 +143,7 @@ void PhasingOptions(int argc, char** argv)
         case SV_FILE:  arg >> opt::svFile; break; 
         case MOD_FILE: arg >> opt::modFile; break; 
         case PHASE_INDEL: opt::phaseIndel=true; break; 
+        case INDEL_QUALITY: arg >> opt::indelQuality; break;
         case DOT_FILE: opt::generateDot=true; break;
         case IS_ONT: opt::isONT=true; break;
         case IS_PB: opt::isPB=true; break;
@@ -333,6 +337,7 @@ int PhasingMain(int argc, char** argv, std::string in_version)
     ecParams.isONT=opt::isONT;
     ecParams.isPB=opt::isPB;
     ecParams.phaseIndel=opt::phaseIndel;
+    ecParams.indelQuality=opt::indelQuality;
     
     ecParams.connectAdjacent=opt::connectAdjacent;
     ecParams.mappingQuality=opt::mappingQuality;

@@ -60,6 +60,12 @@ class SnpParser : public BaseVairantParser{
         // chr, variant position (0-base)
         std::map<std::string, std::map<int, bool> > chrVariantHomopolymer;
         
+        // Track the position of filtered indels
+        std::map<std::string, std::set<int> > filteredIndelPositions;
+
+        // log file for filtered indels
+        std::ofstream removedIndelsLog;
+        
         // override input parser
         void parserProcess(std::string &input);
         // override output parser

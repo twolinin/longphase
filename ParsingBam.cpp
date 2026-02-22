@@ -2,6 +2,7 @@
 
 #include <string.h>
 #include <sstream>
+#include <cmath>
 
 
 // vcf parser modify from 
@@ -216,6 +217,16 @@ SnpParser::SnpParser(PhasingParameters &in_params):commandLine(false){
     chrVariant = new std::map<std::string, std::map<int, RefAlt> >;
     
     params = &in_params;
+        
+    // Initialize removed indels log file
+    if (params->phaseIndel && params->indelQuality > 0) {
+        std::string logFileName = params->resultPrefix + "_removed_indels.log";
+        removedIndelsLog.open(logFileName.c_str());
+        if (removedIndelsLog.is_open()) {
+            removedIndelsLog << "#CHROM\tPOS\tREF\tALT\tQUAL\n";
+        }
+    }
+
     // open vcf file
     htsFile * inf = bcf_open(params->snpFile.c_str(), "r");
     // read header
@@ -305,6 +316,23 @@ SnpParser::SnpParser(PhasingParameters &in_params):commandLine(false){
                 tmp.Ref = rec->d.allele[0]; 
                 tmp.Alt = rec->d.allele[1];
                 
+                float qual = rec->qual;
+                if (std::isnan(qual)) {
+                    qual = 0.0;
+                }
+                if (params->indelQuality > 0 && qual < params->indelQuality){
+                    if (removedIndelsLog.is_open()) {
+                        removedIndelsLog << chr << "\t" << (variantPos + 1) << "\t" 
+                                        << tmp.Ref << "\t" << tmp.Alt << "\t" 
+                                        << (std::isnan(rec->qual) ? "." : std::to_string(rec->qual)) << "\n";
+                    }
+                    // Record the position of filtered indels (0-based)
+                    filteredIndelPositions[chr].insert(variantPos);
+                    continue;
+                }
+
+
+                
                 //prevent the MAVs calling error which makes the GT=0/1
                 if ( rec->d.allele[1][tmp.Alt.size()+1] != '\0' ){
                    continue ;
@@ -318,6 +346,9 @@ SnpParser::SnpParser(PhasingParameters &in_params):commandLine(false){
 }
 
 SnpParser::~SnpParser(){
+    if (removedIndelsLog.is_open()) {
+        removedIndelsLog.close();
+    }
     delete chrVariant;
 }
 
@@ -420,7 +451,16 @@ void SnpParser::writeLine(std::string &input, bool &ps_def, std::ofstream &resul
         if( input.substr(0, 16) == "##FORMAT=<ID=PS," ){
             ps_def = true;
         }
-        resultVcf << input << "\n";
+                // Add  FILTER definition
+        if( input.substr(0, 17) == "##FILTER=<ID=PASS" ){
+            resultVcf << input << "\n";
+            // Add FILTER definition for indel quality filtering
+            if (params->phaseIndel && params->indelQuality > 0) {
+                resultVcf << "##FILTER=<ID=INDEL_QUAL_FILTERED,Description=\"Indel filtered due to QUAL below threshold (" << params->indelQuality << ")\">\n";
+            }
+        } else {
+            resultVcf << input << "\n";
+        }
     }
     else if ( input.substr(0, 6) == "#CHROM" || input.substr(0, 6) == "#chrom" ){
         // format line 
@@ -520,6 +560,17 @@ void SnpParser::writeLine(std::string &input, bool &ps_def, std::ofstream &resul
         // Check if the variant is extracted from this VCF
         auto posIter = (*chrVariant)[fields[0]].find(posIdx);
         
+        // Check if this indel was filtered out due to quality
+        bool isFilteredIndel = false;
+        if (params->phaseIndel && params->indelQuality > 0) {
+            auto filteredIter = filteredIndelPositions.find(fields[0]);
+            if (filteredIter != filteredIndelPositions.end()) {
+                if (filteredIter->second.find(posIdx) != filteredIter->second.end()) {
+                    isFilteredIndel = true;
+                }
+            }
+        }
+        
         // this pos is phase
         if( psElementIter != phasingResult.end() && posIter != (*chrVariant)[fields[0]].end() ){
             // add PS flag and value
@@ -553,6 +604,12 @@ void SnpParser::writeLine(std::string &input, bool &ps_def, std::ofstream &resul
             // add PS flag and value
             fields[8] = fields[8] + ":PS";
             fields[9] = fields[9] + ":.";
+        }
+
+        // Add FILTER tag for filtered indels
+        if (isFilteredIndel) {
+            // Overwrite to INDEL_QUAL_FILTERED, do not keep the original tag
+            fields[6] = "INDEL_QUAL_FILTERED";
         }
                     
         for(std::vector<std::string>::iterator fieldIter = fields.begin(); fieldIter != fields.end(); ++fieldIter){
@@ -1092,19 +1149,19 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln, std::vector<
         int cigar_oplen = bam_cigar_oplen(cigar[i]);
         
         // get the starting position of each variant currently.
-        int modPos = (*currentModIter).first;
-        int svPos = (*currentSVIter).first;
-        if(currentSVIter != SV_map[chrName].end()){
-            svPos = (*currentSVIter).first - 1;
-        }else{
-            svPos = 0;
-        }
-        int variantPos = (*currentVariantIter).first;
+        // Use INT_MAX as sentinel when iterator reaches end(), to avoid dereferencing
+        // end() (undefined behavior) and to ensure exhausted variant types never "win"
+        // the min-position comparison in the processing loop below.
+        int modPos = (currentModIter != currentMod->end()) ? (*currentModIter).first : INT_MAX;
+        int svPos = (currentSVIter != SV_map[chrName].end()) ? (*currentSVIter).first - 1 : INT_MAX; // -1: convert 1-based to 0-based coordinate
+        int variantPos = (currentVariantIter != currentVariants->end()) ? (*currentVariantIter).first : INT_MAX;
         
         // get the first variant detected by the alignment.
         while( currentVariantIter != currentVariants->end() && variantPos < ref_pos ){
             currentVariantIter++;
-            variantPos = (*currentVariantIter).first;
+            if (currentVariantIter != currentVariants->end()) {
+                variantPos = (*currentVariantIter).first;
+            }
         }
         
         // Processing the region covered by the current CIGAR operator
@@ -1113,14 +1170,14 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln, std::vector<
                ( currentSVIter      != SV_map[chrName].end()       && svPos      < ref_pos + cigar_oplen ) || 
                ( currentVariantIter != currentVariants->end() && variantPos < ref_pos + cigar_oplen )){
             
-            // modification's position is minimal
-            if( ( currentVariantIter == currentVariants->end() || modPos < variantPos ) &&
-                ( currentSVIter      == SV_map[chrName].end()       || modPos < svPos ) &&
+            // modification's position is minimal (or equal, MOD takes priority)
+            if( ( currentVariantIter == currentVariants->end() || modPos <= variantPos ) &&
+                ( currentSVIter      == SV_map[chrName].end()       || modPos <= svPos ) &&
                   currentModIter     != currentMod->end() ){
                 
                 // check this read contain modification
                 std::map<std::string ,RefAlt>::iterator readIter = (*currentModIter).second.find(bam_get_qname(&aln));
-                if( readIter != (*currentModIter).second.end() && modPos < variantPos ){
+                if( readIter != (*currentModIter).second.end() && modPos <= variantPos ){
                     
                     // check varaint strand in vcf file is same as bam file
                     if( (*readIter).second.is_reverse == bam_is_rev(&aln) ){
@@ -1135,10 +1192,14 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln, std::vector<
                     }
                 }
                 currentModIter++;
-                modPos = (*currentModIter).first;
+                if (currentModIter != currentMod->end()) {
+                    modPos = (*currentModIter).first;
+                } else {
+                    modPos = INT_MAX;
+                }
             }
-            // SV's position is minimal
-            else if( ( currentVariantIter == currentVariants->end() || svPos < variantPos ) &&
+            // SV's position is minimal (or equal to SNP, SV takes priority over SNP)
+            else if( ( currentVariantIter == currentVariants->end() || svPos <= variantPos ) &&
                      ( currentModIter     == currentMod->end()      || svPos < modPos ) &&
                        currentSVIter      != SV_map[chrName].end()){
                 // If this read not contain SV, it means this read is the same as reference genome.
@@ -1174,7 +1235,11 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln, std::vector<
                 // next SV iter
                 previousSVIter = currentSVIter;
                 currentSVIter++;
-                svPos = (*currentSVIter).first - 1;
+                if (currentSVIter != SV_map[chrName].end()) {
+                    svPos = (*currentSVIter).first - 1;
+                } else {
+                    svPos = INT_MAX;
+                }
             }
 
             // SNP's position is minimal
@@ -1260,7 +1325,11 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln, std::vector<
                         delete tmpVariant;                        
                     }
                     currentVariantIter++;
-                    variantPos = (*currentVariantIter).first;
+                    if (currentVariantIter != currentVariants->end()) {
+                        variantPos = (*currentVariantIter).first;
+                    } else {
+                        variantPos = INT_MAX;
+                    }
                 }
                 else break;
             }

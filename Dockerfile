@@ -1,6 +1,6 @@
 FROM ubuntu:20.04
 LABEL maintainer="https://github.com/twolinin/longphase"
-LABEL version="1.5.1"
+LABEL version="2.0.1"
 
 RUN apt-get update && \
     apt-get install -y git g++ gcc autoconf make zlib1g-dev libbz2-dev liblzma-dev && \
