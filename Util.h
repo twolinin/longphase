@@ -14,11 +14,13 @@
 #include <omp.h>
 #include <numeric> 
 #include <set>
+#include <cmath>
 
 struct PhasingElement{
     // i.e. 0|1  or   1|0
     std::string RAstatus;
     int block;
+    float entropy;
 };
 typedef std::map<std::string,PhasingElement> PhasingResult;
 typedef std::map<std::string,PhasingResult> ChrPhasingResult;

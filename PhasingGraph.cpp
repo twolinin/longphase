@@ -289,7 +289,7 @@ void VairiantGraph::edgeConnectResult(){
     // current variant position, haplotype (1 or 2), previous variants' voting result
     std::map<int, std::map<int,float> > *hpCountMap2 = new std::map<int, std::map<int,float> > ;
     // current snp, haplotype (1 or 2), support snp
-    std::map<int, std::map<int,std::vector<int> > > *hpCountMap = new std::map<int, std::map<int,std::vector<int> > >;
+    //std::map<int, std::map<int,std::vector<int> > > *hpCountMap = new std::map<int, std::map<int,std::vector<int> > >;
     // current snp, result haplotype (1 or 2)
     std::map<int,int> *hpResult = new std::map<int,int>;
     // < block start, <snp in this block> >
@@ -323,7 +323,7 @@ void VairiantGraph::edgeConnectResult(){
         //int h1 = (*hpCountMap)[currPos][1].size();
         //int h2 = (*hpCountMap)[currPos][2].size();
         float h1 = (*hpCountMap2)[currPos][1] ;
-	    float h2 = (*hpCountMap2)[currPos][2] ;
+        float h2 = (*hpCountMap2)[currPos][2] ;
 
         //std::cout << currPos+1 << "\t" << "h1:" << "\t" << h1 << "\t" << "h2:" << "\t" << h2 << "\n" ;
 
@@ -333,7 +333,19 @@ void VairiantGraph::edgeConnectResult(){
            h1 = special.first ;
            h2 = special.second ;
         }
-
+        
+        // TESTING AND RECORD: OBSERVE AND RECORD VARIANT ENTROPY
+        // #entropy
+        float total = h1 + h2;
+        float entropy = 0.0f;
+        if (total > 0.0f) {
+            float p1 = h1 / total;
+            float p2 = h2 / total;
+            if (p1 > 0.0f) entropy -= p1 * std::log2(p1);
+            if (p2 > 0.0f) entropy -= p2 * std::log2(p2);
+        }
+        (*variantEntropy)[currPos] = entropy;
+        
         // new block, set this position as block start 
         if( h1 == h2 ){
             // No new blocks should be created if the next SNP has already been picked up
@@ -373,30 +385,59 @@ void VairiantGraph::edgeConnectResult(){
             //  2 : the haplotype of next (i+1)'s SNP are different as previous
             if( tmp.first.second != -1 ){
                 // record the haplotype resut of next (i+1)'s SNP
+                ///*
+                // 原本判斷
                 if( (*hpResult)[currPos] == 1 ){
                     if( tmp.first.second == 1 ){
-                        (*hpCountMap)[nextNodeIter->first][1].push_back(currPos);
-		                (*hpCountMap2)[nextNodeIter->first][1] += vote.weight;
+                        //(*hpCountMap)[nextNodeIter->first][1].push_back(currPos);
+                        (*hpCountMap2)[nextNodeIter->first][1] += vote.weight;
                         vote.hap = 1 ;
                     }
                     if( tmp.first.second == 2 ){
-                        (*hpCountMap)[nextNodeIter->first][2].push_back(currPos);
-		                (*hpCountMap2)[nextNodeIter->first][2] += vote.weight;
+                        //(*hpCountMap)[nextNodeIter->first][2].push_back(currPos);
+                        (*hpCountMap2)[nextNodeIter->first][2] += vote.weight;
 		                vote.hap = 2 ;
                     }
                 }
                 if( (*hpResult)[currPos]==2 ){
                     if( tmp.first.second == 1 ){
-                        (*hpCountMap)[nextNodeIter->first][2].push_back(currPos);
+                        //hpCountMap)[nextNodeIter->first][2].push_back(currPos);
                         (*hpCountMap2)[nextNodeIter->first][2] += vote.weight;
                         vote.hap = 2 ;
                     }
                     if( tmp.first.second == 2 ){
-                        (*hpCountMap)[nextNodeIter->first][1].push_back(currPos);
+                        //(*hpCountMap)[nextNodeIter->first][1].push_back(currPos);
                         (*hpCountMap2)[nextNodeIter->first][1] += vote.weight;
                         vote.hap = 1 ;
                     }
                 }
+                //*/
+                /*
+                // 可取代判斷
+                float upstreamEntropy = (*variantEntropy)[currPos]; // 需先計算好
+                float adjustedWeight  = vote.weight * (1.0f - upstreamEntropy);
+
+                if( (*hpResult)[currPos] == 1 ){
+                    if( tmp.first.second == 1 ){
+                        (*hpCountMap2)[nextNodeIter->first][1] += adjustedWeight;
+                        vote.hap = 1;
+                    }
+                    if( tmp.first.second == 2 ){
+                        (*hpCountMap2)[nextNodeIter->first][2] += adjustedWeight;
+                        vote.hap = 2;
+                    }
+                }
+                if( (*hpResult)[currPos] == 2 ){
+                    if( tmp.first.second == 1 ){
+                        (*hpCountMap2)[nextNodeIter->first][2] += adjustedWeight;
+                        vote.hap = 2;
+                    }
+                    if( tmp.first.second == 2 ){
+                        (*hpCountMap2)[nextNodeIter->first][1] += adjustedWeight;
+                        vote.hap = 1;
+                    }
+                }
+                */
 
                 (*hpCountMap3)[nextNodeIter->first].push_back( vote );
 
@@ -415,6 +456,21 @@ void VairiantGraph::edgeConnectResult(){
                 break;
             }
         }
+    }
+    
+    // 補算最後一個 variant 的 entropy（它不會成為 currPos，但可能收到 votes）
+    int lastPos = totalVariantInfo->rbegin()->first;
+    if( variantEntropy->find(lastPos) == variantEntropy->end() ){
+        float lh1 = (*hpCountMap2)[lastPos][1];
+        float lh2 = (*hpCountMap2)[lastPos][2];
+        float ltotal = lh1 + lh2;
+        float lentropy = 0.0f;
+        if(ltotal > 0.0f){
+            float p1 = lh1/ltotal, p2 = lh2/ltotal;
+            if(p1 > 0.0f) lentropy -= p1 * std::log2(p1);
+            if(p2 > 0.0f) lentropy -= p2 * std::log2(p2);
+        }
+        (*variantEntropy)[lastPos] = lentropy;
     }
 
     // outFile.close();
@@ -466,7 +522,7 @@ void VairiantGraph::edgeConnectResult(){
         }
     }
     
-    delete hpCountMap;
+    //delete hpCountMap;
     delete hpCountMap2;
     delete hpCountMap3;
     delete hpResult;
@@ -482,6 +538,7 @@ VairiantGraph::VairiantGraph(std::string &in_ref, PhasingParameters &in_params, 
     subNodeHP = new std::map<PosAllele,int>;
     variantType = new std::map<int,int>;
     readHpMap = new std::map<std::string,int>;
+    variantEntropy = new std::map<int, float>;
     chrName = &in_chrName;
 }
 
@@ -509,6 +566,7 @@ void VairiantGraph::destroy(){
     delete subNodeHP;
     delete variantType;
     delete readHpMap;
+    delete variantEntropy;
 }
 
 //check if the position is in the range of the cnv
@@ -1065,6 +1123,7 @@ void VairiantGraph::exportResult(std::string chrName, PhasingResult &result){
             else
                 tmp.block = (*psAltIter).second;
             tmp.RAstatus = std::to_string((*subNodeHP)[ref]) + "|" + std::to_string((*subNodeHP)[alt]);
+            tmp.entropy = (*variantEntropy)[variantIter->first];// currPos = variantIter->first;
         }
         else
             continue;

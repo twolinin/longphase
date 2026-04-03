@@ -160,6 +160,8 @@ class VairiantGraph{
         std::map<PosAllele,int> *subNodeHP;
         // store phased read and read's haplotype
         std::map<std::string,int> *readHpMap;
+        // record variant entropy
+        std::map<int, float> *variantEntropy;
 
         // produce PS tag and determine phased GT tag
         void storeResultPath();

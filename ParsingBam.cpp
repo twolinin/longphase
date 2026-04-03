@@ -3,6 +3,7 @@
 #include <string.h>
 #include <sstream>
 #include <cmath>
+#include <iomanip> 
 
 
 // vcf parser modify from 
@@ -469,6 +470,7 @@ void SnpParser::writeLine(std::string &input, bool &ps_def, std::ofstream &resul
                 resultVcf <<  "##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase set identifier\">\n";
                 ps_def = true;
             }
+            resultVcf << "##INFO=<ID=PE,Number=1,Type=Float,Description=\"Phasing entropy (0.0=perfectly phased, 1.0=maximally ambiguous)\">\n";
             resultVcf << "##longphaseVersion=" << params->version << "\n";
             resultVcf << "##commandline=\"" << params->command << "\"\n";
             commandLine = true;
@@ -573,6 +575,16 @@ void SnpParser::writeLine(std::string &input, bool &ps_def, std::ofstream &resul
         
         // this pos is phase
         if( psElementIter != phasingResult.end() && posIter != (*chrVariant)[fields[0]].end() ){
+            // 加入 PE 到 INFO 欄位
+            float pe = (*psElementIter).second.entropy;
+            std::ostringstream peStr;
+            peStr << std::fixed << std::setprecision(3) << pe;
+            if( fields[7] == "." ){
+                fields[7] = "PE=" + peStr.str();
+            } else {
+                fields[7] = fields[7] + ";PE=" + peStr.str();
+            }
+            
             // add PS flag and value
             fields[8] = fields[8] + ":PS";
             fields[9] = fields[9] + ":" + std::to_string((*psElementIter).second.block);
