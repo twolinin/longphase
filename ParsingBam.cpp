@@ -471,6 +471,8 @@ void SnpParser::writeLine(std::string &input, bool &ps_def, std::ofstream &resul
                 ps_def = true;
             }
             resultVcf << "##INFO=<ID=PE,Number=1,Type=Float,Description=\"Phasing entropy (0.0=perfectly phased, 1.0=maximally ambiguous)\">\n";
+            resultVcf << "##INFO=<ID=H1,Number=1,Type=Float,Description=\"Weighted HP1 vote count\">\n";
+            resultVcf << "##INFO=<ID=H2,Number=1,Type=Float,Description=\"Weighted HP2 vote count\">\n";
             resultVcf << "##longphaseVersion=" << params->version << "\n";
             resultVcf << "##commandline=\"" << params->command << "\"\n";
             commandLine = true;
@@ -584,6 +586,25 @@ void SnpParser::writeLine(std::string &input, bool &ps_def, std::ofstream &resul
             } else {
                 fields[7] = fields[7] + ";PE=" + peStr.str();
             }
+            // 加入 H1 到 INFO 欄位
+            float h1 = (*psElementIter).second.h1;
+            std::ostringstream h1Str;
+            h1Str << std::fixed << std::setprecision(3) << h1;
+            if( fields[7] == "." ){
+                fields[7] = "H1=" + h1Str.str();
+            } else {
+                fields[7] = fields[7] + ";H1=" + h1Str.str();
+            }
+            // 加入 H2 到 INFO 欄位
+            float h2 = (*psElementIter).second.h2;
+            std::ostringstream h2Str;
+            h2Str << std::fixed << std::setprecision(3) << h2;
+            if( fields[7] == "." ){
+                fields[7] = "H2=" + h2Str.str();
+            } else {
+                fields[7] = fields[7] + ";H2=" + h2Str.str();
+            }
+            
             
             // add PS flag and value
             fields[8] = fields[8] + ":PS";

@@ -3,11 +3,11 @@ CXX      = g++
 AR       = ar
 AWK      = awk
 CFLAGS   = -g -Wall -O2 -pedantic -std=c99 -D_XOPEN_SOURCE=600
-CPPFLAGS = -std=c++11 -g -Wall -O3 -fopenmp
+CPPFLAGS = -std=c++11 -g -Wall -O3 -fopenmp -pthread
 LDFLAGS  =
 LIBS     =
 
-OBJ = Haplotag.o ParsingBam.o Util.o HaplotagProcess.o PhasingProcess.o Phasing.o PhasingGraph.o ModCall.o ModCallParsingBam.o ModCallProcess.o main.o
+OBJ = Haplotag.o ParsingBam.o Util.o HaplotagProcess.o PhasingProcess.o Phasing.o PhasingGraph.o ModCall.o Compare.o ModCallParsingBam.o ModCallProcess.o CompareProcess.o main.o
 
 PROGRAMS = longphase
 
@@ -37,7 +37,7 @@ JEMDIR = jemalloc
 JEMLIB = $(JEMDIR)/lib/libjemalloc.a -ldl
 
 $(PROGRAMS): $(OBJ)
-	$(CXX) $(ALL_CPPFLAGS) $(ALL_LDFLAGS)	-o $@ $^ $(HTSLIB_LIB) $(JEMLIB)
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_LDFLAGS)	-o $@ $^ $(HTSLIB_LIB) $(JEMLIB) -pthread
 
 %.o: %.cpp
 	$(CXX) $(ALL_CPPFLAGS) -o $@ -c $^

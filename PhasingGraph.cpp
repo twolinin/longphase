@@ -344,7 +344,11 @@ void VairiantGraph::edgeConnectResult(){
             if (p1 > 0.0f) entropy -= p1 * std::log2(p1);
             if (p2 > 0.0f) entropy -= p2 * std::log2(p2);
         }
+        
+        (*h1weight)[currPos] = h1;
+        (*h2weight)[currPos] = h2;
         (*variantEntropy)[currPos] = entropy;
+        
         
         // new block, set this position as block start 
         if( h1 == h2 ){
@@ -442,8 +446,8 @@ void VairiantGraph::edgeConnectResult(){
                 (*hpCountMap3)[nextNodeIter->first].push_back( vote );
 
                 if( params->generateDot ){
-                    std::string e1 = std::to_string(currPos+1) + ".1\t->\t" + std::to_string(tmp.first.first+1) + "." + std::to_string(tmp.first.second);
-                    std::string e2 = std::to_string(currPos+1) + ".2\t->\t" + std::to_string(tmp.second.first+1) + "." + std::to_string(tmp.second.second);
+                    std::string e1 = std::to_string(currPos+1) + ".1\t->\t" + std::to_string(tmp.first.first+1) + "." + std::to_string(tmp.first.second) + "\t[label=" + std::to_string((*hpCountMap2)[currPos][1]) + "]";
+                    std::string e2 = std::to_string(currPos+1) + ".2\t->\t" + std::to_string(tmp.second.first+1) + "." + std::to_string(tmp.second.second) + "\t[label=" + std::to_string((*hpCountMap2)[currPos][2]) + "]";
 
                     dotResult.push_back(e1);
                     dotResult.push_back(e2);
@@ -458,7 +462,7 @@ void VairiantGraph::edgeConnectResult(){
         }
     }
     
-    // 補算最後一個 variant 的 entropy（它不會成為 currPos，但可能收到 votes）
+    // 補算最後一個 variant 的 entropy
     int lastPos = totalVariantInfo->rbegin()->first;
     if( variantEntropy->find(lastPos) == variantEntropy->end() ){
         float lh1 = (*hpCountMap2)[lastPos][1];
@@ -471,7 +475,10 @@ void VairiantGraph::edgeConnectResult(){
             if(p2 > 0.0f) lentropy -= p2 * std::log2(p2);
         }
         (*variantEntropy)[lastPos] = lentropy;
+        (*h1weight)[lastPos] = lh1;
+        (*h2weight)[lastPos] = lh2;
     }
+
 
     // outFile.close();
     // loop all block and construct graph
@@ -539,6 +546,8 @@ VairiantGraph::VairiantGraph(std::string &in_ref, PhasingParameters &in_params, 
     variantType = new std::map<int,int>;
     readHpMap = new std::map<std::string,int>;
     variantEntropy = new std::map<int, float>;
+    h1weight = new std::map<int, float>;
+    h2weight = new std::map<int, float>;
     chrName = &in_chrName;
 }
 
@@ -567,6 +576,8 @@ void VairiantGraph::destroy(){
     delete variantType;
     delete readHpMap;
     delete variantEntropy;
+    delete h1weight;
+    delete h2weight;
 }
 
 //check if the position is in the range of the cnv
@@ -1088,7 +1099,7 @@ void VairiantGraph::readCorrection(){
 
 void VairiantGraph::writingDotFile(std::string dotPrefix){
     
-    std::ofstream resultVcf(dotPrefix+".dot");
+    std::ofstream resultVcf( params->resultPrefix + "." + dotPrefix + ".dot");
 
     if(!resultVcf.is_open()){
         std::cerr<< "Fail to open write file: " << dotPrefix+".vcf" << "\n";
@@ -1124,6 +1135,8 @@ void VairiantGraph::exportResult(std::string chrName, PhasingResult &result){
                 tmp.block = (*psAltIter).second;
             tmp.RAstatus = std::to_string((*subNodeHP)[ref]) + "|" + std::to_string((*subNodeHP)[alt]);
             tmp.entropy = (*variantEntropy)[variantIter->first];// currPos = variantIter->first;
+            tmp.h1 = (*h1weight)[variantIter->first];
+            tmp.h2 = (*h2weight)[variantIter->first];
         }
         else
             continue;

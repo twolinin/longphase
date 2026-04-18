@@ -162,6 +162,10 @@ class VairiantGraph{
         std::map<std::string,int> *readHpMap;
         // record variant entropy
         std::map<int, float> *variantEntropy;
+        // record h1
+        std::map<int, float> *h1weight;
+        // record h2
+        std::map<int, float> *h2weight;
 
         // produce PS tag and determine phased GT tag
         void storeResultPath();

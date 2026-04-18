@@ -3,7 +3,7 @@
 #include "Phasing.h"
 #include "Haplotag.h"
 #include "ModCall.h"
-
+#include "Compare.h"
 
 #define PROGRAM_BIN "main"
 #define VERSION "2.0.1.jh_dev"
@@ -18,7 +18,7 @@ static const char *STRIDE_USAGE_MESSAGE =
 "               phase      run phasing algorithm.\n"
 "               haplotag   tag reads by haplotype.\n"
 "               modcall    convert bam file to modification vcf file.\n"
-
+"               compare    compare two phased VCF files.\n"
 "\n";
 
 int main(int argc, char** argv)
@@ -42,6 +42,10 @@ int main(int argc, char** argv)
     else if(command=="modcall")
     {
          ModCallMain(argc - 1, argv + 1, version);
+    }
+    else if(command=="compare")
+    {
+         CompareMain(argc - 1, argv + 1, version);
     }
     else{
         std::cout << STRIDE_USAGE_MESSAGE;
