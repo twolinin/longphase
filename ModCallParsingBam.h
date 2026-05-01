@@ -17,7 +17,7 @@
 
 
 struct MethPosInfo{
-    MethPosInfo():methreadcnt(0), noisereadcnt(0),canonreadcnt(0), depth(0),heterstatus(""),strand(-1){}
+    MethPosInfo():methreadcnt(0), noisereadcnt(0),canonreadcnt(0), depth(0),heterstatus(""),strand(-1),variantType(VariantType::MOD){}
 
     int methreadcnt;
     int noisereadcnt;
