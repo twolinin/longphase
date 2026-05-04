@@ -82,7 +82,7 @@ void MethBamParser::detectMeth(std::string chrName, int lastSNPPos, htsThreadPoo
         int result;
         hts_set_opt(fp_in, HTS_OPT_THREAD_POOL, &threadPool);
 
-        while ((result = sam_itr_multi_next(fp_in, iter, aln)) >= 0) { 
+        while ((result = sam_itr_next(fp_in, iter, aln)) >= 0) { 
             int flag = aln->core.flag;
 
             if (  aln->core.qual < 1  // mapping quality
@@ -98,6 +98,7 @@ void MethBamParser::detectMeth(std::string chrName, int lastSNPPos, htsThreadPoo
             parse_CIGAR(*bamHdr,*aln, readVariantVec);
         }
 
+        hts_itr_destroy(iter);
         hts_idx_destroy(idx);
         bam_hdr_destroy(bamHdr);
         bam_destroy1(aln);
@@ -169,7 +170,6 @@ void MethBamParser::parse_CIGAR(const bam_hdr_t &bamHdr,const bam1_t &aln, std::
 
         int cigar_op = bam_cigar_op(cigar[cigaridx]);
         int length = bam_cigar_oplen(cigar[cigaridx]);
-        int variantPos = (*currentVariantIter).first;
         // get the first variant detected by the alignment.
         /*while( currentVariantIter != currentVariants->end() && variantPos < ref_pos ){
             currentVariantIter++;
@@ -299,11 +299,13 @@ void MethBamParser::parse_CIGAR(const bam_hdr_t &bamHdr,const bam1_t &aln, std::
                         //non-modification (not include no detected)
                         else if( mods[j].qual <= params->unModThreshold*255 ){ 
                             (*chrMethMap)[methrpos].canonreadcnt++;
+                            (*chrMethMap)[methrpos].variantType = VariantType::MOD;
                             (*chrMethMap)[methrpos].nonModReadVec.emplace_back(bam_get_qname(&aln));
                             (*tmpReadResult).variantVec.emplace_back(methrpos, 1, 60, VariantType::MOD);
                         }
                         else{
                             (*chrMethMap)[methrpos].noisereadcnt++;
+                            (*chrMethMap)[methrpos].variantType = VariantType::MOD;
                         }
                     }
                 }
@@ -323,6 +325,12 @@ void MethBamParser::parse_CIGAR(const bam_hdr_t &bamHdr,const bam1_t &aln, std::
         // 2: deletion from the reference
         else if(cigar_op == 2){
             if(*refString != ""){
+                if(currentVariantIter == currentVariants->end()) {
+                    refpos += length;
+                    ref_pos += length;
+                    continue;
+                }
+
                 int del_len = length;
                 if ( ref_pos + del_len + 1 == (*currentVariantIter).first ){
                     //if( homopolymerLength((*currentVariantIter).first , ref_string) >=3 ){
@@ -378,7 +386,7 @@ void MethBamParser::parse_CIGAR(const bam_hdr_t &bamHdr,const bam1_t &aln, std::
                         
                         if(allele != -1){
                             (*tmpReadResult).variantVec.emplace_back((*currentVariantIter).first, allele, base_q, VariantType::SNP);
-                            (*chrMethMap)[variantPos].variantType = VariantType::SNP;
+                            (*chrMethMap)[(*currentVariantIter).first].variantType = VariantType::SNP;
                             currentVariantIter++;
                         }
 
@@ -594,7 +602,7 @@ void MethBamParser::exportResult(std::string chrName, std::string chrSquence, in
 
 void writeResultVCF( ModCallParameters &params, std::vector<ReferenceChromosome> &chrInfo, std::map<std::string,std::ostringstream> &chrModCallResult){
 
-    std::ofstream modCallResultVcf(params.resultPrefix+".vcf", std::ios_base::app);
+    std::ofstream modCallResultVcf(params.resultPrefix+".vcf", std::ios_base::out | std::ios_base::trunc);
     if(!modCallResultVcf.is_open()){
         std::cerr<<"Fail to open output file :\n";
     }
@@ -707,13 +715,17 @@ void MethBamParser::judgeMethGenotype(std::string chrName, std::vector<ReadVaria
             int pos = variant.position;
             // Check if the variant is methylation-related and marked as heterogeneous in chrMethMap
             if(variant.type == VariantType::MOD) {
-                if(chrMethMap->find(pos)->second.strand == 0){
+                auto methPosIter = chrMethMap->find(pos);
+                if(methPosIter == chrMethMap->end()){
+                    continue;
+                }
+                if(methPosIter->second.strand == 0){
                     auto pairIter = positionPairs.find(pos);
                     if(pairIter != positionPairs.end()){
                         newRead.variantVec.emplace_back(pos, variant.allele, variant.quality, VariantType::MOD);
                     }
                 }
-                else if(chrMethMap->find(pos)->second.strand == 1){
+                else if(methPosIter->second.strand == 1){
                     auto pairIter = positionPairs.find(pos-1);
                     if(pairIter != positionPairs.end()){
                         newRead.variantVec.emplace_back(pos-1, variant.allele, variant.quality, VariantType::MOD);
@@ -748,7 +760,7 @@ void MethBamParser::calculateDepth(){
         currdepth.first += (*ReadIter).second.first;
         currdepth.second += (*ReadIter).second.second;
         
-        while((*methIter).first >= (*ReadIter).first && (*methIter).first < (*nextReadIter).first && methIter != chrMethMap->end()){
+        while(methIter != chrMethMap->end() && (*methIter).first >= (*ReadIter).first && (*methIter).first < (*nextReadIter).first){
             
             // strand +
             if((*methIter).second.strand == 0){ 
