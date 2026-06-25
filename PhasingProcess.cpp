@@ -128,7 +128,7 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
             continue;
         }
         Clip *clip = new Clip((*chrIter), clipCount);
-        clip->getCNVInterval(clipCount, (*chrIter));
+        clip->getCNVInterval(clipCount);
         
 
         // create a graph object and prepare to phasing.
@@ -151,7 +151,8 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
         readVariantVec.clear();
         readVariantVec.shrink_to_fit();
         delete vGraph;
-        
+        delete clip;
+
         std::cerr<< "(" << (*chrIter) << "," << difftime(time(NULL), chrbegin) << "s)";
     }
     hts_tpool_destroy(threadPool.pool);

@@ -108,6 +108,14 @@ struct less_than_key
 
 std::string getTargetString(std::string line, std::string start_sign, std::string end_sign);
 
+// Returns the character start position in `sample` for the value of `tag` in `format`.
+int findFieldValueStart(const std::string &format, const std::string &sample,
+                        const std::string &tag);
+
+// Marks indels in tandem repeats (2-mer repeated >= 5 times) as dangerous.
+bool isDangerIndel(int variant_pos, const std::string &ref, size_t ref_allele_len,
+                   size_t alt_allele_len);
+
 int homopolymerLength(int snp_pos, const std::string &ref_string);
 
 template <typename T>

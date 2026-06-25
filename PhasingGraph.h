@@ -8,12 +8,18 @@
 
 typedef std::pair<int, int> PosAllele;
 typedef std::map<std::string, int> ReadBaseMap;
-using PosVec = std::vector<int>;
+using HpAlleleCountMap = std::map<int, std::map<int, std::map<double, double>>>;
+using PhasedBlocks = std::map<int, std::vector<int>>;
 
 class Clip{
     private:
         std::string chr;
-        PosVec CNVtoLOHInterval(SnpParser &snpMap);
+
+        static const int CNV_AREA_SIZE             = 30000;
+        static const int CNV_PUSH_THRESHOLD        = 5;
+        static const int CNV_EXTEND_THRESHOLD      = 30;
+        static const int CNV_MAX_LENGTH            = 200000;
+        static const int CNV_SLOWUP_COMMIT_THRESHOLD = 20;
 
         struct cnvState{
             cnvState():push(false),slowUp(false),slowDown(false),currCount(0),rejectCount(0),pullDownCount(0),slowDownCount(0),candidateStartPos(-1),candidateEndPos(-1){}
@@ -42,14 +48,15 @@ class Clip{
         };
         cnvState state;
         void updateThreshold(int upCount);
+        void handleIdleState(int upCount, int downCount, int pos);
+        void handleActiveState(int upCount, int downCount, int pos);
+        void handleSlowUpState(int upCount, int downCount, int pos);
 
     public:
         Clip(std::string &chr, ClipCount &inClipCount);
         ~Clip();
         std::vector<std::pair<int, int>> cnvVec;
-        void getCNVInterval(ClipCount &clipCount, std::string &chr);
-        PosVec detectLOH(SnpParser &snpMap);
-        std::string getChr() const { return chr;}
+        void getCNVInterval(ClipCount &clipCount);
 };
 
 class SubEdge{
@@ -166,7 +173,24 @@ class VairiantGraph{
         
         void readCorrection();
 
+        void accumulateReadHaplotypeEvidence(const Variant& variant, double& refCount, double& altCount);
+
+        void assignReadHaplotypesAndCollectAlleleCounts(HpAlleleCountMap& hpAlleleCountMap);
+
+        void reassignVariantHaplotypes(const HpAlleleCountMap& hpAlleleCountMap);
+
         void edgeConnectResult();
+
+        void scanVariantsAndBuildBlocks(
+            std::map<int, int>& hpResult,
+            PhasedBlocks& phasedBlocks,
+            std::vector<std::string>& outDotResult);
+
+        void materializeBlockResults(
+            const std::map<int, int>& hpResult,
+            const PhasedBlocks& phasedBlocks,
+            std::map<PosAllele, int>& outBkResult,
+            std::map<PosAllele, int>& outSubNodeHP);
 
         void calculateCnvMismatchRate(std::vector<ReadVariant>& in_readVariant, Clip &clip);
 
@@ -175,6 +199,12 @@ class VairiantGraph{
         void calculateAverageMismatchRate(const Clip& clip, const std::map<int, std::map<int, std::vector<int>>>& cnvReadMmrate, std::map<int, double>& missRateMap);
 
         void filterHighMismatchVariants(std::vector<ReadVariant>& in_readVariant, const Clip& clip, const std::map<int, double>& missRateMap);
+
+        void filterOverlappingAlignments(std::vector<ReadVariant>& in_readVariant);
+
+        void applyCnvFilter(std::vector<ReadVariant>& in_readVariant, Clip& clip);
+
+        void buildVariantGraph(std::vector<ReadVariant>& in_readVariant);
 
         bool isPositionInRange(int position, int start, int end);
         
