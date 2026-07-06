@@ -19,7 +19,7 @@ static const char *STRIDE_USAGE_MESSAGE =
 "               phase      run phasing algorithm.\n"
 "               haplotag   tag reads by haplotype.\n"
 "               modcall    convert bam file to modification vcf file.\n"
-"               compare    compare two phased VCF files (adapted from WhatsHap).\n"
+"               compare    compare two phased VCF files.\n"
 "\n";
 
 int main(int argc, char** argv)
