@@ -168,6 +168,15 @@ class VairiantGraph{
         // store phased read and read's haplotype
         std::map<std::string,int> *readHpMap;
 
+        // per-position vote diagnostics recorded during
+        // scanVariantsAndBuildBlocks() and consumed in exportResult().
+        // position -> Shannon entropy of (h1, h2) in bits (0..1)
+        std::map<int, float> *variantEntropy;
+        // position -> weighted HP1 vote count used to derive entropy
+        std::map<int, float> *h1weight;
+        // position -> weighted HP2 vote count used to derive entropy
+        std::map<int, float> *h2weight;
+
         // produce PS tag and determine phased GT tag
         void storeResultPath();
         

@@ -19,6 +19,12 @@ struct PhasingElement{
     // i.e. 0|1  or   1|0
     std::string RAstatus;
     int block;
+    // vote-based diagnostics attached only when the position was phased.
+    // Consumers (writeDataLine) check whether the element exists in
+    // PhasingResult; if it does, these three values are always valid.
+    float h1 = 0.0f;      // weighted HP1 vote count at this position
+    float h2 = 0.0f;      // weighted HP2 vote count at this position
+    float entropy = 0.0f; // Shannon entropy of (h1, h2), in bits (0..1)
 };
 typedef std::map<std::string,PhasingElement> PhasingResult;
 typedef std::map<std::string,PhasingResult> ChrPhasingResult;

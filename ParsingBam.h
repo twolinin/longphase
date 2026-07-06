@@ -44,7 +44,7 @@ public:
 
 class BaseVairantParser {
 public:
-  BaseVairantParser() : params(nullptr), commandLine(false) {}
+  BaseVairantParser() : params(nullptr), commandLine(false), pe_def(false) {}
   // input parser
   void compressParser(std::string &variantFile);
   void unCompressParser(std::string &variantFile);
@@ -64,6 +64,13 @@ public:
 protected:
   PhasingParameters *params;
   bool commandLine;
+  // Tracks whether ##INFO=<ID=PE|H1|H2,...> headers have been emitted
+  // so the three lines are written exactly once per output VCF, even
+  // when the input already declares them.
+  bool pe_def;
+  // Emit the three ##INFO header lines for PE / H1 / H2 exactly once.
+  // Idempotent: repeated calls are no-ops after the first successful call.
+  void writePeInfoHeaders(std::ofstream &resultVcf);
   virtual void writeMetaHeader(const std::string &input, bool &ps_def,
                                std::ofstream &resultVcf);
   void writeColumnHeader(const std::string &input, bool &ps_def,
@@ -133,6 +140,8 @@ private:
   // override input parser
   void parserProcess(std::string &input);
   // override output parser
+  void writeMetaHeader(const std::string &input, bool &ps_def,
+                       std::ofstream &resultVcf);
   void writeDataLine(const std::string &input, std::ofstream &resultVcf,
                      PhasingResult &phasingResult);
 
@@ -168,6 +177,8 @@ private:
   // override input parser
   void parserProcess(std::string &input);
   // override output parser
+  void writeMetaHeader(const std::string &input, bool &ps_def,
+                       std::ofstream &resultVcf);
   void writeDataLine(const std::string &input, std::ofstream &resultVcf,
                      PhasingResult &phasingResult);
 

@@ -1,10 +1,16 @@
 #include "PhasingGraph.h"
 
+#include <cmath>   // std::log2 for Shannon-entropy computation
+
 namespace {
 
-void appendDotEdges(std::vector<std::string>& outDotResult, int currPos, const std::pair<PosAllele, PosAllele>& edgePair){
-    std::string refEdge = std::to_string(currPos + 1) + ".1\t->\t" + std::to_string(edgePair.first.first + 1) + "." + std::to_string(edgePair.first.second);
-    std::string altEdge = std::to_string(currPos + 1) + ".2\t->\t" + std::to_string(edgePair.second.first + 1) + "." + std::to_string(edgePair.second.second);
+void appendDotEdges(std::vector<std::string>& outDotResult, int currPos, const std::pair<PosAllele, PosAllele>& edgePair, float h1Weight, float h2Weight){
+    // The label on each edge is the accumulated vote weight seen at
+    // currPos on that haplotype (HP1 for the .1 edge, HP2 for .2).
+    // This is what the pre-refactor version emitted; downstream graph
+    // viewers depend on it to show read support per edge.
+    std::string refEdge = std::to_string(currPos + 1) + ".1\t->\t" + std::to_string(edgePair.first.first + 1) + "." + std::to_string(edgePair.first.second) + "\t[label=" + std::to_string(h1Weight) + "]";
+    std::string altEdge = std::to_string(currPos + 1) + ".2\t->\t" + std::to_string(edgePair.second.first + 1) + "." + std::to_string(edgePair.second.second) + "\t[label=" + std::to_string(h2Weight) + "]";
 
     outDotResult.push_back(refEdge);
     outDotResult.push_back(altEdge);
@@ -354,6 +360,25 @@ void VairiantGraph::scanVariantsAndBuildBlocks(std::map<int, int>& hpResult, Pha
             h2 = special.second;
         }
 
+        // Record per-variant vote diagnostics (h1, h2, Shannon entropy).
+        // Later consumed in exportResult() and written to VCF as INFO
+        // fields H1 / H2 / PE. Only positions that eventually get phased
+        // will actually reach the VCF; this map may hold values for
+        // positions that don't, and that's harmless.
+        {
+            float total = h1 + h2;
+            float entropy = 0.0f;
+            if(total > 0.0f){
+                float p1 = h1 / total;
+                float p2 = h2 / total;
+                if(p1 > 0.0f) entropy -= p1 * std::log2(p1);
+                if(p2 > 0.0f) entropy -= p2 * std::log2(p2);
+            }
+            (*h1weight)[currPos] = h1;
+            (*h2weight)[currPos] = h2;
+            (*variantEntropy)[currPos] = entropy;
+        }
+
         if(h1 == h2){
             if(currPos < lastConnectPos){
                 continue;
@@ -392,7 +417,9 @@ void VairiantGraph::scanVariantsAndBuildBlocks(std::map<int, int>& hpResult, Pha
                     hpCountMap3);
 
                 if(params->generateDot){
-                    appendDotEdges(outDotResult, currPos, bestEdgePair);
+                    appendDotEdges(outDotResult, currPos, bestEdgePair,
+                                   hpCountMap2[currPos][1],
+                                   hpCountMap2[currPos][2]);
                 }
 
                 lastConnectPos = nextNodeIter->first;
@@ -402,6 +429,29 @@ void VairiantGraph::scanVariantsAndBuildBlocks(std::map<int, int>& hpResult, Pha
             if(nextNodeIter == totalVariantInfo->end()){
                 break;
             }
+        }
+    }
+
+    // The main loop exits before processing the last position (it needs
+    // a next-position to iterate). If the last position received votes
+    // from earlier neighbours, record its entropy too so it also gets
+    // H1 / H2 / PE in the output VCF.
+    if(!totalVariantInfo->empty()){
+        int lastPos = totalVariantInfo->rbegin()->first;
+        if(variantEntropy->find(lastPos) == variantEntropy->end()){
+            float lh1 = hpCountMap2[lastPos][1];
+            float lh2 = hpCountMap2[lastPos][2];
+            float ltotal = lh1 + lh2;
+            float lentropy = 0.0f;
+            if(ltotal > 0.0f){
+                float lp1 = lh1 / ltotal;
+                float lp2 = lh2 / ltotal;
+                if(lp1 > 0.0f) lentropy -= lp1 * std::log2(lp1);
+                if(lp2 > 0.0f) lentropy -= lp2 * std::log2(lp2);
+            }
+            (*h1weight)[lastPos] = lh1;
+            (*h2weight)[lastPos] = lh2;
+            (*variantEntropy)[lastPos] = lentropy;
         }
     }
 }
@@ -469,6 +519,9 @@ VairiantGraph::VairiantGraph(std::string &in_ref, PhasingParameters &in_params, 
     subNodeHP = new std::map<PosAllele,int>;
     variantType = new std::map<int,int>;
     readHpMap = new std::map<std::string,int>;
+    variantEntropy = new std::map<int,float>;
+    h1weight = new std::map<int,float>;
+    h2weight = new std::map<int,float>;
     chrName = &in_chrName;
 }
 
@@ -496,6 +549,9 @@ void VairiantGraph::destroy(){
     delete subNodeHP;
     delete variantType;
     delete readHpMap;
+    delete variantEntropy;
+    delete h1weight;
+    delete h2weight;
 }
 
 //check if the position is in the range of the cnv
@@ -1000,11 +1056,14 @@ void VairiantGraph::readCorrection(){
 }
 
 void VairiantGraph::writingDotFile(std::string dotPrefix){
-    
-    std::ofstream resultVcf(dotPrefix+".dot");
+
+    // Prefix dot files with the run's --out-prefix, e.g.
+    //   result.chr1.dot   instead of just   chr1.dot
+    std::string outPath = params->resultPrefix + "." + dotPrefix + ".dot";
+    std::ofstream resultVcf(outPath);
 
     if(!resultVcf.is_open()){
-        std::cerr<< "Fail to open write file: " << dotPrefix+".vcf" << "\n";
+        std::cerr<< "Fail to open write file: " << outPath << "\n";
     }
     else{
         resultVcf << "digraph G {\n";
@@ -1036,6 +1095,16 @@ void VairiantGraph::exportResult(std::string chrName, PhasingResult &result){
             else
                 tmp.block = (*psAltIter).second;
             tmp.RAstatus = std::to_string((*subNodeHP)[ref]) + "|" + std::to_string((*subNodeHP)[alt]);
+
+            // Attach vote diagnostics (h1, h2, entropy) so writeDataLine
+            // can emit INFO/H1, INFO/H2, INFO/PE for phased positions.
+            // These maps are populated by scanVariantsAndBuildBlocks().
+            auto h1Iter  = h1weight->find(variantIter->first);
+            auto h2Iter  = h2weight->find(variantIter->first);
+            auto entIter = variantEntropy->find(variantIter->first);
+            tmp.h1      = (h1Iter  != h1weight->end())       ? h1Iter->second  : 0.0f;
+            tmp.h2      = (h2Iter  != h2weight->end())       ? h2Iter->second  : 0.0f;
+            tmp.entropy = (entIter != variantEntropy->end()) ? entIter->second : 0.0f;
         }
         else
             continue;

@@ -2,6 +2,7 @@
 
 #include <cstdio>
 #include <cmath>
+#include <iomanip>   // std::fixed / std::setprecision for INFO/PE|H1|H2
 #include <sstream>
 #include <string.h>
 
@@ -206,12 +207,46 @@ void BaseVairantParser::writeColumnHeader(const std::string &input,
                    "\"Phase set identifier\">\n";
       ps_def = true;
     }
+    // Emit PE/H1/H2 header lines here too as a safety net: if the input
+    // VCF has no ##FILTER=<ID=PASS line (SnpParser hooks off that) or
+    // no ##INFO block at all, they still get declared before #CHROM.
+    writePeInfoHeaders(resultVcf);
     resultVcf << "##longphaseVersion=" << params->version << "\n";
     resultVcf << "##commandline=\"" << params->command << "\"\n";
     commandLine = true;
   }
   resultVcf << input << "\n";
 }
+
+void BaseVairantParser::writePeInfoHeaders(std::ofstream &resultVcf) {
+  // Idempotent: writes the three ##INFO lines the first time we're
+  // called, then never again for this parser instance. Every parser
+  // (SNP, SV, MOD) shares this via inheritance.
+  if (pe_def) return;
+  resultVcf << "##INFO=<ID=PE,Number=1,Type=Float,Description=\"Phasing entropy in bits (0.0=perfectly phased, 1.0=maximally ambiguous)\">\n";
+  resultVcf << "##INFO=<ID=H1,Number=1,Type=Float,Description=\"Weighted HP1 vote count\">\n";
+  resultVcf << "##INFO=<ID=H2,Number=1,Type=Float,Description=\"Weighted HP2 vote count\">\n";
+  pe_def = true;
+}
+
+namespace {
+// Format the PE/H1/H2 fragment and either replace a "." INFO field or
+// append with a leading ';' to an existing INFO field. Shared by SNP,
+// SV, and MOD writers so all three VCFs use the exact same formatting.
+void appendPeHapInfoToInfoField(std::string &infoField,
+                                const PhasingElement &pe) {
+  std::ostringstream buf;
+  buf << std::fixed << std::setprecision(3);
+  buf << "PE=" << pe.entropy
+      << ";H1=" << pe.h1
+      << ";H2=" << pe.h2;
+  if (infoField == ".") {
+    infoField = buf.str();
+  } else {
+    infoField += ";" + buf.str();
+  }
+}
+} // namespace
 
 static bool isHetGt(const int *gt) {
   return (gt[0] == 2 && gt[1] == 4) || // 0/1
@@ -415,6 +450,10 @@ void SnpParser::writeMetaHeader(const std::string &input, bool &ps_def,
                    "filtered due to QUAL below threshold ("
                 << params->indelQuality << ")\">\n";
     }
+    // Emit PE/H1/H2 INFO headers right after ##FILTER=<ID=PASS so they
+    // sit in a natural place near the other INFO declarations. Safe if
+    // called more than once (writePeInfoHeaders is idempotent).
+    writePeInfoHeaders(resultVcf);
   } else {
     resultVcf << input << "\n";
   }
@@ -499,6 +538,10 @@ void SnpParser::writeDataLine(const std::string &input,
     fields[9][modify_start] = (*psElementIter).second.RAstatus[0];
     fields[9][modify_start + 1] = '|';
     fields[9][modify_start + 2] = (*psElementIter).second.RAstatus[2];
+
+    // Attach PE / H1 / H2 to INFO for phased positions only.
+    // Rule: if INFO was ".", replace it; otherwise append with ';'.
+    appendPeHapInfoToInfoField(fields[7], (*psElementIter).second);
   }
   // this pos has not been phased
   else {
@@ -729,6 +772,22 @@ void SVParser::writeResult(PhasingResult phasingResult) {
                       phasingResult);
 }
 
+void SVParser::writeMetaHeader(const std::string &input, bool &ps_def,
+                               std::ofstream &resultVcf) {
+  if (input.substr(0, 16) == "##FORMAT=<ID=PS,") {
+    ps_def = true;
+  }
+  // SV VCFs vary widely (Sniffles / cuteSV / DELLY etc.) and may or may
+  // not have ##FILTER=<ID=PASS. To be robust, hook off any ##INFO line
+  // and slip the PE/H1/H2 declarations in alongside them. If no ##INFO
+  // lines exist at all, writeColumnHeader's safety net will still emit
+  // them before #CHROM.
+  resultVcf << input << "\n";
+  if (input.substr(0, 7) == "##INFO=") {
+    writePeInfoHeaders(resultVcf);
+  }
+}
+
 void SVParser::writeDataLine(const std::string &input,
                                std::ofstream &resultVcf,
                                PhasingResult &phasingResult) {
@@ -798,6 +857,10 @@ void SVParser::writeDataLine(const std::string &input,
     fields[9][modify_start] = (*psElementIter).second.RAstatus[0];
     fields[9][modify_start + 1] = '|';
     fields[9][modify_start + 2] = (*psElementIter).second.RAstatus[2];
+
+    // Attach PE / H1 / H2 to INFO for phased positions only.
+    // Rule: if INFO was ".", replace it; otherwise append with ';'.
+    appendPeHapInfoToInfoField(fields[7], (*psElementIter).second);
   }
   // this pos has not been phased
   else {
@@ -1370,6 +1433,20 @@ void METHParser::writeResult(PhasingResult phasingResult) {
                       phasingResult);
 }
 
+void METHParser::writeMetaHeader(const std::string &input, bool &ps_def,
+                                 std::ofstream &resultVcf) {
+  if (input.substr(0, 16) == "##FORMAT=<ID=PS,") {
+    ps_def = true;
+  }
+  // Same strategy as SVParser: piggy-back PE/H1/H2 on existing ##INFO
+  // declarations. modcall's output always emits RS / MR / NR under
+  // ##INFO=, so this reliably places them together.
+  resultVcf << input << "\n";
+  if (input.substr(0, 7) == "##INFO=") {
+    writePeInfoHeaders(resultVcf);
+  }
+}
+
 METHParser::~METHParser() {
   delete chrVariant;
   delete representativeMap;
@@ -1502,6 +1579,10 @@ void METHParser::writeDataLine(const std::string &input,
     fields[9][modify_start] = (*psElementIter).second.RAstatus[0];
     fields[9][modify_start + 1] = '|';
     fields[9][modify_start + 2] = (*psElementIter).second.RAstatus[2];
+
+    // Attach PE / H1 / H2 to INFO for phased positions only.
+    // Rule: if INFO was ".", replace it; otherwise append with ';'.
+    appendPeHapInfoToInfoField(fields[7], (*psElementIter).second);
   }
   // this pos has not been phased
   else {
