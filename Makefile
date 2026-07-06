@@ -3,7 +3,7 @@ CXX      = g++
 AR       = ar
 AWK      = awk
 CFLAGS   = -g -Wall -O2 -pedantic -std=c99 -D_XOPEN_SOURCE=600
-CPPFLAGS = -std=c++11 -g -Wall -O3 -fopenmp -pthread
+CPPFLAGS = -std=c++11 -g -Wall -O3 -fopenmp
 LDFLAGS  =
 LIBS     =
 
@@ -37,7 +37,7 @@ JEMDIR = jemalloc
 JEMLIB = $(JEMDIR)/lib/libjemalloc.a -ldl
 
 $(PROGRAMS): $(OBJ)
-	$(CXX) $(ALL_CPPFLAGS) $(ALL_LDFLAGS)	-o $@ $^ $(HTSLIB_LIB) $(JEMLIB) -pthread
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_LDFLAGS)	-o $@ $^ $(HTSLIB_LIB) $(JEMLIB)
 
 %.o: %.cpp
 	$(CXX) $(ALL_CPPFLAGS) -o $@ -c $^

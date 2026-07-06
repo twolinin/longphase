@@ -8,8 +8,8 @@
 //
 //  This file is only responsible for parsing the CLI arguments and
 //  invoking CompareProcess.  All of the real work (VCF parsing, block
-//  intersection, switch / Hamming computation, threading, output) is
-//  in CompareProcess.cpp.
+//  intersection, switch / Hamming computation, OpenMP-parallel per-
+//  block workloads, output) is in CompareProcess.cpp.
 // =====================================================================
 
 #include "Compare.h"
@@ -19,9 +19,9 @@
 #include <cstring>
 #include <getopt.h>
 #include <iostream>
+#include <omp.h>
 #include <sstream>
 #include <string>
-#include <thread>
 #include <vector>
 
 // ------------------------------------------------------------------ //
@@ -141,10 +141,10 @@ int CompareMain(int argc, char** argv, std::string version)
     }
 
     if (params.numThreads < 1) params.numThreads = 1;
-    unsigned hw = std::thread::hardware_concurrency();
+    unsigned hw = (unsigned)omp_get_max_threads();
     if (hw && (unsigned)params.numThreads > hw * 4) {
         std::cerr << "[compare] Warning: requested threads (" << params.numThreads
-                  << ") much larger than hardware_concurrency (" << hw << ").\n";
+                  << ") much larger than omp_get_max_threads (" << hw << ").\n";
     }
 
     // Dataset names

@@ -15,7 +15,9 @@
 //    VCF; blocks are identified by pairing the two PS values, i.e. the
 //    intersection is taken over (ps_truth, ps_query) tuples
 //    (same as WhatsHap).
-//  * For every intersection block we compute in parallel:
+//  * For every intersection block we compute in parallel via OpenMP
+//    (matching the rest of the longphase codebase, which uses
+//    #pragma omp parallel for over chromosomes):
 //        - switch errors               (hamming of switch-encoded strings)
 //        - SNV-only switch errors      (same but after filtering SNVs)
 //        - minimum block-wise Hamming  (min over the two possible hap
@@ -30,7 +32,6 @@
 #include "CompareProcess.h"
 
 #include <algorithm>
-#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -39,13 +40,13 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <mutex>
 #include <set>
 #include <sstream>
 #include <string>
-#include <thread>
 #include <unordered_map>
 #include <vector>
+
+#include <omp.h>          // OpenMP parallelism (matches phase/haplotag/modcall)
 
 #include <htslib/hts.h>
 #include <htslib/vcf.h>
@@ -547,82 +548,77 @@ ChromResult CompareProcess::compareChromosome(
     if ((size_t)nThreads > workBlocks.size())
         nThreads = (int)std::max<size_t>(1, workBlocks.size());
 
-    std::atomic<size_t> nextIdx{0};
-    auto worker = [&]() {
-        while (true) {
-            size_t i = nextIdx.fetch_add(1);
-            if (i >= workBlocks.size()) break;
-            const auto& block = workBlocks[i];
-            BlockStat& bs = perBlock[i];
+    // Parallelise over independent blocks with OpenMP – the same runtime
+    // used by phase/haplotag/modcall in this codebase.  Each iteration
+    // writes only its own perBlock[i], so there are no data races and
+    // no synchronisation is required.
+    #pragma omp parallel for schedule(dynamic) num_threads(nThreads)
+    for (size_t i = 0; i < workBlocks.size(); ++i) {
+        const auto& block = workBlocks[i];
+        BlockStat& bs = perBlock[i];
 
-            // Build h0 / h1 strings for truth and query.
-            std::string t0, t1, q0, q1;
-            t0.reserve(block.size()); t1.reserve(block.size());
-            q0.reserve(block.size()); q1.reserve(block.size());
-            std::vector<char> isSnv; isSnv.reserve(block.size());
-            for (int idx : block) {
-                const auto& cv = common[idx];
-                t0.push_back('0' + cv.t->h0);
-                t1.push_back('0' + cv.t->h1);
-                q0.push_back('0' + cv.q->h0);
-                q1.push_back('0' + cv.q->h1);
-                isSnv.push_back(cv.t->isSnv ? 1 : 0);
-            }
+        // Build h0 / h1 strings for truth and query.
+        std::string t0, t1, q0, q1;
+        t0.reserve(block.size()); t1.reserve(block.size());
+        q0.reserve(block.size()); q1.reserve(block.size());
+        std::vector<char> isSnv; isSnv.reserve(block.size());
+        for (int idx : block) {
+            const auto& cv = common[idx];
+            t0.push_back('0' + cv.t->h0);
+            t1.push_back('0' + cv.t->h1);
+            q0.push_back('0' + cv.q->h0);
+            q1.push_back('0' + cv.q->h1);
+            isSnv.push_back(cv.t->isSnv ? 1 : 0);
+        }
 
-            // -- Hamming: take min over the two haplotype assignments --
-            int dSame = hammingStr(t0, q0) + hammingStr(t1, q1);
-            int dFlip = hammingStr(t0, q1) + hammingStr(t1, q0);
-            bs.hamming       = std::min(dSame, dFlip) / 2;
-            bs.compared      = (int)block.size();
-            bs.assessedPairs = (int)block.size() - 1;
+        // -- Hamming: take min over the two haplotype assignments --
+        int dSame = hammingStr(t0, q0) + hammingStr(t1, q1);
+        int dFlip = hammingStr(t0, q1) + hammingStr(t1, q0);
+        bs.hamming       = std::min(dSame, dFlip) / 2;
+        bs.compared      = (int)block.size();
+        bs.assessedPairs = (int)block.size() - 1;
 
-            // -- switch error on h0 (identical for h1 in diploid) --
-            std::string sT = switchEncoding(t0);
-            std::string sQ = switchEncoding(q0);
-            bs.switches = hammingStr(sT, sQ);
+        // -- switch error on h0 (identical for h1 in diploid) --
+        std::string sT = switchEncoding(t0);
+        std::string sQ = switchEncoding(q0);
+        bs.switches = hammingStr(sT, sQ);
 
-            // -- switch/flip decomposition --
-            auto sf = computeSwitchFlips(t0, q0);
-            bs.sfSwitches = sf.first;
-            bs.sfFlips    = sf.second;
+        // -- switch/flip decomposition --
+        auto sf = computeSwitchFlips(t0, q0);
+        bs.sfSwitches = sf.first;
+        bs.sfFlips    = sf.second;
 
-            // -- SNV-only switch: rebuild strings restricted to SNV --
-            std::string t0s, q0s;
-            t0s.reserve(block.size()); q0s.reserve(block.size());
-            for (size_t k = 0; k < block.size(); ++k) {
-                if (isSnv[k]) { t0s.push_back(t0[k]); q0s.push_back(q0[k]); }
-            }
-            if (t0s.size() >= 2) {
-                bs.snvSwitches       = hammingStr(switchEncoding(t0s),
-                                                  switchEncoding(q0s));
-                bs.snvAssessedPairs  = (int)t0s.size() - 1;
-            }
+        // -- SNV-only switch: rebuild strings restricted to SNV --
+        std::string t0s, q0s;
+        t0s.reserve(block.size()); q0s.reserve(block.size());
+        for (size_t k = 0; k < block.size(); ++k) {
+            if (isSnv[k]) { t0s.push_back(t0[k]); q0s.push_back(q0[k]); }
+        }
+        if (t0s.size() >= 2) {
+            bs.snvSwitches       = hammingStr(switchEncoding(t0s),
+                                              switchEncoding(q0s));
+            bs.snvAssessedPairs  = (int)t0s.size() - 1;
+        }
 
-            // -- BED records: emit one per position where the two
-            //    switch encodings disagree (adapted from WhatsHap
-            //    BedCreator.records) ------------------------------ //
-            if (wantBed) {
-                for (size_t k = 0; k < sT.size(); ++k) {
-                    if (sT[k] == sQ[k]) continue;
-                    const auto& cvA = common[block[k]];       // position i
-                    const auto& cvB = common[block[k + 1]];   // position i+1
-                    SwBedRecord r;
-                    r.chromosome = chrom;
-                    r.start      = cvA.t->pos;                 // 0-based
-                    r.end        = cvB.t->pos;                 // exclusive
-                    r.isSnv      = cvA.t->isSnv && cvB.t->isSnv;
-                    r.psTruth    = cvA.t->ps;
-                    r.psQuery    = cvA.q->ps;
-                    bs.bedRecords.push_back(std::move(r));
-                }
+        // -- BED records: emit one per position where the two
+        //    switch encodings disagree (adapted from WhatsHap
+        //    BedCreator.records) ------------------------------ //
+        if (wantBed) {
+            for (size_t k = 0; k < sT.size(); ++k) {
+                if (sT[k] == sQ[k]) continue;
+                const auto& cvA = common[block[k]];       // position i
+                const auto& cvB = common[block[k + 1]];   // position i+1
+                SwBedRecord r;
+                r.chromosome = chrom;
+                r.start      = cvA.t->pos;                 // 0-based
+                r.end        = cvB.t->pos;                 // exclusive
+                r.isSnv      = cvA.t->isSnv && cvB.t->isSnv;
+                r.psTruth    = cvA.t->ps;
+                r.psQuery    = cvA.q->ps;
+                bs.bedRecords.push_back(std::move(r));
             }
         }
-    };
-
-    std::vector<std::thread> threads;
-    threads.reserve(nThreads);
-    for (int i = 0; i < nThreads; ++i) threads.emplace_back(worker);
-    for (auto& t : threads) t.join();
+    }
 
     // -------- 7. accumulate per-block stats into ChromResult ------- //
     for (auto& bs : perBlock) {
