@@ -1,6 +1,10 @@
 # LongPhase
 LongPhase is an ultra-fast program for simultaneously co-phasing SNPs, small indels, large SVs, and (5mC) modifications for Nanopore and PacBio platforms. It can produce nearly chromosome-scale haplotype blocks by using Nanpore ultra-long reads without the need for additional trios, chromosome conformation, and strand-seq data. LongPhase can phase a 30x human genome in ~1 minute (see [Speed](#speed)).
 
+For somatic phasing using paired tumor/normal samples, please use [longphase-s](https://github.com/CCU-Bioinformatics-Lab/longphase-s).
+
+For somatic phasing using tumor-only samples, please use [longphase-to](https://github.com/CCU-Bioinformatics-Lab/longphase-to).
+
 ---
 - [Installation](#installation)
 - [Usage](#usage)
@@ -39,6 +43,7 @@ An executable file, longphase_linux-x64, can be executed directly. If you need t
 ```
 git clone https://github.com/twolinin/longphase.git
 cd longphase
+bash setup_onnxruntime.sh
 autoreconf -i
 ./configure
 make -j 4
@@ -348,20 +353,30 @@ minimap2 -ax map-ont -y reference.fasta methylcall.raw.fastq
 
 ---
 ## Comparison with other SNP-phasing programs
-LongPhase is >30x faster than WhatsHap and Margin and produces much larger blocks when tested on HG002, HG003,and HG004.
-![btac058f3](https://github.com/twolinin/longphase/assets/6086073/af3a75a1-6268-4700-9dcc-4a6f34e86f7a)
+- SNP-only (program comparison): v2.0 maintains ~0.055–0.056% switch error; N50 is consistently higher than WhatsHap.
+<img width="3789" height="1988" alt="snp_phasing_comparison_new" src="https://github.com/user-attachments/assets/1bfbbed8-1417-4023-90c9-bae71d65d94f" />
+
+- SNP+INDEL (program comparison): v2.0 achieves lower error and higher N50 than WhatsHap.
+<img width="3789" height="1988" alt="snp_indel_phasing_comparison_new" src="https://github.com/user-attachments/assets/b4c00074-ec49-45bd-a67b-d508b2c5a8ce" />
+
+- SNP-Methylation (program comparison): v2.0 ModCall-only yields higher N50 than both v2.0 SNP-based and MethPhaser.
+<img width="4800" height="2400" alt="477704574-45001492-2e2f-4370-a533-83146560502d" src="https://github.com/user-attachments/assets/f9785ef9-2643-4bc3-95bf-e5723a75e099" />
+
+- Strategy comparison (SNP / SNP+INDEL / SNP+Methylation / SNP+INDEL+Methylation): adding Methylation—especially tri-modal—markedly raises N50 while keeping switch error low.
+<img width="4800" height="2400" alt="Strategy comparison" src="https://github.com/user-attachments/assets/8364cb36-546a-4e78-8724-8ff09136828f" />
 
 ## Speed
-LongPhase can phase a human genome within 1-2 minutes.
-phase (-t 24) | v1.6 (Time) | v1.6 (Memory)
+LongPhase can phase a human genome within 1-3 minutes.
+phase (-t 24) | v2.0 (Time) | v2.0 (Memory)
 -- | -- | -- 
-HG002 ONT R10.4.1 10x |  39s | 15.1G
-HG002 ONT R10.4.1 20x |  53s | 15.6G
-HG002 ONT R10.4.1 30x |  68s | 24.4G
-HG002 ONT R10.4.1 40x |  217s | 26.6G
-HG002 ONT R10.4.1 50x |  262s | 22.2G
-HG002 ONT R10.4.1 60x |  113s | 33.4G
+HG002 ONT R10.4.1 10x |  39s | 26.9G
+HG002 ONT R10.4.1 20x |  75s | 33.8G
+HG002 ONT R10.4.1 30x |  102s | 39.3G
+HG002 ONT R10.4.1 40x |  124s | 44.5G
+HG002 ONT R10.4.1 50x |  171s | 47.6G
+HG002 ONT R10.4.1 60x |  180s | 52.8G
 
+*If the device is running low on memory, you can control memory usage by reducing the number of threads (-t).
 
 ---
 ## Citation
