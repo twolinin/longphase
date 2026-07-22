@@ -167,6 +167,10 @@ int GNNModule::run() {
                 (!params_.respect_bridge || !pr.is_bridge)) unph++;
         }
     std::cerr << "\n[GNN] Predictions: " << total << ", unphase: " << unph << "\n";
+    if (params_.split_blocks) {
+        std::cerr << "[GNN] Checking block connectivity\n";
+        computeBlockSplits();
+    }
     writeOutputVCF();
     if (!params_.sv_vcf.empty() && !params_.output_sv_vcf.empty())
         writeOutputVCF(params_.sv_vcf, params_.output_sv_vcf);
@@ -546,6 +550,132 @@ void GNNModule::processChromosome(const std::string& chrom, int tidx,
 }
 
 // ═══════════════════════════════════════════════════════════
+// Block connectivity check: after unphasing, if a PS block is split
+// into disconnected components (bridge removed), assign new PS IDs.
+// Parallelized per chromosome.
+void GNNModule::computeBlockSplits() {
+    std::vector<std::string> chroms;
+    for (auto& [ch, vl] : variants_) chroms.push_back(ch);
+
+    std::atomic<size_t> cidx{0};
+    std::mutex reassign_mutex;
+    std::atomic<int> total_splits{0}, total_new{0}, total_reassigned{0};
+
+    auto worker = [&]() {
+        while (true) {
+            size_t ci = cidx.fetch_add(1);
+            if (ci >= chroms.size()) return;
+            const std::string& ch = chroms[ci];
+            auto& vl = variants_[ch];
+            auto& em = dot_edges_[ch];
+
+            // Which positions are being unphased?
+            std::unordered_set<int> unphase_pos;
+            if (predictions_.count(ch)) {
+                for (auto& [pos, pr] : predictions_.at(ch)) {
+                    if (pr.prob_error >= params_.break_threshold &&
+                        (!params_.respect_bridge || !pr.is_bridge))
+                        unphase_pos.insert(pos);
+                }
+            }
+            if (unphase_pos.empty()) continue;
+
+            // Group remaining phased variants by PS
+            std::unordered_map<int, std::vector<int>> ps_blocks; // ps -> positions
+            std::unordered_map<int, int> pos_to_ps;
+            for (auto& v : vl) {
+                if (!v.is_phased) continue;
+                if (v.ps < 0) continue;
+                if (unphase_pos.count(v.pos)) continue;
+                ps_blocks[v.ps].push_back(v.pos);
+                pos_to_ps[v.pos] = v.ps;
+            }
+
+            // Build adjacency (only same-PS, both-phased edges)
+            std::unordered_map<int, std::vector<int>> adj;
+            for (auto& [src, elist] : em) {
+                if (unphase_pos.count(src)) continue;
+                auto it_s = pos_to_ps.find(src);
+                if (it_s == pos_to_ps.end()) continue;
+                for (auto& e : elist) {
+                    int dst = e.dst_pos;
+                    if (unphase_pos.count(dst)) continue;
+                    auto it_d = pos_to_ps.find(dst);
+                    if (it_d == pos_to_ps.end()) continue;
+                    if (it_s->second != it_d->second) continue;
+                    adj[src].push_back(dst);
+                    adj[dst].push_back(src);
+                }
+            }
+
+            std::unordered_map<int, int> local_reassign;
+            int local_splits = 0, local_new = 0;
+
+            // Per-PS connected components via BFS
+            for (auto& [ps_val, positions] : ps_blocks) {
+                if (positions.size() <= 1) continue;
+
+                std::unordered_set<int> pos_set(positions.begin(), positions.end());
+                std::unordered_set<int> visited;
+                std::vector<std::vector<int>> components;
+
+                for (int start : positions) {
+                    if (visited.count(start)) continue;
+                    std::vector<int> comp;
+                    std::vector<int> queue = {start};
+                    while (!queue.empty()) {
+                        int node = queue.back(); queue.pop_back();
+                        if (visited.count(node)) continue;
+                        visited.insert(node);
+                        comp.push_back(node);
+                        auto it = adj.find(node);
+                        if (it != adj.end())
+                            for (int nb : it->second)
+                                if (!visited.count(nb) && pos_set.count(nb))
+                                    queue.push_back(nb);
+                    }
+                    components.push_back(std::move(comp));
+                }
+
+                if (components.size() <= 1) continue;
+
+                // Sort: largest component keeps original PS
+                std::sort(components.begin(), components.end(),
+                          [](const std::vector<int>& a, const std::vector<int>& b){
+                              return a.size() > b.size(); });
+                local_splits++;
+                for (size_t i = 1; i < components.size(); ++i) {
+                    // New PS = min position in component + 1 (1-based convention)
+                    int new_ps = *std::min_element(components[i].begin(),
+                                                   components[i].end()) + 1;
+                    local_new++;
+                    for (int pos : components[i])
+                        local_reassign[pos] = new_ps;
+                }
+            }
+
+            if (!local_reassign.empty()) {
+                std::lock_guard<std::mutex> lk(reassign_mutex);
+                ps_reassign_[ch] = std::move(local_reassign);
+                total_splits += local_splits;
+                total_new += local_new;
+                total_reassigned += (int)ps_reassign_[ch].size();
+            }
+        }
+    };
+
+    std::vector<std::thread> threads;
+    for (int t = 0; t < params_.threads; ++t) threads.emplace_back(worker);
+    for (auto& t : threads) t.join();
+
+    std::cerr << "[GNN] PS blocks split: " << total_splits.load()
+              << ", new blocks: " << total_new.load()
+              << ", variants reassigned: " << total_reassigned.load() << "\n";
+}
+
+
+
+// ═══════════════════════════════════════════════════════════
 void GNNModule::writeOutputVCF() {
     writeOutputVCF(params_.vcf_path, params_.output_vcf);
 }
@@ -556,7 +686,7 @@ void GNNModule::writeOutputVCF(const std::string& in_path, const std::string& ou
     htsFile* ofp = hts_open(out_path.c_str(), "w");
     (void)bcf_hdr_write(ofp, hdr);
     bcf1_t* rec = bcf_init();
-    int nu = 0;
+    int nu = 0, nsplit = 0;
     while (bcf_read(ifp, hdr, rec) == 0) {
         bcf_unpack(rec, BCF_UN_ALL);
         std::string ch = bcf_hdr_id2name(hdr, rec->rid);
@@ -575,12 +705,22 @@ void GNNModule::writeOutputVCF(const std::string& in_path, const std::string& ou
             }
             bcf_update_format_int32(hdr,rec,"PS",nullptr,0);
             nu++;
+        } else if (params_.split_blocks && ps_reassign_.count(ch)) {
+            // Variant stays phased but its block was split → new PS
+            auto& rmap = ps_reassign_[ch];
+            auto it = rmap.find(rec->pos);
+            if (it != rmap.end()) {
+                int32_t new_ps = it->second;
+                bcf_update_format_int32(hdr, rec, "PS", &new_ps, 1);
+                nsplit++;
+            }
         }
         (void)bcf_write(ofp, hdr, rec);
     }
     bcf_destroy(rec); bcf_hdr_destroy(hdr);
     hts_close(ifp); hts_close(ofp);
-    std::cerr << "[GNN] " << out_path << ": unphased " << nu << " variants\n";
+    std::cerr << "[GNN] " << out_path << ": unphased " << nu
+              << ", PS-split " << nsplit << " variants\n";
 }
 
 // ═══════════════════════════════════════════════════════════

@@ -57,6 +57,7 @@ public:
         int   window          = 20;
         int   threads         = 4;
         bool  respect_bridge  = false;
+        bool  split_blocks    = true;
     };
 
     explicit GNNModule(const Params& p);
@@ -77,11 +78,16 @@ private:
     std::mutex pred_mutex_;
     std::map<std::string, std::unordered_map<int, Prediction>> predictions_;
 
+    // Block splits: [chrom][pos] = new_ps_id (for variants whose block
+    // was split after a bridge was unphased)
+    std::map<std::string, std::unordered_map<int, int>> ps_reassign_;
+
     void loadModel();
     void parseVCF();
     void parseSecondaryVCF(const std::string& path, GnnVariantType vtype);
     void parseDotFiles();
     void computeGenomicFeatures();
+    void computeBlockSplits();
     // Pre-computed per-chromosome data
     struct ChromData {
         std::unordered_map<int, int> ps_count;

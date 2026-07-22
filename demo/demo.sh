@@ -1,11 +1,11 @@
 #!/bin/bash
 # ──────────────────────────────────────────────────────────
-# LongPhase demo
+# LongPhase demo — chr1:121.5-122.0M
 # ──────────────────────────────────────────────────────────
 set -euo pipefail
 
 LONGPHASE=../longphase
-MODEL=model_cophase.onnx
+MODEL=../model_cophase.onnx
 THREADS=4
 
 step() { echo -e "\n\033[1;36m════ $1 ════\033[0m"; }
@@ -38,20 +38,16 @@ $LONGPHASE gnn -t $THREADS \
     -m $MODEL \
     -r demo_ref.fa.gz \
     -s testing_snvOnly.vcf \
-    --dot-prefix testing_snvOnly \
-    -o testing_snvOnly_gnn.vcf
+    -o testing_snvOnly_gnn
 
 step "Step 3b: GNN correction (cophasing)"
 $LONGPHASE gnn -t $THREADS \
     -m $MODEL \
     -r demo_ref.fa.gz \
     -s testing_cophasing.vcf \
-    --sv-vcf testing_cophasing_SV.vcf \
-    --mod-vcf testing_cophasing_mod.vcf \
-    --dot-prefix testing_cophasing \
-    -o testing_cophasing_gnn.vcf \
-    --output-sv-vcf testing_cophasing_SV_gnn.vcf \
-    --output-mod-vcf testing_cophasing_mod_gnn.vcf
+    --sv-file testing_cophasing_SV.vcf \
+    --mod-file testing_cophasing_mod.vcf \
+    -o testing_cophasing_gnn
 
 step "Step 4: Evaluate"
 for LABEL in testing_snvOnly testing_snvOnly_gnn testing_cophasing testing_cophasing_gnn; do
