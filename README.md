@@ -43,7 +43,6 @@ An executable file, longphase_linux-x64, can be executed directly. If you need t
 ```
 git clone https://github.com/twolinin/longphase.git
 cd longphase
-bash setup_onnxruntime.sh
 autoreconf -i
 ./configure
 make -j 4
