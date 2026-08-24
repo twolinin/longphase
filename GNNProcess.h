@@ -11,10 +11,14 @@
 #include <map>
 #include <cmath>
 #include <mutex>
-#include <onnxruntime_cxx_api.h>
+#include <memory>
 
-constexpr int NODE_FEAT_DIM = 31;
-constexpr int EDGE_FEAT_DIM = 7;
+#include "GNNModel.h"   // compiled-in model weights
+
+// Feature counts come from the generated weight header, so the code and the
+// model can never disagree: a mismatch is a compile error.
+constexpr int NODE_FEAT_DIM = gnn::kNodeFeat;
+constexpr int EDGE_FEAT_DIM = gnn::kEdgeFeat;
 constexpr int HP_RADIUS     = 15;
 constexpr int GC_RADIUS     = 50;
 constexpr int NEIGH_RADIUS  = 500;
@@ -50,7 +54,7 @@ struct Prediction {
 class GNNModule {
 public:
     struct Params {
-        std::string model_path, vcf_path, dot_prefix, reference_path, output_vcf;
+        std::string vcf_path, dot_prefix, reference_path, output_vcf;
         std::string sv_vcf, mod_vcf, output_sv_vcf, output_mod_vcf;
         float break_threshold = 0.30f;
         float pe_threshold    = 0.80f;
@@ -66,10 +70,10 @@ public:
 
 private:
     Params params_;
-    Ort::Env                      ort_env_;
-    std::unique_ptr<Ort::Session> ort_session_;
-    Ort::SessionOptions           ort_options_;
-    Ort::MemoryInfo               memory_info_;
+
+    // Holds the decoded weights. forward() keeps no mutable state, so a
+    // single const instance is shared by every worker thread.
+    std::unique_ptr<const gnn::Model> model_;
 
     std::map<std::string, std::vector<VariantInfo>> variants_;
     // dot_edges_[chrom][src_pos] = list of edges from that position
@@ -93,7 +97,6 @@ private:
         std::unordered_map<int, int> ps_count;
         std::vector<int> all_pos;
         std::vector<int> indel_pos;
-        std::unordered_set<int> bridge_set;   // precomputed bridge vertices
         std::unordered_map<int, int> pos_to_idx; // pos → index in variant list
     };
 

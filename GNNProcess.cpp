@@ -26,16 +26,13 @@
 static constexpr float EPS = 1e-6f;
 
 GNNModule::GNNModule(const Params& p)
-    : params_(p),
-      ort_env_(ORT_LOGGING_LEVEL_WARNING, "longphase_gnn"),
-      memory_info_(Ort::MemoryInfo::CreateCpu(
-          OrtAllocatorType::OrtArenaAllocator, OrtMemTypeDefault))
+    : params_(p)
 {}
 GNNModule::~GNNModule() = default;
 
 // ═══════════════════════════════════════════════════════════
 int GNNModule::run() {
-    std::cerr << "[GNN] Loading ONNX model\n";
+    std::cerr << "[GNN] Loading model\n";
     loadModel();
     std::cerr << "[GNN] Parsing VCF\n";
     parseVCF();
@@ -74,58 +71,10 @@ int GNNModule::run() {
         for (auto& v : vl) if (v.indel_len > 0) cd.indel_pos.push_back(v.pos);
         std::sort(cd.indel_pos.begin(), cd.indel_pos.end());
 
-        // Precompute bridge vertices using full chromosome adjacency
-        auto& em = dot_edges_[ch];
-        std::unordered_map<int, std::unordered_set<int>> pos_adj;
-        std::unordered_set<int> all_ps_set;
-        for (auto& v : vl) {
-            all_ps_set.insert(v.pos);
-            if (!em.count(v.pos)) continue;
-            for (auto& e : em.at(v.pos)) {
-                pos_adj[v.pos].insert(e.dst_pos);
-                pos_adj[e.dst_pos].insert(v.pos);
-            }
-        }
-        // BFS for bridge detection on the full graph
-        // A variant is a bridge if removing it increases connected components
-        // Only check variants with PE >= threshold (potential triggers and their neighbors)
-        for (auto& v : vl) {
-            if (v.pe < params_.pe_threshold * 0.5f) continue; // only check relevant variants
-            if (pos_adj.find(v.pos) == pos_adj.end()) continue;
-            // Quick check: if degree <= 1, not a bridge
-            if (pos_adj[v.pos].size() <= 1) continue;
-
-            // Count components in local neighborhood with and without
-            auto local = pos_adj[v.pos]; // neighbors
-            local.insert(v.pos);
-            // Add 2nd-hop neighbors
-            std::unordered_set<int> extended;
-            for (int p : local) {
-                extended.insert(p);
-                if (pos_adj.count(p))
-                    for (int nb : pos_adj.at(p)) extended.insert(nb);
-            }
-
-            auto bfs_count = [&](const std::unordered_set<int>& nodes) -> int {
-                std::unordered_set<int> vis; int comp = 0;
-                for (int p : nodes) {
-                    if (vis.count(p)) continue; comp++;
-                    std::vector<int> q = {p}; vis.insert(p);
-                    while (!q.empty()) {
-                        int c = q.back(); q.pop_back();
-                        if (pos_adj.count(c))
-                            for (int nb : pos_adj.at(c))
-                                if (nodes.count(nb) && !vis.count(nb))
-                                    { vis.insert(nb); q.push_back(nb); }
-                    }
-                }
-                return comp;
-            };
-            int before = bfs_count(extended);
-            auto without = extended; without.erase(v.pos);
-            if (!without.empty() && bfs_count(without) > before)
-                cd.bridge_set.insert(v.pos);
-        }
+        // Bridge vertices used to be precomputed here over the whole
+        // chromosome. They are now derived per window inside
+        // processChromosome(), which is what the model was trained on and is
+        // also cheaper, since each window holds only a few dozen variants.
 
         // pos → index in vlist
         for (int i = 0; i < (int)vl.size(); ++i)
@@ -181,10 +130,12 @@ int GNNModule::run() {
 
 // ═══════════════════════════════════════════════════════════
 void GNNModule::loadModel() {
-    ort_options_.SetIntraOpNumThreads(1);
-    ort_options_.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
-    ort_session_ = std::make_unique<Ort::Session>(
-        ort_env_, params_.model_path.c_str(), ort_options_);
+    // Decodes the weights compiled in via GNNWeights.h. Nothing is read from
+    // disk, so --model is not consulted.
+    model_ = std::make_unique<const gnn::Model>();
+    std::cerr << "[GNN]   " << gnn::kParamCount << " parameters, "
+              << NODE_FEAT_DIM << " node / " << EDGE_FEAT_DIM
+              << " edge features\n";
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -402,6 +353,63 @@ void GNNModule::processChromosome(const std::string& chrom, int tidx,
         return std::min(std::log10(1.0f+best), std::log10(10001.0f));
     };
 
+    // ── Bridge vertices ──────────────────────────────────
+    // Mirrors is_bridge_vertex() in prepare_gnn_data.py: the graph is built
+    // from edges whose endpoints both lie inside this window, collapsed to
+    // position level and treated as undirected. A variant is a bridge when
+    // removing it raises the number of connected components of the window.
+    //
+    // The window holds a few dozen variants, so recomputing per window is
+    // cheaper than the chromosome-wide pass this replaces, and it is what
+    // the model was trained on.
+    std::unordered_map<int, std::unordered_set<int>> pos_adj;
+    for (int pos : wpos_set) {
+        if (!edge_map.count(pos)) continue;
+        for (auto& e : edge_map.at(pos)) {
+            if (!wpos_set.count(e.dst_pos)) continue;
+            if (e.src_pos == e.dst_pos) continue;
+            pos_adj[e.src_pos].insert(e.dst_pos);
+            pos_adj[e.dst_pos].insert(e.src_pos);
+        }
+    }
+
+    // Connected components of wpos_set, optionally with one node removed.
+    auto n_components = [&](int exclude) -> int {
+        std::unordered_set<int> vis;
+        int count = 0;
+        for (int start : wpos_set) {
+            if (start == exclude) continue;
+            if (vis.count(start)) continue;
+            ++count;
+            std::vector<int> q{start};
+            while (!q.empty()) {
+                int node = q.back(); q.pop_back();
+                if (vis.count(node)) continue;
+                vis.insert(node);
+                auto it = pos_adj.find(node);
+                if (it == pos_adj.end()) continue;
+                for (int nb : it->second)
+                    if (nb != exclude && wpos_set.count(nb) && !vis.count(nb))
+                        q.push_back(nb);
+            }
+        }
+        return count;
+    };
+
+    const int comp_before = n_components(-1);
+    std::unordered_set<int> bridge_set;
+    for (int pos : wpos_set) {
+        if (wpos_set.size() <= 1) break;
+        auto it = pos_adj.find(pos);
+        if (it == pos_adj.end()) continue;
+        // Needs at least one neighbour that survives the removal.
+        bool has_active = false;
+        for (int nb : it->second)
+            if (nb != pos && wpos_set.count(nb)) { has_active = true; break; }
+        if (!has_active) continue;
+        if (n_components(pos) > comp_before) bridge_set.insert(pos);
+    }
+
     // out_wsum for weight_ratio
     std::unordered_map<int64_t, float> out_wsum;
     auto make_key = [](int pos, int al) -> int64_t { return ((int64_t)pos << 4) | al; };
@@ -413,19 +421,7 @@ void GNNModule::processChromosome(const std::string& chrom, int tidx,
         }
     }
 
-    // reverse edge weight
-    std::unordered_map<int64_t, float> rev_w_map;
-    auto rev_key = [](int dp, int da, int sp, int sa) -> int64_t {
-        return ((int64_t)dp << 34) | ((int64_t)da << 32) | ((int64_t)sp << 4) | sa; };
-    for (int pos : wpos_set) {
-        if (!edge_map.count(pos)) continue;
-        for (auto& e : edge_map.at(pos)) {
-            if (!wpos_set.count(e.dst_pos)) continue;
-            rev_w_map[rev_key(e.dst_pos, e.dst_allele, e.src_pos, e.src_allele)] = e.weight;
-        }
-    }
-
-    // ── Node features [N × 27] ──
+    // ── Node features [N × NODE_FEAT_DIM] ──
     std::vector<float> nf(N * NODE_FEAT_DIM, 0.0f);
     std::unordered_map<int64_t, int> pa_to_nid;
 
@@ -441,7 +437,7 @@ void GNNModule::processChromosome(const std::string& chrom, int tidx,
                        / std::log1p(100.0f);
         float wm = wmean.count(v->pos) ? wmean[v->pos] : 1.0f;
         float rvd = std::log2(total / (wm+EPS) + EPS);
-        float bridge_f = cd.bridge_set.count(v->pos) ? 1.0f : 0.0f;
+        float bridge_f = bridge_set.count(v->pos) ? 1.0f : 0.0f;
 
         for (int a = 0; a < 2; ++a) {
             int allele = a+1, nid = i*2+a;
@@ -482,8 +478,6 @@ void GNNModule::processChromosome(const std::string& chrom, int tidx,
             auto* sv = pos_to_var[e.src_pos]; auto* dv = pos_to_var[e.dst_pos];
             float inter_ps = (sv && dv && sv->ps != dv->ps) ? 1.0f : 0.0f;
             float wsum = out_wsum[make_key(e.src_pos, e.src_allele)];
-            float rw = 0; auto rit = rev_w_map.find(rev_key(e.dst_pos,e.dst_allele,e.src_pos,e.src_allele));
-            if (rit != rev_w_map.end()) rw = rit->second;
             int row = dn, col = sn;
             adj[row*N+col] = 1.0f;
             float* ep = &ef[(row*N+col)*EDGE_FEAT_DIM];
@@ -491,7 +485,7 @@ void GNNModule::processChromosome(const std::string& chrom, int tidx,
             ep[1] = std::log10(1.0f+std::abs((float)(e.dst_pos-e.src_pos)));
             ep[2] = std::log1p(e.weight);
             ep[3] = same_hp; ep[4] = inter_ps;
-            ep[5] = e.weight/(wsum+EPS); ep[6] = std::log1p(rw);
+            ep[5] = e.weight/(wsum+EPS);
         }
     }
 
@@ -512,18 +506,11 @@ void GNNModule::processChromosome(const std::string& chrom, int tidx,
         if (ni>0) for(int f=0;f<EDGE_FEAT_DIM;++f) ef[(i*N+i)*EDGE_FEAT_DIM+f]=se[f]/ni;
     }
 
-    // ── ONNX inference ──
-    std::array<int64_t,2> ns={N,NODE_FEAT_DIM}, as_={N,N};
-    std::array<int64_t,3> es={N,N,EDGE_FEAT_DIM};
-    auto tn = Ort::Value::CreateTensor<float>(memory_info_,nf.data(),nf.size(),ns.data(),2);
-    auto ta = Ort::Value::CreateTensor<float>(memory_info_,adj.data(),adj.size(),as_.data(),2);
-    auto te = Ort::Value::CreateTensor<float>(memory_info_,ef.data(),ef.size(),es.data(),3);
-    std::vector<Ort::Value> in; in.reserve(3);
-    in.push_back(std::move(tn)); in.push_back(std::move(ta)); in.push_back(std::move(te));
-    const char* inn[]={"node_features","adjacency","edge_features"};
-    const char* outn[]={"probabilities"};
-    auto out = ort_session_->Run(Ort::RunOptions{nullptr},inn,in.data(),3,outn,1);
-    float* op = out[0].GetTensorMutableData<float>();
+    // ── Inference ──
+    // adj(row, col) != 0 means an edge col -> row, which is the orientation
+    // gnn::Model expects.
+    std::vector<float> probs = model_->forward(nf, adj, ef, N);
+    const float* op = probs.data();
 
     // ── Collect predictions for center-zone nodes ──
     // Match Python _center_mask: thr = min(10 / max(1, round(max_r * 20)), 1.0)
@@ -540,7 +527,7 @@ void GNNModule::processChromosome(const std::string& chrom, int tidx,
         if (rel > center_thr) continue;
         int n1=i*2, n2=i*2+1;
         float p_err = (op[n1*2+1]+op[n2*2+1])/2.0f;
-        bool br = cd.bridge_set.count(wvars[i]->pos) > 0;
+        bool br = bridge_set.count(wvars[i]->pos) > 0;
         std::lock_guard<std::mutex> lk(pred_mutex_);
         auto& pr = predictions_[chrom][wvars[i]->pos];
         pr.prob_error = (pr.prob_error*pr.count + p_err)/(pr.count+1);
@@ -699,8 +686,13 @@ void GNNModule::writeOutputVCF(const std::string& in_path, const std::string& ou
         if (unph) {
             int32_t* gt=nullptr; int ng=0;
             if (bcf_get_genotypes(hdr,rec,&gt,&ng)>=2) {
-                gt[0]=bcf_gt_unphased(bcf_gt_allele(gt[0]));
-                gt[1]=bcf_gt_unphased(bcf_gt_allele(gt[1]));
+                // An unphased genotype carries no order, and the VCF spec
+                // writes it ascending, so sort the alleles rather than
+                // leaving "1/0" behind.
+                int a0 = bcf_gt_allele(gt[0]), a1 = bcf_gt_allele(gt[1]);
+                if (a0 > a1) std::swap(a0, a1);
+                gt[0]=bcf_gt_unphased(a0);
+                gt[1]=bcf_gt_unphased(a1);
                 bcf_update_genotypes(hdr,rec,gt,ng); free(gt);
             }
             bcf_update_format_int32(hdr,rec,"PS",nullptr,0);
@@ -789,30 +781,6 @@ float GNNModule::calcSTRContext(const std::string& s, int c) {
     return std::min((float)best/10.0f,1.0f);
 }
 
-// ═══════════════════════════════════════════════════════════
-#ifdef GNN_STANDALONE
-int main(int argc, char* argv[]) {
-    GNNModule::Params p;
-    for(int i=1;i<argc;++i){std::string a=argv[i];
-        if((a=="--model"||a=="-m")&&i+1<argc) p.model_path=argv[++i];
-        else if((a=="--vcf"||a=="-v")&&i+1<argc) p.vcf_path=argv[++i];
-        else if(a=="--dot-prefix"&&i+1<argc) p.dot_prefix=argv[++i];
-        else if((a=="--reference"||a=="-r")&&i+1<argc) p.reference_path=argv[++i];
-        else if((a=="--output"||a=="-o")&&i+1<argc) p.output_vcf=argv[++i];
-        else if((a=="-B"||a=="--break-threshold")&&i+1<argc) p.break_threshold=std::stof(argv[++i]);
-        else if(a=="--pe-threshold"&&i+1<argc) p.pe_threshold=std::stof(argv[++i]);
-        else if(a=="--window"&&i+1<argc) p.window=std::stoi(argv[++i]);
-        else if((a=="-t"||a=="--threads")&&i+1<argc) p.threads=std::stoi(argv[++i]);
-        else if(a=="--sv-vcf"&&i+1<argc) p.sv_vcf=argv[++i];
-        else if(a=="--mod-vcf"&&i+1<argc) p.mod_vcf=argv[++i];
-        else if(a=="--output-sv-vcf"&&i+1<argc) p.output_sv_vcf=argv[++i];
-        else if(a=="--output-mod-vcf"&&i+1<argc) p.output_mod_vcf=argv[++i];
-        else if(a=="--respect-bridge") p.respect_bridge=true;
-        else if(a=="-h"||a=="--help"){std::cerr<<"longphase gnn --model M --vcf V --dot-prefix D -r R -o O [-B 0.30] [-t 4]\n"
-            "  [--sv-vcf SV.vcf] [--mod-vcf MOD.vcf] [--output-sv-vcf O_SV] [--output-mod-vcf O_MOD]\n"
-            "  [--respect-bridge]\n";return 0;}
-    }
-    if(p.model_path.empty()||p.vcf_path.empty()||p.output_vcf.empty()){std::cerr<<"Error: --model, --vcf, --output required\n";return 1;}
-    return GNNModule(p).run();
-}
-#endif
+// A standalone main() used to live here for testing. It was removed along
+// with --model: the CLI now lives in GNN.cpp and the weights are compiled in.
+

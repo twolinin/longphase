@@ -5,7 +5,6 @@
 set -euo pipefail
 
 LONGPHASE=../longphase
-MODEL=../model_cophase.onnx
 THREADS=4
 
 step() { echo -e "\n\033[1;36m════ $1 ════\033[0m"; }
@@ -35,14 +34,12 @@ $LONGPHASE phase --indels --ont --dot -t $THREADS \
 
 step "Step 3a: GNN correction (SNV-only)"
 $LONGPHASE gnn -t $THREADS \
-    -m $MODEL \
     -r demo_ref.fa.gz \
     -s testing_snvOnly.vcf \
     -o testing_snvOnly_gnn
 
 step "Step 3b: GNN correction (cophasing)"
 $LONGPHASE gnn -t $THREADS \
-    -m $MODEL \
     -r demo_ref.fa.gz \
     -s testing_cophasing.vcf \
     --sv-file testing_cophasing_SV.vcf \

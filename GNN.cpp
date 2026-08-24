@@ -13,7 +13,6 @@ static const char *CORRECT_USAGE_MESSAGE =
 "Usage: longphase " SUBPROGRAM " [OPTION]\n"
 "      --help                          display this help and exit.\n\n"
 "require arguments:\n"
-"      -m, --model=NAME                input ONNX model file.\n"
 "      -s, --snp-file=NAME             input phased SNP/SNV vcf file (from longphase phase).\n"
 "      -o, --out-prefix=NAME           prefix of corrected result. default:result\n"
 "optional arguments:\n"
@@ -35,7 +34,7 @@ static const char *CORRECT_USAGE_MESSAGE =
 "      <prefix>_SV.vcf                 corrected SV vcf   (only if --sv-file given)\n"
 "      <prefix>_mod.vcf                corrected mod vcf  (only if --mod-file given)\n";
 
-static const char* shortopts = "m:s:o:r:B:t:";
+static const char* shortopts = "s:o:r:B:t:";
 
 enum {
     OPT_HELP = 1,
@@ -50,7 +49,6 @@ enum {
 
 static const struct option longopts[] = {
     { "help",             no_argument,       NULL, OPT_HELP },
-    { "model",            required_argument, NULL, 'm' },
     { "snp-file",         required_argument, NULL, 's' },
     { "out-prefix",       required_argument, NULL, 'o' },
     { "reference",        required_argument, NULL, 'r' },
@@ -68,7 +66,6 @@ static const struct option longopts[] = {
 
 namespace opt
 {
-    static std::string modelFile = "";
     static std::string snpFile = "";
     static std::string resultPrefix = "result";
     static std::string referenceFile = "";
@@ -119,7 +116,6 @@ void GNNOptions(int argc, char** argv)
         std::istringstream arg(optarg != NULL ? optarg : "");
         switch (c)
         {
-            case 'm': arg >> opt::modelFile; break;
             case 's': arg >> opt::snpFile; break;
             case 'o': arg >> opt::resultPrefix; break;
             case 'r': arg >> opt::referenceFile; break;
@@ -142,18 +138,6 @@ void GNNOptions(int argc, char** argv)
     for (int i = 0; i < argc; ++i) {
         opt::command.append(argv[i]);
         opt::command.append(" ");
-    }
-
-    if (opt::modelFile != "") {
-        std::ifstream openFile(opt::modelFile.c_str());
-        if (!openFile.is_open()) {
-            std::cerr << "File " << opt::modelFile << " not exist.\n\n";
-            die = true;
-        }
-    }
-    else {
-        std::cerr << SUBPROGRAM ": missing model file.\n";
-        die = true;
     }
 
     if (opt::snpFile != "") {
@@ -249,7 +233,6 @@ int GNNMain(int argc, char** argv, std::string in_version)
 
     GNNOptions(argc, argv);
 
-    params.model_path      = opt::modelFile;
     params.vcf_path        = opt::snpFile;
     params.dot_prefix      = opt::dotPrefix;
     params.reference_path  = opt::referenceFile;
@@ -272,7 +255,7 @@ int GNNMain(int argc, char** argv, std::string in_version)
 
     std::cerr << "LongPhase Ver " << in_version << "\n\n"
               << "--- GNN Correction Parameters ---\n"
-              << "Model           : " << params.model_path << "\n"
+              << "Model           : built-in\n"
               << "SNP file        : " << params.vcf_path << "\n";
     if (!params.sv_vcf.empty())
         std::cerr << "SV file         : " << params.sv_vcf << "\n";
