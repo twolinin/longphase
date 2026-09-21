@@ -189,9 +189,9 @@ An example of SV VCF file
 ```
 
 ### GNN command
-The `gnn` command refines the output of `phase` with a graph neural network that detects unreliable phasing decisions and unphases them, splitting phase blocks where needed. To use it, run phase with the --dot option: this writes one DOT file per chromosome (<out-prefix>.<chrom>.dot) to the same directory as the phased VCF.
+The `gnn` command refines the output of `phase` with a graph neural network that detects unreliable phasing decisions and unphases them, splitting phase blocks where needed. To use it, run phase with the --dot option: this writes one DOT file per chromosome (`<out-prefix>.<chrom>.dot`) to the same directory as the phased VCF.
 
-By default, `gnn` looks for the DOT files next to the phased SNV VCF given with `-s`, using the VCF path without its `.vcf` / `.vcf.gz` extension as the prefix. For example, `-s /data/phased.vcf` reads `/data/phased.chr1.dot`, `/data/phased.chr2.dot`, and so on. Keep the DOT files in the same directory as the phased SNV VCF and do not rename either, or point to them explicitly with `--dot-prefix`. The phased SV and modification VCFs have no location requirement.
+By default, `gnn` looks for the DOT files next to the phased SNP VCF given with `-s`, using the VCF path without its `.vcf` / `.vcf.gz` extension as the prefix. For example, `-s /data/phased.vcf` reads `/data/phased.chr1.dot`, `/data/phased.chr2.dot`, and so on. Keep the DOT files in the same directory as the phased SNP VCF and do not rename either, or point to them explicitly with `--dot-prefix`. The phased SV and modification VCFs have no location requirement.
 
 Providing the reference with `-r` is strongly recommended: the model uses sequence-context features computed from the reference, and accuracy is lower without it.
 
