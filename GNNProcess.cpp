@@ -819,4 +819,3 @@ float GNNModule::calcSTRContext(const std::string& s, int c) {
 
 // A standalone main() used to live here for testing. It was removed along
 // with --model: the CLI now lives in GNN.cpp and the weights are compiled in.
-
