@@ -5,13 +5,14 @@
 #include <fstream>
 #include <sstream>
 #include <cstring>
+#include <cstdlib>
 #include <glob.h>
 
 #define SUBPROGRAM "gnn"
 
 static const char *CORRECT_USAGE_MESSAGE =
 "Usage: longphase " SUBPROGRAM " [OPTION]\n"
-"      --help                          display this help and exit.\n\n"
+"      -h, --help                      display this help and exit.\n\n"
 "require arguments:\n"
 "      -s, --snp-file=NAME             input phased SNP/SNV vcf file (from longphase phase).\n"
 "      -o, --out-prefix=NAME           prefix of corrected result. default:result\n"
@@ -34,7 +35,7 @@ static const char *CORRECT_USAGE_MESSAGE =
 "      <prefix>_SV.vcf                 corrected SV vcf   (only if --sv-file given)\n"
 "      <prefix>_mod.vcf                corrected mod vcf  (only if --mod-file given)\n";
 
-static const char* shortopts = "s:o:r:B:t:";
+static const char* shortopts = "hs:o:r:B:t:";
 
 enum {
     OPT_HELP = 1,
@@ -111,7 +112,7 @@ void GNNOptions(int argc, char** argv)
     optind = 1;
 
     bool die = false;
-    for (char c; (c = getopt_long(argc, argv, shortopts, longopts, NULL)) != -1;)
+    for (int c; (c = getopt_long(argc, argv, shortopts, longopts, NULL)) != -1;)
     {
         std::istringstream arg(optarg != NULL ? optarg : "");
         switch (c)
@@ -128,6 +129,7 @@ void GNNOptions(int argc, char** argv)
             case OPT_WINDOW:          arg >> opt::window; break;
             case OPT_RESPECT_BRIDGE:  opt::respectBridge = true; break;
             case OPT_NO_SPLIT_BLOCKS: opt::splitBlocks = false; break;
+            case 'h':
             case OPT_HELP:
                 std::cout << CORRECT_USAGE_MESSAGE;
                 exit(EXIT_SUCCESS);

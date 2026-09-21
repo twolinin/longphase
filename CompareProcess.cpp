@@ -771,12 +771,8 @@ int CompareProcess::run()
     // Parse --regions / --regions-bed (if any) once up-front.
     if (!loadRegions()) return 1;
 
-    // Currently support pairwise comparison (truth vs query).
-    if (params.vcfFiles.size() != 2) {
-        std::cerr << "[compare] Notice: " << params.vcfFiles.size()
-                  << " VCFs were given; only the first two will be compared "
-                     "(multiway comparison is not implemented).\n";
-    }
+    // Compare is pairwise: CLI (Compare.cpp) already guarantees exactly
+    // 2 input VCFs, so we can dereference [0] and [1] directly.
     const std::string& truthPath = params.vcfFiles[0];
     const std::string& queryPath = params.vcfFiles[1];
 

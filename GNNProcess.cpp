@@ -16,6 +16,7 @@
 #include <numeric>
 #include <cstring>
 #include <cstdio>
+#include <cstdlib>
 #include <thread>
 #include <atomic>
 #include <set>
@@ -46,9 +47,11 @@ int GNNModule::run() {
     }
     // Re-sort after merging secondary VCFs
     if (!params_.sv_vcf.empty() || !params_.mod_vcf.empty()) {
-        for (auto& [ch, vl] : variants_)
+        for (auto& kv : variants_) {
+            auto& vl = kv.second;
             std::sort(vl.begin(), vl.end(),
                       [](const VariantInfo& a, const VariantInfo& b){ return a.pos < b.pos; });
+        }
     }
     std::cerr << "[GNN] Parsing DOT files\n";
     parseDotFiles();
@@ -60,7 +63,7 @@ int GNNModule::run() {
     // Pre-compute per-chromosome data
     std::map<std::string, ChromData> chrom_data;
     std::vector<std::string> chroms;
-    for (auto& [ch, vl] : variants_) chroms.push_back(ch);
+    for (auto& kv : variants_) chroms.push_back(kv.first);
 
     for (auto& ch : chroms) {
         auto& cd = chrom_data[ch];
@@ -109,8 +112,9 @@ int GNNModule::run() {
     for (auto& t : threads) t.join();
 
     int total = 0, unph = 0;
-    for (auto& [ch, pm] : predictions_)
-        for (auto& [pos, pr] : pm) {
+    for (auto& kv_ch : predictions_)
+        for (auto& kv_pos : kv_ch.second) {
+            auto& pr = kv_pos.second;
             total++;
             if (pr.prob_error >= params_.break_threshold &&
                 (!params_.respect_bridge || !pr.is_bridge)) unph++;
@@ -132,7 +136,7 @@ int GNNModule::run() {
 void GNNModule::loadModel() {
     // Decodes the weights compiled in via GNNWeights.h. Nothing is read from
     // disk, so --model is not consulted.
-    model_ = std::make_unique<const gnn::Model>();
+    model_.reset(new gnn::Model());
     std::cerr << "[GNN]   " << gnn::kParamCount << " parameters, "
               << NODE_FEAT_DIM << " node / " << EDGE_FEAT_DIM
               << " edge features\n";
@@ -174,9 +178,11 @@ void GNNModule::parseVCF() {
         n++;
     }
     bcf_destroy(rec); bcf_hdr_destroy(hdr); hts_close(fp);
-    for (auto& [ch, vl] : variants_)
+    for (auto& kv : variants_) {
+        auto& vl = kv.second;
         std::sort(vl.begin(), vl.end(),
                   [](const VariantInfo& a, const VariantInfo& b){ return a.pos < b.pos; });
+    }
     std::cerr << "  " << n << " phased variants\n";
 }
 
@@ -186,7 +192,8 @@ void GNNModule::parseVCF() {
 void GNNModule::parseDotFiles() {
     // Collect chromosome list and pre-initialize dot_edges_ map
     std::vector<std::string> chroms;
-    for (auto& [ch, vl] : variants_) {
+    for (auto& kv : variants_) {
+        const std::string& ch = kv.first;
         chroms.push_back(ch);
         dot_edges_[ch]; // pre-create entry to avoid concurrent map insertion
     }
@@ -230,7 +237,7 @@ void GNNModule::parseDotFiles() {
 // ═══════════════════════════════════════════════════════════
 void GNNModule::computeGenomicFeatures() {
     std::vector<std::string> chroms;
-    for (auto& [ch, vl] : variants_) chroms.push_back(ch);
+    for (auto& kv : variants_) chroms.push_back(kv.first);
 
     std::atomic<size_t> cidx{0};
     int n_threads = std::min(params_.threads, (int)chroms.size());
@@ -501,7 +508,8 @@ void GNNModule::processChromosome(const std::string& chrom, int tidx,
         adj[i*N+i]=1.0f;
         float se[EDGE_FEAT_DIM]={}; int ni=0;
         for (int j=0;j<N;++j) if (j!=i && adj[i*N+j]>0.5f) {
-            for(int f=0;f<EDGE_FEAT_DIM;++f) se[f]+=ef[(i*N+j)*EDGE_FEAT_DIM+f]; ni++;
+            for(int f=0;f<EDGE_FEAT_DIM;++f) se[f]+=ef[(i*N+j)*EDGE_FEAT_DIM+f];
+            ni++;
         }
         if (ni>0) for(int f=0;f<EDGE_FEAT_DIM;++f) ef[(i*N+i)*EDGE_FEAT_DIM+f]=se[f]/ni;
     }
@@ -542,7 +550,7 @@ void GNNModule::processChromosome(const std::string& chrom, int tidx,
 // Parallelized per chromosome.
 void GNNModule::computeBlockSplits() {
     std::vector<std::string> chroms;
-    for (auto& [ch, vl] : variants_) chroms.push_back(ch);
+    for (auto& kv : variants_) chroms.push_back(kv.first);
 
     std::atomic<size_t> cidx{0};
     std::mutex reassign_mutex;
@@ -559,7 +567,9 @@ void GNNModule::computeBlockSplits() {
             // Which positions are being unphased?
             std::unordered_set<int> unphase_pos;
             if (predictions_.count(ch)) {
-                for (auto& [pos, pr] : predictions_.at(ch)) {
+                for (auto& kv_pos : predictions_.at(ch)) {
+                    const auto& pos = kv_pos.first;
+                    auto& pr = kv_pos.second;
                     if (pr.prob_error >= params_.break_threshold &&
                         (!params_.respect_bridge || !pr.is_bridge))
                         unphase_pos.insert(pos);
@@ -580,7 +590,9 @@ void GNNModule::computeBlockSplits() {
 
             // Build adjacency (only same-PS, both-phased edges)
             std::unordered_map<int, std::vector<int>> adj;
-            for (auto& [src, elist] : em) {
+            for (auto& kv_src : em) {
+                const auto& src = kv_src.first;
+                auto& elist = kv_src.second;
                 if (unphase_pos.count(src)) continue;
                 auto it_s = pos_to_ps.find(src);
                 if (it_s == pos_to_ps.end()) continue;
@@ -599,7 +611,8 @@ void GNNModule::computeBlockSplits() {
             int local_splits = 0, local_new = 0;
 
             // Per-PS connected components via BFS
-            for (auto& [ps_val, positions] : ps_blocks) {
+            for (auto& kv_ps : ps_blocks) {
+                auto& positions = kv_ps.second;
                 if (positions.size() <= 1) continue;
 
                 std::unordered_set<int> pos_set(positions.begin(), positions.end());
@@ -669,9 +682,24 @@ void GNNModule::writeOutputVCF() {
 
 void GNNModule::writeOutputVCF(const std::string& in_path, const std::string& out_path) {
     htsFile* ifp = hts_open(in_path.c_str(), "r");
+    if (!ifp) {
+        std::cerr << "[GNN] ERROR: cannot open " << in_path << "\n";
+        std::exit(EXIT_FAILURE);
+    }
     bcf_hdr_t* hdr = bcf_hdr_read(ifp);
+    if (!hdr) {
+        std::cerr << "[GNN] ERROR: cannot read VCF header of " << in_path << "\n";
+        std::exit(EXIT_FAILURE);
+    }
     htsFile* ofp = hts_open(out_path.c_str(), "w");
-    (void)bcf_hdr_write(ofp, hdr);
+    if (!ofp) {
+        std::cerr << "[GNN] ERROR: cannot create " << out_path << "\n";
+        std::exit(EXIT_FAILURE);
+    }
+    if (bcf_hdr_write(ofp, hdr) < 0) {
+        std::cerr << "[GNN] ERROR: failed to write VCF header to " << out_path << "\n";
+        std::exit(EXIT_FAILURE);
+    }
     bcf1_t* rec = bcf_init();
     int nu = 0, nsplit = 0;
     while (bcf_read(ifp, hdr, rec) == 0) {
@@ -693,8 +721,9 @@ void GNNModule::writeOutputVCF(const std::string& in_path, const std::string& ou
                 if (a0 > a1) std::swap(a0, a1);
                 gt[0]=bcf_gt_unphased(a0);
                 gt[1]=bcf_gt_unphased(a1);
-                bcf_update_genotypes(hdr,rec,gt,ng); free(gt);
+                bcf_update_genotypes(hdr,rec,gt,ng);
             }
+            free(gt);
             bcf_update_format_int32(hdr,rec,"PS",nullptr,0);
             nu++;
         } else if (params_.split_blocks && ps_reassign_.count(ch)) {
@@ -707,10 +736,17 @@ void GNNModule::writeOutputVCF(const std::string& in_path, const std::string& ou
                 nsplit++;
             }
         }
-        (void)bcf_write(ofp, hdr, rec);
+        if (bcf_write(ofp, hdr, rec) < 0) {
+            std::cerr << "[GNN] ERROR: failed to write record to " << out_path << "\n";
+            std::exit(EXIT_FAILURE);
+        }
     }
     bcf_destroy(rec); bcf_hdr_destroy(hdr);
-    hts_close(ifp); hts_close(ofp);
+    hts_close(ifp);
+    if (hts_close(ofp) != 0) {
+        std::cerr << "[GNN] ERROR: failed to close " << out_path << "\n";
+        std::exit(EXIT_FAILURE);
+    }
     std::cerr << "[GNN] " << out_path << ": unphased " << nu
               << ", PS-split " << nsplit << " variants\n";
 }

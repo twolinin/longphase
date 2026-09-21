@@ -28,22 +28,23 @@
 // Usage text
 // ------------------------------------------------------------------ //
 static const char *COMPARE_USAGE =
-"Usage:  compare [OPTION] ... TRUTH.vcf  QUERY1.vcf [QUERY2.vcf ...]\n"
-"        Compare two or more phased VCF files (first VCF is treated as truth).\n"
+"Usage:  compare [OPTION] ... TRUTH.vcf  QUERY.vcf\n"
+"        Compare two phased VCF files (the first is treated as truth,\n"
+"        the second as the query being evaluated).\n"
 "\n"
 "  -h, --help                     display this help and exit.\n"
 "\n"
 "require arguments:\n"
-"      At least two phased VCF/BCF files.  The first one is treated\n"
-"      as the ground-truth phasing.\n"
+"      Exactly two phased VCF/BCF files.  The first one is treated\n"
+"      as the ground-truth phasing; the second is the query.\n"
 "\n"
 "optional arguments:\n"
 "  -o, --out-prefix=NAME          prefix of output TSV file.\n"
 "                                 default: compare_result\n"
 "  -t, --threads=NUM              number of threads used for the parallel\n"
 "                                 switch / Hamming computation. default: 1\n"
-"  -n, --names=N1,N2,...          comma-separated list of data-set names\n"
-"                                 used in the report (same order as VCFs).\n"
+"  -n, --names=TRUTH,QUERY        comma-separated pair of data-set names\n"
+"                                 used in the report (truth first).\n"
 "  -s, --sample=SAMPLE            name of the sample to process.\n"
 "                                 default: first sample found in VCF\n"
 "      --ignore-sample-name       for single-sample VCFs, ignore sample\n"
@@ -134,8 +135,16 @@ int CompareMain(int argc, char** argv, std::string version)
     // Positional = VCF files
     while (optind < argc) params.vcfFiles.emplace_back(argv[optind++]);
 
-    if (params.vcfFiles.size() < 2) {
-        std::cerr << "[compare] ERROR: at least two VCF files are required.\n\n";
+    if (params.vcfFiles.size() != 2) {
+        if (params.vcfFiles.size() < 2) {
+            std::cerr << "[compare] ERROR: two VCF files are required "
+                         "(TRUTH.vcf QUERY.vcf).\n\n";
+        } else {
+            std::cerr << "[compare] ERROR: got " << params.vcfFiles.size()
+                      << " positional VCFs; compare only supports pairwise\n"
+                         "               (TRUTH.vcf QUERY.vcf).  Multiway "
+                         "comparison is not implemented.\n\n";
+        }
         std::cout << COMPARE_USAGE;
         return 1;
     }
