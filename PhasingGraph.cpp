@@ -22,7 +22,7 @@ void SubEdge::destroy(){
     delete altReadCount;
 }
 
-void SubEdge::addSubEdge(int currentQuality, Variant connectNode, std::string readName, int baseQuality, double edgeWeight){
+void SubEdge::addSubEdge(int currentQuality, Variant connectNode, const std::string &readName, int baseQuality, double edgeWeight){
     // target noded is REF allele
     if(connectNode.allele == 0 ){
         // debug, this parameter will record the names of all reads between two points
@@ -76,7 +76,7 @@ std::pair<float,float> SubEdge::BestPair(int targetPos){
 float SubEdge::getRefReadCount(int targetPos){
     std::map<int, float>::iterator posIter = refReadCount->find(targetPos);
     if( posIter != refReadCount->end() ){
-        return (*refReadCount)[targetPos];
+        return posIter->second;
     }
     return 0;
 }
@@ -84,7 +84,7 @@ float SubEdge::getRefReadCount(int targetPos){
 float SubEdge::getAltReadCount(int targetPos){
     std::map<int, float>::iterator posIter = altReadCount->find(targetPos);
     if( posIter != altReadCount->end() ){
-        return (*altReadCount)[targetPos];
+        return posIter->second;
     }
     return 0;
 }
@@ -303,15 +303,15 @@ void VairiantGraph::edgeConnectResult(){
     // Visit all position and assign SNPs to haplotype.
     // Avoid recording duplicate information,
     // only one of the two alleles needs to be used for each SNP
-    for(std::map<int,ReadBaseMap*>::iterator variantIter = totalVariantInfo->begin() ; variantIter != totalVariantInfo->end() ; variantIter++ ){
+    for(auto variantIter = variantPositions.begin() ; variantIter != variantPositions.end() ; variantIter++ ){
         // check next position
-        std::map<int,ReadBaseMap*>::iterator nextNodeIter = std::next(variantIter, 1);
-        if( nextNodeIter == totalVariantInfo->end() ){
+        auto nextNodeIter = std::next(variantIter, 1);
+        if( nextNodeIter == variantPositions.end() ){
              break;
         }
         
-        currPos = variantIter->first;
-        nextPos = nextNodeIter->first;
+        currPos = (*variantIter);
+        nextPos = (*nextNodeIter);
         
         // There should not be a large distance between any two variants, 
         // with the default being a distance of 300000bp, equivalent to one centromere length.
@@ -361,7 +361,7 @@ void VairiantGraph::edgeConnectResult(){
 	    VoteResult vote(currPos, 1); //used to store previous 20 variants' voting information
 
         // consider reads from the currnt SNP and the next (i+1)'s SNP
-        std::pair<PosAllele,PosAllele> tmp = edgeIter->second->findBestEdgePair(nextNodeIter->first, params->isONT, params->edgeThreshold, false, *variantType, vote);
+        std::pair<PosAllele,PosAllele> tmp = edgeIter->second->findBestEdgePair((*nextNodeIter), params->isONT, params->edgeThreshold, false, *variantType, vote);
 
 	    // if the target is a danger indel change its weight to 0.1
 	    if ( (*variantType)[currPos] == 4 ) {
@@ -375,30 +375,30 @@ void VairiantGraph::edgeConnectResult(){
                 // record the haplotype resut of next (i+1)'s SNP
                 if( (*hpResult)[currPos] == 1 ){
                     if( tmp.first.second == 1 ){
-                        (*hpCountMap)[nextNodeIter->first][1].push_back(currPos);
-		                (*hpCountMap2)[nextNodeIter->first][1] += vote.weight;
+                        (*hpCountMap)[(*nextNodeIter)][1].push_back(currPos);
+		                (*hpCountMap2)[(*nextNodeIter)][1] += vote.weight;
                         vote.hap = 1 ;
                     }
                     if( tmp.first.second == 2 ){
-                        (*hpCountMap)[nextNodeIter->first][2].push_back(currPos);
-		                (*hpCountMap2)[nextNodeIter->first][2] += vote.weight;
+                        (*hpCountMap)[(*nextNodeIter)][2].push_back(currPos);
+		                (*hpCountMap2)[(*nextNodeIter)][2] += vote.weight;
 		                vote.hap = 2 ;
                     }
                 }
                 if( (*hpResult)[currPos]==2 ){
                     if( tmp.first.second == 1 ){
-                        (*hpCountMap)[nextNodeIter->first][2].push_back(currPos);
-                        (*hpCountMap2)[nextNodeIter->first][2] += vote.weight;
+                        (*hpCountMap)[(*nextNodeIter)][2].push_back(currPos);
+                        (*hpCountMap2)[(*nextNodeIter)][2] += vote.weight;
                         vote.hap = 2 ;
                     }
                     if( tmp.first.second == 2 ){
-                        (*hpCountMap)[nextNodeIter->first][1].push_back(currPos);
-                        (*hpCountMap2)[nextNodeIter->first][1] += vote.weight;
+                        (*hpCountMap)[(*nextNodeIter)][1].push_back(currPos);
+                        (*hpCountMap2)[(*nextNodeIter)][1] += vote.weight;
                         vote.hap = 1 ;
                     }
                 }
 
-                (*hpCountMap3)[nextNodeIter->first].push_back( vote );
+                (*hpCountMap3)[(*nextNodeIter)].push_back( vote );
 
                 if( params->generateDot ){
                     std::string e1 = std::to_string(currPos+1) + ".1\t->\t" + std::to_string(tmp.first.first+1) + "." + std::to_string(tmp.first.second);
@@ -408,10 +408,10 @@ void VairiantGraph::edgeConnectResult(){
                     dotResult.push_back(e2);
                 }
                 
-                lastConnectPos = nextNodeIter->first;
+                lastConnectPos = (*nextNodeIter);
             }
             nextNodeIter++;
-            if( nextNodeIter == totalVariantInfo->end() ){
+            if( nextNodeIter == variantPositions.end() ){
                 break;
             }
         }
@@ -476,7 +476,6 @@ void VairiantGraph::edgeConnectResult(){
 VairiantGraph::VairiantGraph(std::string &in_ref, PhasingParameters &in_params, std::string &in_chrName){
     params=&in_params;
     ref=&in_ref;
-    totalVariantInfo = new std::map<int,ReadBaseMap*>;
     edgeList = new std::map<int,VariantEdge*>;
     bkResult = new std::map<PosAllele,int>;
     subNodeHP = new std::map<PosAllele,int>;
@@ -499,11 +498,6 @@ void VairiantGraph::destroy(){
         delete edgeIter->second->alt;
     }
     
-    for( auto variantIter = totalVariantInfo->begin() ; variantIter != totalVariantInfo->end() ; variantIter++ ){
-        delete variantIter->second;
-    }
-    
-    delete totalVariantInfo;
     delete edgeList;
     delete bkResult;
     delete subNodeHP;
@@ -834,14 +828,7 @@ void VairiantGraph::addEdge(std::vector<ReadVariant> &in_readVariant, Clip &clip
 
             //tmpRead.variantVec.push_back(variant);
             
-            // Each position will record the included reads and their corresponding base qualities.
-            auto variantIter = totalVariantInfo->find(variant.position);
-            
-            if( variantIter == totalVariantInfo->end() ){
-                (*totalVariantInfo)[variant.position] = new ReadBaseMap();
-            }
-            
-            (*(*totalVariantInfo)[variant.position])[(*readIter).read_name] = variant.quality;
+            variantPositions.insert(variant.position);
         }
     }   
 
@@ -854,18 +841,18 @@ void VairiantGraph::addEdge(std::vector<ReadVariant> &in_readVariant, Clip &clip
         
         while(variant1Iter != readIter->second.variantVec.end() && variant2Iter != readIter->second.variantVec.end() ){
             // create new edge if not exist
-            std::map<int,VariantEdge*>::iterator posIter = edgeList->find(variant1Iter->position);
-            if( posIter == edgeList->end() )
-                (*edgeList)[variant1Iter->position] = new VariantEdge(variant1Iter->position);
+            VariantEdge *&edge = (*edgeList)[variant1Iter->position];
+            if( edge == nullptr )
+                edge = new VariantEdge(variant1Iter->position);
 
             // add edge process
             for(int nextNode = 0 ; nextNode < params->connectAdjacent; nextNode++){
                 // this allele support ref
                 if( variant1Iter->allele == 0 )
-                    (*edgeList)[variant1Iter->position]->ref->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).first,params->baseQuality,params->edgeWeight);
+                    edge->ref->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).first,params->baseQuality,params->edgeWeight);
                 // this allele support alt
                 if( (*variant1Iter).allele == 1 )
-                    (*edgeList)[variant1Iter->position]->alt->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).first,params->baseQuality,params->edgeWeight);
+                    edge->alt->addSubEdge((*variant1Iter).quality, (*variant2Iter),(*readIter).first,params->baseQuality,params->edgeWeight);
                 
                 // next snp
                 variant2Iter++;
@@ -986,8 +973,8 @@ void VairiantGraph::readCorrection(){
     
     std::map<int,std::map<int,int>> hpAllele;
     // reassign allele result
-    for(auto variantIter = totalVariantInfo->begin() ; variantIter != totalVariantInfo->end() ; variantIter++ ){
-        int position = variantIter->first;
+    for(auto variantIter = variantPositions.begin() ; variantIter != variantPositions.end() ; variantIter++ ){
+        int position = (*variantIter);
         PosAllele refAllele = std::make_pair(position, 1);
         PosAllele altAllele = std::make_pair(position, 2);
         
@@ -1049,12 +1036,12 @@ void VairiantGraph::writingDotFile(std::string dotPrefix){
 void VairiantGraph::exportResult(std::string chrName, PhasingResult &result){
     
     // loop all position
-    for( std::map<int,ReadBaseMap*>::iterator variantIter = totalVariantInfo->begin() ; variantIter != totalVariantInfo->end() ; variantIter++ ){
+    for( auto variantIter = variantPositions.begin() ; variantIter != variantPositions.end() ; variantIter++ ){
         
         PhasingElement tmp;
         
-        PosAllele ref = std::make_pair( variantIter->first , 1);
-        PosAllele alt = std::make_pair( variantIter->first , 2);
+        PosAllele ref = std::make_pair( (*variantIter) , 1);
+        PosAllele alt = std::make_pair( (*variantIter) , 2);
         
         std::map<PosAllele,int>::iterator psRefIter = bkResult->find(ref);
         std::map<PosAllele,int>::iterator psAltIter = bkResult->find(alt);
@@ -1070,7 +1057,7 @@ void VairiantGraph::exportResult(std::string chrName, PhasingResult &result){
             continue;
         
         if( tmp.block != 0){
-            std::string key = chrName + "_" + std::to_string( variantIter->first );
+            std::string key = chrName + "_" + std::to_string( (*variantIter) );
             result[key] = tmp;
         }
     }
@@ -1081,7 +1068,7 @@ std::map<std::string,int>* VairiantGraph::getReadHP(){
 }
 
 int VairiantGraph::totalNode(){
-    return totalVariantInfo->size();
+    return variantPositions.size();
 }
 
 void VairiantGraph::phasingProcess(){
@@ -1090,7 +1077,7 @@ void VairiantGraph::phasingProcess(){
     // a second layer map as the value. The second layer map uses the destination coordinate as the key and
     // stores the number of support read as values. (There is another map used for debugging purposes that
     // treats the read name vector as a value.) The method begins by visiting the coordinates covered by each 
-    // read and recording this information in 'totalVariantInfo.' Subsequently, it connects the coordinates contained 
+    // read and recording this information in 'variantPositions'. Subsequently, it connects the coordinates contained
     // in each read on the graph. Specifically, each coordinate is connected to the next N coordinates in a 
     // linear fashion.
     this->edgeConnectResult();
