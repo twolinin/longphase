@@ -4,6 +4,7 @@
 #include "Util.h"
 #include "ParsingBam.h"
 #include "PhasingProcess.h"
+#include <set>
 
 
 typedef std::pair<int, int> PosAllele;
@@ -82,7 +83,7 @@ class SubEdge{
         
         void destroy();
         
-        void addSubEdge(int currentQuality, Variant connectNode, std::string readName, int baseQuality, double edgeWeight);
+        void addSubEdge(int currentQuality, Variant connectNode, const std::string &readName, int baseQuality, double edgeWeight);
         std::pair<float,float> BestPair(int targetPos);
         float getRefReadCount(int targetPos);
         float getAltReadCount(int targetPos);        
@@ -152,9 +153,8 @@ class VairiantGraph{
         // position, edge
         std::map<int,VariantEdge*> *edgeList;
 
-        // Each position will record the included reads and their corresponding base qualities.
-        // position, < read name, quality>
-        std::map<int,ReadBaseMap*> *totalVariantInfo;
+        // Variant positions in genomic order.
+        std::set<int> variantPositions;
         // position, type < 0=SNP 1=SV 2=MOD 3=INDEL >
         std::map<int,int> *variantType;
 
