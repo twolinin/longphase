@@ -233,19 +233,31 @@ void GNNModule::parseDotFiles() {
                 std::ifstream fin(path);
                 if (!fin.is_open()) continue;
 
-                std::vector<DotEdge> local_edges;
+                // phase writes all edges of a source position together, so
+                // collect one run at a time and store it at its exact size
+                // instead of buffering the whole chromosome.
+                auto& em = dot_edges_[ch];
+                std::vector<DotEdge> run;
+                auto flush = [&]() {
+                    if (run.empty()) return;
+                    auto& v = em[run.front().src_pos];
+                    if (v.empty()) v.assign(run.begin(), run.end());
+                    else v.insert(v.end(), run.begin(), run.end());
+                    run.clear();
+                };
+                int n_edges = 0;
                 std::string line;
                 while (std::getline(fin, line)) {
                     int sp, sa, dp, da; float w;
                     if (std::sscanf(line.c_str(), "%d.%d -> %d.%d [label=%f]",
                                     &sp, &sa, &dp, &da, &w) == 5) {
-                        local_edges.push_back({sp-1, sa, dp-1, da, w});
+                        if (!run.empty() && run.front().src_pos != sp-1) flush();
+                        run.push_back({sp-1, sa, dp-1, da, w});
+                        ++n_edges;
                     }
                 }
-                // Index by src_pos
-                auto& em = dot_edges_[ch];
-                for (auto& e : local_edges) em[e.src_pos].push_back(e);
-                total += (int)local_edges.size();
+                flush();
+                total += n_edges;
             }
         });
     }
