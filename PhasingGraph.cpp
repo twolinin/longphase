@@ -4,7 +4,7 @@
 
 namespace {
 
-void appendDotEdges(std::vector<std::string>& outDotResult, int currPos, const std::pair<PosAllele, PosAllele>& edgePair, float h1Weight, float h2Weight){
+void appendDotEdges(std::string& outDotResult, int currPos, const std::pair<PosAllele, PosAllele>& edgePair, float h1Weight, float h2Weight){
     // The label on each edge is the accumulated vote weight seen at
     // currPos on that haplotype (HP1 for the .1 edge, HP2 for .2).
     // These labels are new in v2.1 (earlier versions wrote unlabelled
@@ -13,8 +13,10 @@ void appendDotEdges(std::vector<std::string>& outDotResult, int currPos, const s
     std::string refEdge = std::to_string(currPos + 1) + ".1\t->\t" + std::to_string(edgePair.first.first + 1) + "." + std::to_string(edgePair.first.second) + "\t[label=" + std::to_string(h1Weight) + "]";
     std::string altEdge = std::to_string(currPos + 1) + ".2\t->\t" + std::to_string(edgePair.second.first + 1) + "." + std::to_string(edgePair.second.second) + "\t[label=" + std::to_string(h2Weight) + "]";
 
-    outDotResult.push_back(refEdge);
-    outDotResult.push_back(altEdge);
+    outDotResult += refEdge;
+    outDotResult += '\n';
+    outDotResult += altEdge;
+    outDotResult += '\n';
 }
 
 void recordVoteForNextPosition(
@@ -52,10 +54,6 @@ void recordVoteForNextPosition(
 //SubEdge
 
 SubEdge::SubEdge():readCount(0){ 
-    refRead = new std::map<int, std::vector<std::string> >;
-    altRead = new std::map<int, std::vector<std::string> >;
-    refQuality = new std::map<int, int>;
-    altQuality = new std::map<int, int>;
     refReadCount = new std::map<int, float>;
     altReadCount = new std::map<int, float>;
 }
@@ -64,10 +62,6 @@ SubEdge::~SubEdge(){
 }
 
 void SubEdge::destroy(){
-    delete refRead;
-    delete altRead;
-    delete refQuality;
-    delete altQuality;
     delete refReadCount;
     delete altReadCount;
 }
@@ -159,46 +153,6 @@ std::vector<std::pair<int,int>> SubEdge::getConnectPos(){
         result.push_back( std::make_pair( (*edgeIter).first, 1 ) );
     }
     return result;
-}
-
-int SubEdge::getQuality(PosAllele targetPos){
-    // target is Ref allele
-    if( targetPos.second == 1 ){
-        std::map<int, int>::iterator qIter = refQuality->find(targetPos.first);
-        if( qIter == refQuality->end() )
-            return 0;
-        else
-            return (*refQuality)[targetPos.first];
-    }
-    // target is Alt allele
-    if( targetPos.second == 2 ){
-        std::map<int, int>::iterator qIter = altQuality->find(targetPos.first);
-        if( qIter == altQuality->end() )
-            return 0;
-        else
-            return (*altQuality)[targetPos.first];
-    }
-    return 0;
-}
-
-int SubEdge::getAvgQuality(PosAllele targetPos){
-    // target is Ref allele
-    if( targetPos.second == 1 ){
-        std::map<int, int>::iterator qIter = refQuality->find(targetPos.first);
-        if( qIter == refQuality->end() )
-            return 0;
-        else
-            return (*refQuality)[targetPos.first]/(*refReadCount)[targetPos.first];
-    }
-    // target is Alt allele
-    if( targetPos.second == 2 ){
-        std::map<int, int>::iterator qIter = altQuality->find(targetPos.first);
-        if( qIter == altQuality->end() )
-            return 0;
-        else
-            return (*altQuality)[targetPos.first]/(*altReadCount)[targetPos.first];
-    }
-    return 0;
 }
 
 VoteResult::VoteResult( int currPos, float variantweight ) {
@@ -333,7 +287,7 @@ std::pair<float,float> VairiantGraph::Onelongcase( std::vector<VoteResult> vote 
 }
 
 //VairiantGraph
-void VairiantGraph::scanVariantsAndBuildBlocks(std::map<int, int>& hpResult, PhasedBlocks& phasedBlocks, std::vector<std::string>& outDotResult){
+void VairiantGraph::scanVariantsAndBuildBlocks(std::map<int, int>& hpResult, PhasedBlocks& phasedBlocks, std::string& outDotResult){
     std::map<int, std::vector<VoteResult> > hpCountMap3;
     std::map<int, std::map<int,float> > hpCountMap2;
     int blockStart = -1;
@@ -1057,9 +1011,7 @@ void VairiantGraph::writingDotFile(std::string dotPrefix){
     else{
         resultVcf << "digraph G {\n";
 
-        for(auto edge : dotResult){
-            resultVcf << edge << "\n";
-        }
+        resultVcf << dotResult;
         resultVcf << "}\n";
     }
     return;

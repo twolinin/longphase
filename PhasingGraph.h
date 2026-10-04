@@ -64,14 +64,6 @@ class SubEdge{
     
     private:
         int readCount;
-        // Edge information. The vector store next pos
-        // < next position, read name >
-        std::map<int, std::vector<std::string> > *refRead;
-        std::map<int, std::vector<std::string> > *altRead;
-        // sum of edge pair quality, pos1 quality + pos2 quality
-        // < next position, quality sum >
-        std::map<int, int> *refQuality;
-        std::map<int, int> *altQuality;
         // < next position, read count >
         std::map<int, float> *refReadCount;
         std::map<int, float> *altReadCount;
@@ -90,9 +82,6 @@ class SubEdge{
         
         std::vector<std::string> showEdge(std::string message);
         std::vector<std::pair<int,int>> getConnectPos();
- 
-        int getQuality(PosAllele targetPos);
-        int getAvgQuality(PosAllele targetPos);
 
 };
 
@@ -146,7 +135,7 @@ class VairiantGraph{
         std::string *chrName;
         PhasingParameters *params;
         std::string *ref;
-        std::vector<std::string> dotResult;
+        std::string dotResult;
         std::vector<ReadVariant> *readVariant;
         
         // By default, a Map in C++ is sorted in increasing order based on its key.
@@ -193,7 +182,7 @@ class VairiantGraph{
         void scanVariantsAndBuildBlocks(
             std::map<int, int>& hpResult,
             PhasedBlocks& phasedBlocks,
-            std::vector<std::string>& outDotResult);
+            std::string& outDotResult);
 
         void materializeBlockResults(
             const std::map<int, int>& hpResult,
