@@ -106,7 +106,7 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
         }
 
 	    // fetch chromosome string
-        std::string chr_reference = fastaParser.chrString.at(*chrIter);
+        std::string &chr_reference = fastaParser.chrString.at(*chrIter);
         // create a bam parser object and prepare to fetch varint from each vcf file
 	    BamParser *bamParser = new BamParser((*chrIter), params.bamFile, snpFile, svFile, modFile, chr_reference);
         // use to store variant

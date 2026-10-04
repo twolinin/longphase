@@ -138,7 +138,7 @@ void BaseVairantParser::unCompressParser(std::string &variantFile) {
 
 void BaseVairantParser::compressInput(std::string variantFile,
                                       std::string resultFile,
-                                      PhasingResult phasingResult) {
+                                      PhasingResult &phasingResult) {
   if (variantFile == "") return;
   std::ofstream resultVcf(resultFile);
   if (!resultVcf.is_open()) {
@@ -153,7 +153,7 @@ void BaseVairantParser::compressInput(std::string variantFile,
 
 void BaseVairantParser::unCompressInput(std::string variantFile,
                                         std::string resultFile,
-                                        PhasingResult phasingResult) {
+                                        PhasingResult &phasingResult) {
   std::ifstream originVcf(variantFile);
   std::ofstream resultVcf(resultFile);
 
@@ -175,7 +175,7 @@ void BaseVairantParser::unCompressInput(std::string variantFile,
 
 void BaseVairantParser::dispatchWriteResult(const std::string &inputFile,
                                             const std::string &outputFile,
-                                            PhasingResult phasingResult) {
+                                            PhasingResult &phasingResult) {
   if (inputFile.find("gz") != std::string::npos)
     compressInput(inputFile, outputFile, phasingResult);
   else if (inputFile.find("vcf") != std::string::npos)
@@ -502,7 +502,7 @@ int SnpParser::getLastSNP(std::string chrName) {
   return (*lastVariantIter).first;
 }
 
-void SnpParser::writeResult(PhasingResult phasingResult) {
+void SnpParser::writeResult(PhasingResult &phasingResult) {
   dispatchWriteResult(params->snpFile, params->resultPrefix + ".vcf",
                       phasingResult);
 }
@@ -840,7 +840,7 @@ std::map<int, std::map<int, bool>> SVParser::getVariants(std::string chrName) {
   return targetVariants;
 }
 
-void SVParser::writeResult(PhasingResult phasingResult) {
+void SVParser::writeResult(PhasingResult &phasingResult) {
   dispatchWriteResult(params->svFile, params->resultPrefix + "_SV.vcf",
                       phasingResult);
 }
@@ -1503,7 +1503,7 @@ METHParser::METHParser(PhasingParameters &in_params, SnpParser &in_snpFile,
   }
 }
 
-void METHParser::writeResult(PhasingResult phasingResult) {
+void METHParser::writeResult(PhasingResult &phasingResult) {
   dispatchWriteResult(params->modFile, params->resultPrefix + "_mod.vcf",
                       phasingResult);
 }

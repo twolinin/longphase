@@ -51,12 +51,12 @@ public:
   virtual void parserProcess(std::string &input) = 0;
   // output parser
   void compressInput(std::string variantFile, std::string resultFile,
-                     PhasingResult phasingResult);
+                     PhasingResult &phasingResult);
   void unCompressInput(std::string variantFile, std::string resultFile,
-                       PhasingResult phasingResult);
+                       PhasingResult &phasingResult);
   void dispatchWriteResult(const std::string &inputFile,
                            const std::string &outputFile,
-                           PhasingResult phasingResult);
+                           PhasingResult &phasingResult);
   void writeLine(std::string &input, bool &ps_def,
                  std::ofstream &resultVcf,
                  PhasingResult &phasingResult);
@@ -121,7 +121,7 @@ public:
 
   int getLastSNP(std::string chrName);
 
-  void writeResult(PhasingResult phasingResult);
+  void writeResult(PhasingResult &phasingResult);
 
   bool findSNP(std::string chr, int posistion);
 
@@ -153,7 +153,7 @@ public:
 
   std::map<int, std::map<int, bool>> getVariants(std::string chrName);
 
-  void writeResult(PhasingResult phasingResult);
+  void writeResult(PhasingResult &phasingResult);
 
   bool findSV(std::string chr, int posistion);
 };
@@ -191,7 +191,7 @@ public:
   METHParser(PhasingParameters &params, SnpParser &snpFile, SVParser &svFile);
   ~METHParser();
 
-  void writeResult(PhasingResult phasingResult);
+  void writeResult(PhasingResult &phasingResult);
 };
 
 struct Alignment {
