@@ -41,16 +41,18 @@ FastaParser::FastaParser(std::string fastaFile,
     // ref_len is a return value that is length of retrun string
     int ref_len = 0;
 
-    // read file
-    std::string chr_info(faidx_fetch_seq(fai, (*iter).c_str(), 0,
-                                         last_pos.at(index) + 5, &ref_len));
+    // read file; faidx_fetch_seq returns a malloc'd buffer owned by us
+    char *seq = faidx_fetch_seq(fai, (*iter).c_str(), 0,
+                                last_pos.at(index) + 5, &ref_len);
     if (ref_len == 0) {
       std::cout << "nothing in reference file \n";
     }
 
     // update map
-    chrString[(*iter)] = chr_info;
+    chrString[(*iter)] = seq ? std::string(seq, ref_len) : std::string();
+    free(seq);
   }
+  fai_destroy(fai);
 }
 
 FastaParser::~FastaParser() {}

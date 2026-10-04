@@ -537,6 +537,7 @@ void VairiantGraph::destroy(){
         edgeIter->second->alt->destroy();
         delete edgeIter->second->ref;
         delete edgeIter->second->alt;
+        delete edgeIter->second;
     }
     
     delete edgeList;
