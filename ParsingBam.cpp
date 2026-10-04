@@ -269,8 +269,9 @@ void removePeHapFromInfoField(std::string &infoField) {
 
 // Format the PE/H1/H2 fragment and either replace a "." INFO field or
 // append with a leading ';' to an existing INFO field. Any PE/H1/H2
-// already present are removed first so each key appears only once. Shared by SNP,
-// SV, and MOD writers so all three VCFs use the exact same formatting.
+// already present are removed first so each key appears only once.
+// Shared by SNP, SV, and MOD writers so all three VCFs use the exact
+// same formatting.
 void appendPeHapInfoToInfoField(std::string &infoField,
                                 const PhasingElement &pe) {
   removePeHapFromInfoField(infoField);
@@ -279,7 +280,11 @@ void appendPeHapInfoToInfoField(std::string &infoField,
   buf << "PE=" << pe.entropy
       << ";H1=" << pe.h1
       << ";H2=" << pe.h2;
-  if (infoField == ".") {
+  // modcall ends INFO with ';', so drop trailing separators to avoid
+  // writing an empty entry (";;PE=...")
+  while (!infoField.empty() && infoField.back() == ';')
+    infoField.pop_back();
+  if (infoField.empty() || infoField == ".") {
     infoField = buf.str();
   } else {
     infoField += ";" + buf.str();
