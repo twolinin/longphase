@@ -533,7 +533,10 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
                       fastaParser.chrString.at(chr), tagResult);
     }
 
-    writeUnmappedTail(in, out, bamHdr, idx);
+    // Unmapped reads have no coordinate, so they belong only to a
+    // whole-genome run; with --region they would be added to every region.
+    if (params.region.empty())
+        writeUnmappedTail(in, out, bamHdr, idx);
 
     if(tagResult!=NULL){
         (*tagResult).close();
