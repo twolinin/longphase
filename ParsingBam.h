@@ -97,6 +97,8 @@ private:
 
   // Track the position of filtered indels
   std::map<std::string, std::set<int>> filteredIndelPositions;
+  // <prefix>_removed_indels.log, open only when --indelQuality is set
+  std::ofstream removedIndelsLog;
 
   // override input parser
   void parserProcess(std::string &input);

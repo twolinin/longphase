@@ -324,6 +324,15 @@ SnpParser::SnpParser(PhasingParameters &in_params) {
 
   params = &in_params;
 
+  // Initialize removed indels log file
+  if (params->phaseIndel && params->indelQuality > 0) {
+    std::string logFileName = params->resultPrefix + "_removed_indels.log";
+    removedIndelsLog.open(logFileName.c_str());
+    if (removedIndelsLog.is_open()) {
+      removedIndelsLog << "#CHROM\tPOS\tREF\tALT\tQUAL\n";
+    }
+  }
+
   // open vcf file
   htsFile *inf = bcf_open(params->snpFile.c_str(), "r");
   // read header
@@ -410,6 +419,17 @@ SnpParser::SnpParser(PhasingParameters &in_params) {
         if (std::isnan(qual)) {
           qual = 0.0;
         }
+        if (params->indelQuality > 0 && qual < params->indelQuality) {
+          if (removedIndelsLog.is_open()) {
+            removedIndelsLog << chr << "\t" << (variantPos + 1) << "\t"
+                             << tmp.Ref << "\t" << tmp.Alt << "\t"
+                             << (std::isnan(rec->qual) ? "." : std::to_string(rec->qual))
+                             << "\n";
+          }
+          // Record the position of filtered indels (0-based)
+          filteredIndelPositions[chr].insert(variantPos);
+          continue;
+        }
 
         // prevent the MAVs calling error which makes the GT=0/1
         if (rec->d.allele[1][tmp.Alt.size() + 1] != '\0') {
@@ -423,7 +443,12 @@ SnpParser::SnpParser(PhasingParameters &in_params) {
   }
 }
 
-SnpParser::~SnpParser() { delete chrVariant; }
+SnpParser::~SnpParser() {
+  if (removedIndelsLog.is_open()) {
+    removedIndelsLog.close();
+  }
+  delete chrVariant;
+}
 
 std::map<int, SnpVariant> SnpParser::getVariants(std::string chrName) {
   std::map<int, SnpVariant> targetVariants;
