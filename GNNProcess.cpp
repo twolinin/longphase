@@ -149,7 +149,15 @@ void GNNModule::loadModel() {
 // ═══════════════════════════════════════════════════════════
 void GNNModule::parseVCF() {
     htsFile* fp = hts_open(params_.vcf_path.c_str(), "r");
+    if (!fp) {
+        std::cerr << "[GNN] ERROR: cannot open " << params_.vcf_path << "\n";
+        std::exit(EXIT_FAILURE);
+    }
     bcf_hdr_t* hdr = bcf_hdr_read(fp);
+    if (!hdr) {
+        std::cerr << "[GNN] ERROR: cannot read VCF header of " << params_.vcf_path << "\n";
+        std::exit(EXIT_FAILURE);
+    }
     int pe_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "PE");
     if (pe_id < 0 || !bcf_hdr_idinfo_exists(hdr, BCF_HL_INFO, pe_id)) {
         std::cerr << "[GNN] WARNING: " << params_.vcf_path
@@ -765,8 +773,17 @@ void GNNModule::writeOutputVCF(const std::string& in_path, const std::string& ou
 // ═══════════════════════════════════════════════════════════
 void GNNModule::parseSecondaryVCF(const std::string& path, GnnVariantType vtype) {
     htsFile* fp = hts_open(path.c_str(), "r");
-    if (!fp) { std::cerr << "  WARNING: cannot open " << path << "\n"; return; }
+    // Fatal, like parseVCF: writeOutputVCF re-reads this file and would
+    // fail anyway, only after the whole GNN pass.
+    if (!fp) {
+        std::cerr << "[GNN] ERROR: cannot open " << path << "\n";
+        std::exit(EXIT_FAILURE);
+    }
     bcf_hdr_t* hdr = bcf_hdr_read(fp);
+    if (!hdr) {
+        std::cerr << "[GNN] ERROR: cannot read VCF header of " << path << "\n";
+        std::exit(EXIT_FAILURE);
+    }
     bcf1_t* rec = bcf_init();
     int n = 0;
     while (bcf_read(fp, hdr, rec) == 0) {
