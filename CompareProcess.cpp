@@ -3,8 +3,11 @@
 //  -------------------------------------------------------------------
 //  LongPhase "compare" sub-command – processing core.
 //
-//  Adapted by Claude (Anthropic) from WhatsHap's compare module:
-//      https://github.com/whatshap/whatshap/blob/main/whatshap/cli/compare.py
+//  An independent C++ implementation; the metrics follow the definitions
+//  used by whatshap compare so that results are directly comparable:
+//      https://github.com/whatshap/whatshap
+//  Phased VCFs are parsed with htslib and the per-block switch and
+//  Hamming computations run in parallel.
 //
 //  Implementation notes
 //  --------------------
@@ -14,7 +17,7 @@
 //  * Variants in the intersection inherit their phase-set ID from each
 //    VCF; blocks are identified by pairing the two PS values, i.e. the
 //    intersection is taken over (ps_truth, ps_query) tuples
-//    (same as WhatsHap).
+//    (the same block definition as whatshap compare).
 //  * For every intersection block we compute in parallel via OpenMP
 //    (matching the rest of the longphase codebase, which uses
 //    #pragma omp parallel for over chromosomes):
@@ -22,7 +25,8 @@
 //        - SNV-only switch errors      (same but after filtering SNVs)
 //        - minimum block-wise Hamming  (min over the two possible hap
 //                                       assignments, diploid)
-//        - switch / flip decomposition (WhatsHap compute_switch_flips)
+//        - switch / flip decomposition (as defined by whatshap's
+//                                       compute_switch_flips)
 //  * Block span statistics are computed on the QUERY VCF, chromosome by
 //    chromosome.  N50 is over block spans in bp.
 //  * At the bottom of the TSV we emit the two summary lines requested
@@ -246,7 +250,8 @@ static inline int hammingStr(const std::string& a, const std::string& b)
     return d;
 }
 
-// WhatsHap's compute_switch_flips (diploid, hap 0 only).
+// Switch / flip decomposition, following the definition of whatshap's
+// compute_switch_flips (diploid, hap 0 only).
 // Returns {switches, flips}.
 static std::pair<int,int> computeSwitchFlips(const std::string& p0,
                                              const std::string& p1)
@@ -330,8 +335,8 @@ bool CompareProcess::loadVcf(const std::string& path,
         // Must have REF + at least one ALT
         if (rec->n_allele < 2) continue;
 
-        // We only look at the first ALT (diploid bi-allelic focus, as
-        // WhatsHap does in the default configuration).
+        // We only look at the first ALT (diploid bi-allelic focus, the
+        // same scope as whatshap compare's default configuration).
         const char* ref = rec->d.allele[0];
         const char* alt = rec->d.allele[1];
         VariantRecord v;
@@ -601,8 +606,8 @@ ChromResult CompareProcess::compareChromosome(
         }
 
         // -- BED records: emit one per position where the two
-        //    switch encodings disagree (adapted from WhatsHap
-        //    BedCreator.records) ------------------------------ //
+        //    switch encodings disagree (same records as whatshap's
+        //    BedCreator) ------------------------------------- //
         if (wantBed) {
             for (size_t k = 0; k < sT.size(); ++k) {
                 if (sT[k] == sQ[k]) continue;

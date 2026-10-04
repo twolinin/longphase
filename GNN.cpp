@@ -95,6 +95,27 @@ static int countDotFiles(const std::string& prefix)
     return n;
 }
 
+// Normalise a path for comparison: drop "./" segments and repeated
+// slashes, so result.vcf and ./result.vcf compare equal.
+static std::string normalizePath(const std::string& path)
+{
+    std::string out;
+    size_t i = 0;
+    while (i < path.size()) {
+        if (path[i] == '/') {
+            if (out.empty() || out.back() != '/') out += '/';
+            ++i;
+        }
+        else if (path.compare(i, 2, "./") == 0 && (out.empty() || out.back() == '/')) {
+            i += 2;
+        }
+        else {
+            out += path[i++];
+        }
+    }
+    return out;
+}
+
 // Strip a trailing .vcf / .vcf.gz / .VCF from a path
 static std::string stripVcfSuffix(const std::string& path)
 {
@@ -196,6 +217,35 @@ void GNNOptions(int argc, char** argv)
                   << opt::window
                   << "\nplease check --window=NUM\n";
         die = true;
+    }
+    else if (opt::window > 63) {
+        std::cerr << SUBPROGRAM " invalid window. value: "
+                  << opt::window
+                  << "\nthe maximum is 63: each variant adds two graph nodes and the"
+                  << " model accepts at most 256, so (2*window+1)*2 <= 256."
+                  << "\nplease check --window=NUM\n";
+        die = true;
+    }
+
+    // ── Refuse to overwrite an input file ────────────────
+    {
+        const std::string outputs[] = {
+            opt::resultPrefix + ".vcf",
+            opt::resultPrefix + "_SV.vcf",
+            opt::resultPrefix + "_mod.vcf"
+        };
+        const std::string inputs[] = { opt::snpFile, opt::svFile, opt::modFile };
+        for (const std::string& in : inputs) {
+            if (in.empty()) continue;
+            for (const std::string& out : outputs) {
+                if (normalizePath(in) == normalizePath(out)) {
+                    std::cerr << SUBPROGRAM ": output file " << out
+                              << " would overwrite input file " << in << ".\n"
+                              << "please choose a different prefix with -o, --out-prefix=NAME\n";
+                    die = true;
+                }
+            }
+        }
     }
 
     // ── Resolve DOT prefix ───────────────────────────────

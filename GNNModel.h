@@ -3,8 +3,10 @@
 // The weights are compiled in via GNNWeights.h, so no model file is needed at
 // run time. The computation matches the exported ONNX graph. Everything is
 // dense:
-// the adjacency is [N, N] and the edge features [N, N, 7], so no sparse
-// scatter primitives are required.
+// the adjacency is [N, N] and the edge features [N, N, 6], so no sparse
+// scatter primitives are required. (An earlier model had a 7th edge
+// feature, the reverse-edge weight; it was dropped because it was always
+// identical to the forward weight.)
 //
 // Memory is O(N^2 * heads) for the attention scores, which is fine for the
 // windows used here (tens to a couple of hundred nodes) but would need
@@ -40,7 +42,7 @@ struct Tensor {
 };
 
 struct LayerWeights {
-    Tensor lin_l_w, lin_r_w, edge_enc;      // [128,128] [128,128] [7,128]
+    Tensor lin_l_w, lin_r_w, edge_enc;      // [128,128] [128,128] [6,128]
     std::vector<float> lin_l_b, lin_r_b, att, mpnn_b;
     Tensor q_w, k_w, v_w, o_w;
     std::vector<float> q_b, k_b, v_b, o_b;
@@ -57,7 +59,7 @@ public:
 
     // node_feat  [n * 31]     row-major
     // adjacency  [n * n]      adjacency(i,j) > 0.5 means an edge j -> i
-    // edge_feat  [n * n * 7]  features of that same edge
+    // edge_feat  [n * n * 6]  features of that same edge
     // returns    [n * 2]      class probabilities per node
     std::vector<float> forward(const std::vector<float>& node_feat,
                                const std::vector<float>& adjacency,

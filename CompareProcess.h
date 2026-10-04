@@ -3,8 +3,11 @@
 //  -------------------------------------------------------------------
 //  LongPhase "compare" sub-command – processing core.
 //
-//  Adapted by Claude (Anthropic) from WhatsHap's compare module:
-//      https://github.com/whatshap/whatshap/blob/main/whatshap/cli/compare.py
+//  An independent C++ implementation; the metrics follow the definitions
+//  used by whatshap compare so that results are directly comparable:
+//      https://github.com/whatshap/whatshap
+//  Phased VCFs are parsed with htslib and the per-block switch and
+//  Hamming computations run in parallel.
 //
 //  This header declares:
 //    - CompareParameters  : holds all CLI parameters

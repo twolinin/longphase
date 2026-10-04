@@ -183,8 +183,16 @@ void BaseVairantParser::dispatchWriteResult(const std::string &inputFile,
 void BaseVairantParser::writeLine(std::string &input, bool &ps_def,
                                   std::ofstream &resultVcf,
                                   PhasingResult &phasingResult) {
-  if (input.substr(0, 2) == "##")
+  if (input.substr(0, 2) == "##") {
+    // Drop PE/H1/H2 declarations carried over from an input that was
+    // already phased by LongPhase; writePeInfoHeaders() emits the current
+    // ones, so re-phasing never produces duplicate ##INFO lines.
+    if (input.compare(0, 14, "##INFO=<ID=PE,") == 0 ||
+        input.compare(0, 14, "##INFO=<ID=H1,") == 0 ||
+        input.compare(0, 14, "##INFO=<ID=H2,") == 0)
+      return;
     writeMetaHeader(input, ps_def, resultVcf);
+  }
   else if (input.substr(0, 6) == "#CHROM" || input.substr(0, 6) == "#chrom")
     writeColumnHeader(input, ps_def, resultVcf);
   else
@@ -223,18 +231,49 @@ void BaseVairantParser::writePeInfoHeaders(std::ofstream &resultVcf) {
   // called, then never again for this parser instance. Every parser
   // (SNP, SV, MOD) shares this via inheritance.
   if (pe_def) return;
-  resultVcf << "##INFO=<ID=PE,Number=1,Type=Float,Description=\"Phasing entropy in bits (0.0=perfectly phased, 1.0=maximally ambiguous)\">\n";
+  resultVcf << "##INFO=<ID=PE,Number=1,Type=Float,Description=\"Phasing entropy in bits; 0 means either a unanimous vote or no incoming votes (block start), 1 means maximally ambiguous\">\n";
   resultVcf << "##INFO=<ID=H1,Number=1,Type=Float,Description=\"Weighted HP1 vote count\">\n";
   resultVcf << "##INFO=<ID=H2,Number=1,Type=Float,Description=\"Weighted HP2 vote count\">\n";
   pe_def = true;
 }
 
 namespace {
+// Remove existing PE=, H1= and H2= entries from an INFO field, e.g. when
+// re-phasing a VCF that LongPhase already annotated. Keys are matched
+// exactly, so fields such as H1x= are kept. An emptied field becomes ".".
+void removePeHapFromInfoField(std::string &infoField) {
+  if (infoField == ".")
+    return;
+  std::string kept;
+  bool removed = false;
+  size_t start = 0;
+  while (start <= infoField.size()) {
+    size_t end = infoField.find(';', start);
+    if (end == std::string::npos)
+      end = infoField.size();
+    std::string entry = infoField.substr(start, end - start);
+    std::string key = entry.substr(0, entry.find('='));
+    if (key == "PE" || key == "H1" || key == "H2") {
+      removed = true;
+    } else if (!entry.empty()) {
+      if (!kept.empty())
+        kept += ";";
+      kept += entry;
+    }
+    start = end + 1;
+  }
+  // Leave fields without PE/H1/H2 untouched (unphased records stay as-is)
+  if (removed)
+    infoField = kept.empty() ? "." : kept;
+}
+
 // Format the PE/H1/H2 fragment and either replace a "." INFO field or
-// append with a leading ';' to an existing INFO field. Shared by SNP,
+// append with a leading ';' to an existing INFO field. Any PE/H1/H2
+// already present are removed first so each key appears only once. Shared by SNP,
 // SV, and MOD writers so all three VCFs use the exact same formatting.
 void appendPeHapInfoToInfoField(std::string &infoField,
                                 const PhasingElement &pe) {
+  removePeHapFromInfoField(infoField);
   std::ostringstream buf;
   buf << std::fixed << std::setprecision(3);
   buf << "PE=" << pe.entropy
@@ -545,6 +584,8 @@ void SnpParser::writeDataLine(const std::string &input,
   }
   // this pos has not been phased
   else {
+    // drop stale PE/H1/H2 left over from a previously phased input
+    removePeHapFromInfoField(fields[7]);
     // add PS flag and value
     fields[8] = fields[8] + ":PS";
     fields[9] = fields[9] + ":.";
@@ -864,6 +905,8 @@ void SVParser::writeDataLine(const std::string &input,
   }
   // this pos has not been phased
   else {
+    // drop stale PE/H1/H2 left over from a previously phased input
+    removePeHapFromInfoField(fields[7]);
     // add PS flag and value
     fields[8] = fields[8] + ":PS";
     fields[9] = fields[9] + ":.";
@@ -1586,6 +1629,8 @@ void METHParser::writeDataLine(const std::string &input,
   }
   // this pos has not been phased
   else {
+    // drop stale PE/H1/H2 left over from a previously phased input
+    removePeHapFromInfoField(fields[7]);
     // add PS flag and value
     fields[8] = fields[8] + ":PS";
     fields[9] = fields[9] + ":.";

@@ -110,6 +110,10 @@ int GNNModule::run() {
         });
     }
     for (auto& t : threads) t.join();
+    if (skipped_windows_.load() > 0)
+        std::cerr << "\n[GNN] WARNING: " << skipped_windows_.load()
+                  << " windows skipped because they exceed " << MAX_NODES
+                  << " graph nodes; reduce --window\n";
 
     int total = 0, unph = 0;
     for (auto& kv_ch : predictions_)
@@ -146,6 +150,13 @@ void GNNModule::loadModel() {
 void GNNModule::parseVCF() {
     htsFile* fp = hts_open(params_.vcf_path.c_str(), "r");
     bcf_hdr_t* hdr = bcf_hdr_read(fp);
+    int pe_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "PE");
+    if (pe_id < 0 || !bcf_hdr_idinfo_exists(hdr, BCF_HL_INFO, pe_id)) {
+        std::cerr << "[GNN] WARNING: " << params_.vcf_path
+                  << " has no phasing entropy field (##INFO=<ID=PE>).\n"
+                  << "[GNN] WARNING: gnn will not correct anything. Re-generate the"
+                  << " input with 'longphase phase' from LongPhase v2.1 or later.\n";
+    }
     bcf1_t* rec = bcf_init();
     int n = 0;
     while (bcf_read(fp, hdr, rec) == 0) {
@@ -302,7 +313,7 @@ void GNNModule::processChromosome(const std::string& chrom, int tidx,
     }
     int n_var = (int)wvars.size();
     int N = n_var * 2;
-    if (N > MAX_NODES) return;
+    if (N > MAX_NODES) { skipped_windows_.fetch_add(1); return; }
 
     float max_offset = 1.0f;
     for (auto* v : wvars) {

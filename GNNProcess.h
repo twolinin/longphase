@@ -11,6 +11,7 @@
 #include <map>
 #include <cmath>
 #include <mutex>
+#include <atomic>
 #include <memory>
 
 #include "GNNModel.h"   // compiled-in model weights
@@ -80,6 +81,8 @@ private:
     std::map<std::string, std::unordered_map<int, std::vector<DotEdge>>> dot_edges_;
 
     std::mutex pred_mutex_;
+    // Windows skipped because they exceed MAX_NODES
+    std::atomic<int> skipped_windows_{0};
     std::map<std::string, std::unordered_map<int, Prediction>> predictions_;
 
     // Block splits: [chrom][pos] = new_ps_id (for variants whose block

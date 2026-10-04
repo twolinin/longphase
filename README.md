@@ -164,6 +164,18 @@ When phasing SNPs alone, LongPhase outputs the results into a VCF file. The alle
 1       24132   .       C       T       11.1    PASS    .       GT:GQ:DP:AD:VAF:PL:PS   1|0:11:63:41,17:0.269841:10,0,29:16809
 ```
 
+Since v2.1, the INFO column of every phased record (SNP, indel, SV and modification VCFs) also carries three fields describing how confidently the variant was phased. Unphased records do not have them.
+
+| Field | Description |
+|---|---|
+| `PE` | Phasing entropy in bits, computed from `H1` and `H2`. 0 means either a unanimous vote or no incoming votes (the first variant of a block); 1 means maximally ambiguous. |
+| `H1` | Weighted read votes placing this variant on haplotype 1 relative to the preceding variants of its block. |
+| `H2` | Weighted read votes placing this variant on haplotype 2. |
+
+These fields are used by the `gnn` command, which needs a VCF produced by `phase` v2.1 or later.
+
+With `--dot`, `phase` also writes one Graphviz DOT file per chromosome, named `<out-prefix>.<chrom>.dot`. Each edge links one allele of a variant (`<pos>.1` or `<pos>.2`) to an allele of a later variant and carries `[label=<weight>]`, the read-support weight of that edge. The `gnn` command reads these files.
+
 ---
 ### Output files of SNP and SV co-phasing
 When co-phasing SNPs and SVs, two VCFs (one for SNPs and one for SVs) are outputted. Similarly, the phased SVs are stored in the GT field and the block ID is in the PS field. For instance, the following example illustrates two haplotypes of five SNPs and two SVs, A\<INS\>G\<noSV\>TCC and G\<noSV\>A\<INS\>ATT, which are co-phased in the same block 382189.
@@ -194,6 +206,8 @@ The `gnn` command refines the output of `phase` with a graph neural network that
 By default, `gnn` looks for the DOT files next to the phased SNP VCF given with `-s`, using the VCF path without its `.vcf` / `.vcf.gz` extension as the prefix. For example, `-s /data/phased.vcf` reads `/data/phased.chr1.dot`, `/data/phased.chr2.dot`, and so on. Keep the DOT files in the same directory as the phased SNP VCF and do not rename either, or point to them explicitly with `--dot-prefix`. The phased SV and modification VCFs have no location requirement.
 
 Providing the reference with `-r` is strongly recommended: the model uses sequence-context features computed from the reference, and accuracy is lower without it.
+
+The model weights are compiled into the `longphase` binary. The training pipeline (data preparation, training and weight export) is not included in this repository; it is available from the authors on request.
 
 #### SNP-only command
 
@@ -359,6 +373,8 @@ Lines starting with `##` describe the query VCF as a whole, regardless of the tr
 ##Total Block Sum = 2544941127
 ```
 Lines starting with `###` summarise the comparison over the chromosomes present in both VCFs. Only these chromosomes can be assessed, so these values can differ from the `##` totals.
+`Phased_SNV` counts heterozygous SNVs that are phased in both VCFs. The denominator of `Phased_SNV(%)` is the number of heterozygous SNVs in the truth on the assessed chromosomes, including those the truth leaves unphased, so comparing a VCF with itself does not give 100%. `Phased_INDEL(%)` is defined the same way for indels.
+The metrics follow the definitions used by whatshap compare, so switch errors and Hamming distances are directly comparable with results produced by WhatsHap.
 ```
 ###Sample       Phased_SNV      Phased_SNV(%)   Phased_INDEL    Phased_INDEL(%) SNV_SW  SNV_SW(%)       Hamming_Dis.(%) No._of_Block    Block_N50(bp)   Block_Sum
 ###longphase_10x_1.vcf  1873883 78.11491        0       0.00000 2277    0.12187 6.92789 6029    939511  2480308905

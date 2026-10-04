@@ -3,11 +3,11 @@
 //  -------------------------------------------------------------------
 //  LongPhase "compare" sub-command.
 //
-//  This module was adapted by Claude (Anthropic) from the WhatsHap
-//  project, specifically:
-//      https://github.com/whatshap/whatshap/blob/main/whatshap/cli/compare.py
-//  It has been re-written in C++ with multi-thread support for the
-//  switch / Hamming computations.
+//  An independent C++ implementation; the metrics follow the definitions
+//  used by whatshap compare so that results are directly comparable:
+//      https://github.com/whatshap/whatshap
+//  Phased VCFs are parsed with htslib and the per-block switch and
+//  Hamming computations run in parallel.
 // =====================================================================
 #ifndef COMPARE_H
 #define COMPARE_H

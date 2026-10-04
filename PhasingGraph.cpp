@@ -7,8 +7,9 @@ namespace {
 void appendDotEdges(std::vector<std::string>& outDotResult, int currPos, const std::pair<PosAllele, PosAllele>& edgePair, float h1Weight, float h2Weight){
     // The label on each edge is the accumulated vote weight seen at
     // currPos on that haplotype (HP1 for the .1 edge, HP2 for .2).
-    // This is what the pre-refactor version emitted; downstream graph
-    // viewers depend on it to show read support per edge.
+    // These labels are new in v2.1 (earlier versions wrote unlabelled
+    // edges); "longphase gnn" reads them as the read-support weight of
+    // each edge.
     std::string refEdge = std::to_string(currPos + 1) + ".1\t->\t" + std::to_string(edgePair.first.first + 1) + "." + std::to_string(edgePair.first.second) + "\t[label=" + std::to_string(h1Weight) + "]";
     std::string altEdge = std::to_string(currPos + 1) + ".2\t->\t" + std::to_string(edgePair.second.first + 1) + "." + std::to_string(edgePair.second.second) + "\t[label=" + std::to_string(h2Weight) + "]";
 
