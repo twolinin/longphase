@@ -453,15 +453,15 @@ minimap2 -ax map-ont -y reference.fasta methylcall.raw.fastq
 <img width="854" height="615" alt="cophasing" src="https://github.com/user-attachments/assets/065fdfe4-cb81-430e-bba2-ccea461415de" />
 
 ## Speed
-LongPhase can phase a human genome within 1-3 minutes.
-phase (-t 24) | v2.0 (Time) | v2.0 (Memory)
+LongPhase can phase a human genome within 1-4 minutes.
+phase (-t 24) | v2.1 (Time) | v2.1 (Memory)
 -- | -- | -- 
-HG002 ONT R10.4.1 10x |  39s | 26.9G
-HG002 ONT R10.4.1 20x |  75s | 33.8G
-HG002 ONT R10.4.1 30x |  102s | 39.3G
-HG002 ONT R10.4.1 40x |  124s | 44.5G
-HG002 ONT R10.4.1 50x |  171s | 47.6G
-HG002 ONT R10.4.1 60x |  180s | 52.8G
+HG002 ONT R10.4.1 10x |  67s | 20.3G
+HG002 ONT R10.4.1 20x |  110s | 24.2G
+HG002 ONT R10.4.1 30x |  151s | 26.1G
+HG002 ONT R10.4.1 40x |  187s | 27.3G
+HG002 ONT R10.4.1 50x |  227s | 29.5G
+HG002 ONT R10.4.1 60x |  240s | 30.9G
 
 *If the device is running low on memory, you can control memory usage by reducing the number of threads (-t).
 
