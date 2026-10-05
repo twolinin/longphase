@@ -136,6 +136,8 @@ class VairiantGraph{
         PhasingParameters *params;
         std::string *ref;
         std::string dotResult;
+        // graph edges for the GNN
+        std::vector<DotEdge> gnnEdges;
         std::vector<ReadVariant> *readVariant;
         
         // By default, a Map in C++ is sorted in increasing order based on its key.
@@ -216,6 +218,7 @@ class VairiantGraph{
         
         void phasingProcess();
         void writingDotFile(std::string dotPrefix);
+        void exportGnnEdges(std::vector<DotEdge> &out);
         std::map<std::string,int>* getReadHP();
         void exportResult(std::string chrName, PhasingResult &result);
         int totalNode();

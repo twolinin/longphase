@@ -16,10 +16,7 @@ For somatic phasing using tumor-only samples, please use [longphase-to](https://
 		- [The complete list of phase parameters](#the-complete-list-of-phase-parameters)
 		- [Output of SNP and indel phasing](#output-of-snp-and-indel-phasing)
 		- [Output files of SNP and SV co-phasing](#output-files-of-snp-and-sv-co-phasing)
-	- [GNN command](#gnn-command)
-		- [SNP-only command](#snp-only-command)
-		- [SNP, SV and modification co-phasing command](#snp-sv-and-modification-co-phasing-command)
-  		- [The complete list of gnn parameters](#the-complete-list-of-gnn-parameters)
+		- [GNN model](#gnn-model)
 	- [Haplotag command](#haplotag-command)
 		- [The complete list of haplotag parameters](#the-complete-list-of-haplotag-parameters)
   	- [Modcall command](#modcall-command)
@@ -125,6 +122,7 @@ optional arguments:
    -t, --threads=Num                      number of thread. default:1
    -o, --out-prefix=NAME                  prefix of phasing result. default: result
    --indels                               phase small indel. default: False
+   --indelQuality=Num                     filter indels with QUAL less than threshold (only effective when --indels is enabled). default: 0
    --dot                                  each contig/chromosome will generate dot file.
 
 parse alignment arguments:
@@ -147,6 +145,15 @@ haplotag read correction arguments:
    -m, --readConfidence=[0.5~1]           The confidence of a read being assigned to any haplotype. default:0.65
    -n, --snpConfidence=[0.5~1]            The confidence of assigning two alleles of a SNP to different haplotypes. default:0.75
 
+GNN arguments:
+   --disableGNN                           phase without the GNN model. default: False
+   --gnnBreakThreshold=[0~1]              unphase a variant when its GNN error probability exceeds
+                                          this value. default:0.30
+   --gnnPeThreshold=[0~1]                 phasing entropy at which a variant is checked by the GNN. default:0.80
+   --gnnWindow=[1~63]                     variants on each side of a checked variant given to the GNN. default:20
+   --gnnRespectBridge                     do not unphase bridge variants. default: False
+   --gnnNoSplitBlocks                     do not split phase blocks that become disconnected
+                                          after a bridge variant is unphased. default: False
 
 ```
 ---
@@ -172,9 +179,9 @@ Since v2.1, the INFO column of every phased record (SNP, indel, SV and modificat
 | `H1` | Weighted read votes placing this variant on haplotype 1 relative to the preceding variants of its block. |
 | `H2` | Weighted read votes placing this variant on haplotype 2. |
 
-These fields are used by the `gnn` command, which needs a VCF produced by `phase` v2.1 or later.
+The GNN uses `PE` to decide which variants to examine (see [GNN model](#gnn-model)).
 
-With `--dot`, `phase` also writes one Graphviz DOT file per chromosome, named `<out-prefix>.<chrom>.dot`. Each edge links one allele of a variant (`<pos>.1` or `<pos>.2`) to an allele of a later variant and carries `[label=<weight>]`, the read-support weight of that edge. The `gnn` command reads these files.
+With `--dot`, `phase` also writes one Graphviz DOT file per chromosome, named `<out-prefix>.<chrom>.dot`. Each edge links one allele of a variant (`<pos>.1` or `<pos>.2`) to an allele of a later variant and carries `[label=<weight>]`, the read-support weight of that edge. These files are optional output; the GNN does not need them.
 
 ---
 ### Output files of SNP and SV co-phasing
@@ -200,65 +207,12 @@ An example of SV VCF file
 1       545892  8       N       ACACGCGGGCCGTGGCCAGCAGGCGGCGCTGCAGGAGAGGAGATGCCCAGGCCTGGCGGCC   .       PASS    IMPRECISE;SVMETHOD=Snifflesv1.0.11;CHR2=1;END=545893;STD_quant_start=28.919840;STD_quant_stop=28.543200;Kurtosis_quant_start=-0.382251;Kurtosis_quant_stop=-0.130808;SVTYPE=INS;RNAMES=0120d560-50f0-4298-8b03-7bd30f3cf139,030ac5d4-e616-4ce9-8ad3-243835335085,0cf1b0d9-2b4d-463d-a658-01b4b040dc63,22e11f79-0067-4735-8b69-97d951ca702f,2ca8a6f4-be9d-4df5-80d2-dc1743f97a84,3977c988-9901-4e5b-9f9c-b8ebfcce8e93,3e333422-12ca-4f16-afb8-ed7611dcbc2c,4191371c-49ea-466d-aadc-06f27cdf1050,4aaae789-54fe-4fa5-84b3-5524dc2b3796,5933e1b7-1aeb-4437-a875-3befbf703420,623804bb-e2fe-415d-96ae-3d06aec63e5d,672244ce-2d5d-45cf-beb2-ddeddae917e8,6b79aa23-7c9c-49dc-9b88-8419c88c7a36,7842d9f1-9a77-4c9a-ab5b-5a644ed2d355,7ba26d64-d9b0-475f-8d5f-1fa73fc42d93,8e10bf13-9674-489c-924e-182a42e08a34,a2b1b2ef-1e28-465e-8b3f-c44e15990d8b,a45514f1-4aae-40eb-94eb-2969722a7b05,b8181546-6839-49cd-b64f-b65c96369a2b,c140eaba-e0e7-44e7-9f16-c8c67fd4a2f2,c7835cf7-44c0-44da-b10e-b2468fc8caab,ca4aa84d-34d1-4639-8634-b6a5540129ca,d56f0abe-4389-4197-a151-0eb567fb99f0,e6992c7d-c00e-40e7-b80b-562094a9b60f,e8bb376c-20e0-4bed-a61f-b82b5c37ef6f,ec325153-0c55-4ece-8f3c-c432701e6750,f3242a61-deec-49e7-b99f-335a1ba13791,f91a7627-7fdb-4f03-8f33-0ed1649d96fe;SUPTYPE=AL;SVLEN=62;STRANDS=+-;RE=28;REF_strand=51;AF=0.54902        GT:DR:DV:PS     1|0:23:28:382189
 ```
 
-### GNN command
-The `gnn` command refines the output of `phase` with a graph neural network that detects unreliable phasing decisions and unphases them, splitting phase blocks where needed. To use it, run phase with the --dot option: this writes one DOT file per chromosome (`<out-prefix>.<chrom>.dot`) to the same directory as the phased VCF.
+### GNN model
+Since v2.1, phasing includes a graph neural network (GNN). Once the read-support graph is built and variants are connected into phase blocks, the GNN examines the variants whose phasing is uncertain, using the graph around each one and its sequence context in the reference. Variants it judges to be unreliably phased are left unphased, and blocks that lose their connection there are split. The output files are the same as before (`<prefix>.vcf`, `<prefix>_SV.vcf` and `<prefix>_mod.vcf`). The GNN is used by default for both `--ont` and `--pb`.
 
-By default, `gnn` looks for the DOT files next to the phased SNP VCF given with `-s`, using the VCF path without its `.vcf` / `.vcf.gz` extension as the prefix. For example, `-s /data/phased.vcf` reads `/data/phased.chr1.dot`, `/data/phased.chr2.dot`, and so on. Keep the DOT files in the same directory as the phased SNP VCF and do not rename either, or point to them explicitly with `--dot-prefix`. The phased SV and modification VCFs have no location requirement.
-
-Providing the reference with `-r` is strongly recommended: the model uses sequence-context features computed from the reference, and accuracy is lower without it.
+Use `--disableGNN` to phase without it. The `--gnn*` options in [the complete list of phase parameters](#the-complete-list-of-phase-parameters) tune it: variants whose phasing entropy (`PE`) reaches `--gnnPeThreshold` are examined, and a variant is left unphased when its predicted error probability exceeds `--gnnBreakThreshold`.
 
 The model weights are compiled into the `longphase` binary. The training pipeline (data preparation, training and weight export) is not included in this repository; it is available from the authors on request.
-
-#### SNP-only command
-
-```
-longphase gnn \
--r reference.fasta \
--s phased_snp.vcf \
--o gnn_correction
-```
-
-#### SNP, SV and modification co-phasing command
-
-```
-longphase gnn \
--r reference.fasta \
--s phased_snp.vcf \
---sv-file phased_sv.vcf \
---mod-file phased_mod.vcf \
--o gnn_correction
-```
-
-#### The complete list of gnn parameters
-
-```
-Usage: longphase gnn [OPTION]
-      -h, --help                      display this help and exit.
-
-require arguments:
-      -s, --snp-file=NAME             input phased SNP/SNV vcf file (from longphase phase).
-      -o, --out-prefix=NAME           prefix of corrected result. default:result
-optional arguments:
-      -r, --reference=NAME            reference fasta. improves accuracy.
-      --sv-file=NAME                  input phased SV vcf file.
-      --mod-file=NAME                 input phased modified vcf file.
-      --dot-prefix=NAME               DOT file prefix. default: same as --snp-file without .vcf
-      -B, --break-threshold=[0~1]     unphase a variant when GNN error probability exceeds
-                                      this value. default:0.30
-      --pe-threshold=[0~1]            phasing entropy threshold to trigger GNN. default:0.80
-      --window=NUM                    window size in variants. default:20
-      --respect-bridge                do not unphase bridge vertices. default:false
-      --no-split-blocks               do not split PS blocks that become disconnected
-                                      after a bridge variant is unphased. default:false
-      -t, --threads=NUM               number of thread. default:4
-
-Output files (based on -o prefix):
-      <prefix>.vcf                    corrected SNP vcf
-      <prefix>_SV.vcf                 corrected SV vcf   (only if --sv-file given)
-      <prefix>_mod.vcf                corrected mod vcf  (only if --mod-file given)
-
-```
-
 
 ### Haplotag command
 This command tags (assigns) each read (in BAM) to one haplotype in the phased SNP/SV VCF. i.e., reads will be tagged as HP:i:1 or HP:i:2. In addition, the haplotype block of each read is stored in the PS tag. The phased VCF can be also generated by other programs as long as the PS or HP tags are encoded. The author can specify ```--log``` for additionally output a plain-text file containing haplotype tags of each read without parsing BAM.

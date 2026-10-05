@@ -121,7 +121,7 @@ public:
 
   int getLastSNP(std::string chrName);
 
-  void writeResult(PhasingResult &phasingResult);
+  void writeResult(PhasingResult &phasingResult, const std::string &outPrefix);
 
   bool findSNP(std::string chr, int posistion);
 
@@ -153,7 +153,7 @@ public:
 
   std::map<int, std::map<int, bool>> getVariants(std::string chrName);
 
-  void writeResult(PhasingResult &phasingResult);
+  void writeResult(PhasingResult &phasingResult, const std::string &outPrefix);
 
   bool findSV(std::string chr, int posistion);
 };
@@ -191,7 +191,7 @@ public:
   METHParser(PhasingParameters &params, SnpParser &snpFile, SVParser &svFile);
   ~METHParser();
 
-  void writeResult(PhasingResult &phasingResult);
+  void writeResult(PhasingResult &phasingResult, const std::string &outPrefix);
 };
 
 struct Alignment {

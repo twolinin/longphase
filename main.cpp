@@ -4,7 +4,6 @@
 #include "Haplotag.h"
 #include "ModCall.h"
 #include "Compare.h"
-#include "GNN.h"
 
 
 #define PROGRAM_BIN "longphase"
@@ -21,7 +20,6 @@ static const char *STRIDE_USAGE_MESSAGE =
 "               haplotag   tag reads by haplotype.\n"
 "               modcall    convert bam file to modification vcf file.\n"
 "               compare    compare two phased VCF files.\n"
-"               gnn        GNN-based post-hoc phasing correction.\n"
 
 "\n";
 
@@ -50,10 +48,6 @@ int main(int argc, char** argv)
     else if(command=="compare")
     {
          CompareMain(argc - 1, argv + 1, version);
-    }
-    else if(command=="gnn")
-    {
-         GNNMain(argc - 1, argv + 1, version);
     }
     else{
         std::cout << STRIDE_USAGE_MESSAGE;
