@@ -16,15 +16,15 @@ $LONGPHASE modcall -t $THREADS \
     -s demo_snv.vcf.gz \
     -o testing_modcall
 
-step "Step 2a: Phasing (SNV-only)"
-$LONGPHASE phase --ont --dot -t $THREADS \
+step "Step 2a: Phasing (SNV-only, --disableGNN)"
+$LONGPHASE phase --ont --disableGNN -t $THREADS \
     -s demo_snv.vcf.gz \
     -r demo_ref.fa.gz \
     -b demo.bam \
     -o testing_snvOnly
 
-step "Step 2b: Phasing (cophasing)"
-$LONGPHASE phase --indels --ont --dot -t $THREADS \
+step "Step 2b: Phasing (cophasing, --disableGNN)"
+$LONGPHASE phase --indels --ont --disableGNN -t $THREADS \
     -s demo_snv.vcf.gz \
     -r demo_ref.fa.gz \
     -b demo.bam \
@@ -32,18 +32,20 @@ $LONGPHASE phase --indels --ont --dot -t $THREADS \
     --mod-file testing_modcall.vcf \
     -o testing_cophasing
 
-step "Step 3a: GNN correction (SNV-only)"
-$LONGPHASE gnn -t $THREADS \
+step "Step 3a: Phasing (SNV-only, with GNN, the default)"
+$LONGPHASE phase --ont -t $THREADS \
+    -s demo_snv.vcf.gz \
     -r demo_ref.fa.gz \
-    -s testing_snvOnly.vcf \
+    -b demo.bam \
     -o testing_snvOnly_gnn
 
-step "Step 3b: GNN correction (cophasing)"
-$LONGPHASE gnn -t $THREADS \
+step "Step 3b: Phasing (cophasing, with GNN, the default)"
+$LONGPHASE phase --indels --ont -t $THREADS \
+    -s demo_snv.vcf.gz \
     -r demo_ref.fa.gz \
-    -s testing_cophasing.vcf \
-    --sv-file testing_cophasing_SV.vcf \
-    --mod-file testing_cophasing_mod.vcf \
+    -b demo.bam \
+    --sv-file demo_sv.vcf.gz \
+    --mod-file testing_modcall.vcf \
     -o testing_cophasing_gnn
 
 step "Step 4: Evaluate"

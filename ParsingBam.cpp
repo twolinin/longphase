@@ -502,8 +502,9 @@ int SnpParser::getLastSNP(std::string chrName) {
   return (*lastVariantIter).first;
 }
 
-void SnpParser::writeResult(PhasingResult &phasingResult) {
-  dispatchWriteResult(params->snpFile, params->resultPrefix + ".vcf",
+void SnpParser::writeResult(PhasingResult &phasingResult,
+                            const std::string &outPrefix) {
+  dispatchWriteResult(params->snpFile, outPrefix + ".vcf",
                       phasingResult);
 }
 
@@ -840,8 +841,9 @@ std::map<int, std::map<int, bool>> SVParser::getVariants(std::string chrName) {
   return targetVariants;
 }
 
-void SVParser::writeResult(PhasingResult &phasingResult) {
-  dispatchWriteResult(params->svFile, params->resultPrefix + "_SV.vcf",
+void SVParser::writeResult(PhasingResult &phasingResult,
+                           const std::string &outPrefix) {
+  dispatchWriteResult(params->svFile, outPrefix + "_SV.vcf",
                       phasingResult);
 }
 
@@ -1503,8 +1505,9 @@ METHParser::METHParser(PhasingParameters &in_params, SnpParser &in_snpFile,
   }
 }
 
-void METHParser::writeResult(PhasingResult &phasingResult) {
-  dispatchWriteResult(params->modFile, params->resultPrefix + "_mod.vcf",
+void METHParser::writeResult(PhasingResult &phasingResult,
+                             const std::string &outPrefix) {
+  dispatchWriteResult(params->modFile, outPrefix + "_mod.vcf",
                       phasingResult);
 }
 

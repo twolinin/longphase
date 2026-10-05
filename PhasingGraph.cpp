@@ -1,6 +1,7 @@
 #include "PhasingGraph.h"
 
 #include <cmath>   // std::log2 for Shannon-entropy computation
+#include <cstdlib> // std::strtof
 
 namespace {
 
@@ -8,8 +9,7 @@ void appendDotEdges(std::string& outDotResult, int currPos, const std::pair<PosA
     // The label on each edge is the accumulated vote weight seen at
     // currPos on that haplotype (HP1 for the .1 edge, HP2 for .2).
     // These labels are new in v2.1 (earlier versions wrote unlabelled
-    // edges); "longphase gnn" reads them as the read-support weight of
-    // each edge.
+    // edges). The GNN gets the same weights via appendGnnEdges.
     std::string refEdge = std::to_string(currPos + 1) + ".1\t->\t" + std::to_string(edgePair.first.first + 1) + "." + std::to_string(edgePair.first.second) + "\t[label=" + std::to_string(h1Weight) + "]";
     std::string altEdge = std::to_string(currPos + 1) + ".2\t->\t" + std::to_string(edgePair.second.first + 1) + "." + std::to_string(edgePair.second.second) + "\t[label=" + std::to_string(h2Weight) + "]";
 
@@ -17,6 +17,16 @@ void appendDotEdges(std::string& outDotResult, int currPos, const std::pair<PosA
     outDotResult += '\n';
     outDotResult += altEdge;
     outDotResult += '\n';
+}
+
+// Same edges as appendDotEdges, for the GNN. The model was trained on
+// weights read back from the DOT label, so they take the same text round
+// trip (std::to_string, then parsed as float) to give identical values.
+void appendGnnEdges(std::vector<DotEdge>& outEdges, int currPos, const std::pair<PosAllele, PosAllele>& edgePair, float h1Weight, float h2Weight){
+    float w1 = std::strtof(std::to_string(h1Weight).c_str(), NULL);
+    float w2 = std::strtof(std::to_string(h2Weight).c_str(), NULL);
+    outEdges.push_back({currPos, 1, edgePair.first.first, edgePair.first.second, w1});
+    outEdges.push_back({currPos, 2, edgePair.second.first, edgePair.second.second, w2});
 }
 
 void recordVoteForNextPosition(
@@ -376,6 +386,11 @@ void VairiantGraph::scanVariantsAndBuildBlocks(std::map<int, int>& hpResult, Pha
                                    hpCountMap2[currPos][1],
                                    hpCountMap2[currPos][2]);
                 }
+                if(params->enableGNN){
+                    appendGnnEdges(gnnEdges, currPos, bestEdgePair,
+                                   hpCountMap2[currPos][1],
+                                   hpCountMap2[currPos][2]);
+                }
 
                 lastConnectPos = *nextNodeIter;
             }
@@ -485,6 +500,7 @@ VairiantGraph::~VairiantGraph(){
 void VairiantGraph::destroy(){
     dotResult.clear();
     dotResult.shrink_to_fit();
+    std::vector<DotEdge>().swap(gnnEdges);
 
     for( auto edgeIter = edgeList->begin() ; edgeIter != edgeList->end() ; edgeIter++ ){
         edgeIter->second->ref->destroy();
@@ -1015,6 +1031,10 @@ void VairiantGraph::writingDotFile(std::string dotPrefix){
         resultVcf << "}\n";
     }
     return;
+}
+
+void VairiantGraph::exportGnnEdges(std::vector<DotEdge> &out){
+    out.swap(gnnEdges);
 }
 
 void VairiantGraph::exportResult(std::string chrName, PhasingResult &result){
