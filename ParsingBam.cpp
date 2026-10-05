@@ -2,6 +2,7 @@
 
 #include <cstdio>
 #include <cmath>
+#include <iomanip>   // std::fixed / std::setprecision for INFO/PE|H1|H2
 #include <sstream>
 #include <string.h>
 
@@ -40,16 +41,18 @@ FastaParser::FastaParser(std::string fastaFile,
     // ref_len is a return value that is length of retrun string
     int ref_len = 0;
 
-    // read file
-    std::string chr_info(faidx_fetch_seq(fai, (*iter).c_str(), 0,
-                                         last_pos.at(index) + 5, &ref_len));
+    // read file; faidx_fetch_seq returns a malloc'd buffer owned by us
+    char *seq = faidx_fetch_seq(fai, (*iter).c_str(), 0,
+                                last_pos.at(index) + 5, &ref_len);
     if (ref_len == 0) {
       std::cout << "nothing in reference file \n";
     }
 
     // update map
-    chrString[(*iter)] = chr_info;
+    chrString[(*iter)] = seq ? std::string(seq, ref_len) : std::string();
+    free(seq);
   }
+  fai_destroy(fai);
 }
 
 FastaParser::~FastaParser() {}
@@ -135,7 +138,7 @@ void BaseVairantParser::unCompressParser(std::string &variantFile) {
 
 void BaseVairantParser::compressInput(std::string variantFile,
                                       std::string resultFile,
-                                      PhasingResult phasingResult) {
+                                      PhasingResult &phasingResult) {
   if (variantFile == "") return;
   std::ofstream resultVcf(resultFile);
   if (!resultVcf.is_open()) {
@@ -150,7 +153,7 @@ void BaseVairantParser::compressInput(std::string variantFile,
 
 void BaseVairantParser::unCompressInput(std::string variantFile,
                                         std::string resultFile,
-                                        PhasingResult phasingResult) {
+                                        PhasingResult &phasingResult) {
   std::ifstream originVcf(variantFile);
   std::ofstream resultVcf(resultFile);
 
@@ -172,7 +175,7 @@ void BaseVairantParser::unCompressInput(std::string variantFile,
 
 void BaseVairantParser::dispatchWriteResult(const std::string &inputFile,
                                             const std::string &outputFile,
-                                            PhasingResult phasingResult) {
+                                            PhasingResult &phasingResult) {
   if (inputFile.find("gz") != std::string::npos)
     compressInput(inputFile, outputFile, phasingResult);
   else if (inputFile.find("vcf") != std::string::npos)
@@ -182,8 +185,16 @@ void BaseVairantParser::dispatchWriteResult(const std::string &inputFile,
 void BaseVairantParser::writeLine(std::string &input, bool &ps_def,
                                   std::ofstream &resultVcf,
                                   PhasingResult &phasingResult) {
-  if (input.substr(0, 2) == "##")
+  if (input.substr(0, 2) == "##") {
+    // Drop PE/H1/H2 declarations carried over from an input that was
+    // already phased by LongPhase; writePeInfoHeaders() emits the current
+    // ones, so re-phasing never produces duplicate ##INFO lines.
+    if (input.compare(0, 14, "##INFO=<ID=PE,") == 0 ||
+        input.compare(0, 14, "##INFO=<ID=H1,") == 0 ||
+        input.compare(0, 14, "##INFO=<ID=H2,") == 0)
+      return;
     writeMetaHeader(input, ps_def, resultVcf);
+  }
   else if (input.substr(0, 6) == "#CHROM" || input.substr(0, 6) == "#chrom")
     writeColumnHeader(input, ps_def, resultVcf);
   else
@@ -206,12 +217,82 @@ void BaseVairantParser::writeColumnHeader(const std::string &input,
                    "\"Phase set identifier\">\n";
       ps_def = true;
     }
+    // Emit PE/H1/H2 header lines here too as a safety net: if the input
+    // VCF has no ##FILTER=<ID=PASS line (SnpParser hooks off that) or
+    // no ##INFO block at all, they still get declared before #CHROM.
+    writePeInfoHeaders(resultVcf);
     resultVcf << "##longphaseVersion=" << params->version << "\n";
     resultVcf << "##commandline=\"" << params->command << "\"\n";
     commandLine = true;
   }
   resultVcf << input << "\n";
 }
+
+void BaseVairantParser::writePeInfoHeaders(std::ofstream &resultVcf) {
+  // Idempotent: writes the three ##INFO lines the first time we're
+  // called, then never again for this parser instance. Every parser
+  // (SNP, SV, MOD) shares this via inheritance.
+  if (pe_def) return;
+  resultVcf << "##INFO=<ID=PE,Number=1,Type=Float,Description=\"Phasing entropy in bits; 0 means either a unanimous vote or no incoming votes (block start), 1 means maximally ambiguous\">\n";
+  resultVcf << "##INFO=<ID=H1,Number=1,Type=Float,Description=\"Weighted HP1 vote count\">\n";
+  resultVcf << "##INFO=<ID=H2,Number=1,Type=Float,Description=\"Weighted HP2 vote count\">\n";
+  pe_def = true;
+}
+
+namespace {
+// Remove existing PE=, H1= and H2= entries from an INFO field, e.g. when
+// re-phasing a VCF that LongPhase already annotated. Keys are matched
+// exactly, so fields such as H1x= are kept. An emptied field becomes ".".
+void removePeHapFromInfoField(std::string &infoField) {
+  if (infoField == ".")
+    return;
+  std::string kept;
+  bool removed = false;
+  size_t start = 0;
+  while (start <= infoField.size()) {
+    size_t end = infoField.find(';', start);
+    if (end == std::string::npos)
+      end = infoField.size();
+    std::string entry = infoField.substr(start, end - start);
+    std::string key = entry.substr(0, entry.find('='));
+    if (key == "PE" || key == "H1" || key == "H2") {
+      removed = true;
+    } else if (!entry.empty()) {
+      if (!kept.empty())
+        kept += ";";
+      kept += entry;
+    }
+    start = end + 1;
+  }
+  // Leave fields without PE/H1/H2 untouched (unphased records stay as-is)
+  if (removed)
+    infoField = kept.empty() ? "." : kept;
+}
+
+// Format the PE/H1/H2 fragment and either replace a "." INFO field or
+// append with a leading ';' to an existing INFO field. Any PE/H1/H2
+// already present are removed first so each key appears only once.
+// Shared by SNP, SV, and MOD writers so all three VCFs use the exact
+// same formatting.
+void appendPeHapInfoToInfoField(std::string &infoField,
+                                const PhasingElement &pe) {
+  removePeHapFromInfoField(infoField);
+  std::ostringstream buf;
+  buf << std::fixed << std::setprecision(3);
+  buf << "PE=" << pe.entropy
+      << ";H1=" << pe.h1
+      << ";H2=" << pe.h2;
+  // modcall ends INFO with ';', so drop trailing separators to avoid
+  // writing an empty entry (";;PE=...")
+  while (!infoField.empty() && infoField.back() == ';')
+    infoField.pop_back();
+  if (infoField.empty() || infoField == ".") {
+    infoField = buf.str();
+  } else {
+    infoField += ";" + buf.str();
+  }
+}
+} // namespace
 
 static bool isHetGt(const int *gt) {
   return (gt[0] == 2 && gt[1] == 4) || // 0/1
@@ -244,6 +325,15 @@ SnpParser::SnpParser(PhasingParameters &in_params) {
   chrVariant = new std::map<std::string, std::map<int, SnpVariant>>;
 
   params = &in_params;
+
+  // Initialize removed indels log file
+  if (params->phaseIndel && params->indelQuality > 0) {
+    std::string logFileName = params->resultPrefix + "_removed_indels.log";
+    removedIndelsLog.open(logFileName.c_str());
+    if (removedIndelsLog.is_open()) {
+      removedIndelsLog << "#CHROM\tPOS\tREF\tALT\tQUAL\n";
+    }
+  }
 
   // open vcf file
   htsFile *inf = bcf_open(params->snpFile.c_str(), "r");
@@ -331,6 +421,17 @@ SnpParser::SnpParser(PhasingParameters &in_params) {
         if (std::isnan(qual)) {
           qual = 0.0;
         }
+        if (params->indelQuality > 0 && qual < params->indelQuality) {
+          if (removedIndelsLog.is_open()) {
+            removedIndelsLog << chr << "\t" << (variantPos + 1) << "\t"
+                             << tmp.Ref << "\t" << tmp.Alt << "\t"
+                             << (std::isnan(rec->qual) ? "." : std::to_string(rec->qual))
+                             << "\n";
+          }
+          // Record the position of filtered indels (0-based)
+          filteredIndelPositions[chr].insert(variantPos);
+          continue;
+        }
 
         // prevent the MAVs calling error which makes the GT=0/1
         if (rec->d.allele[1][tmp.Alt.size() + 1] != '\0') {
@@ -344,7 +445,12 @@ SnpParser::SnpParser(PhasingParameters &in_params) {
   }
 }
 
-SnpParser::~SnpParser() { delete chrVariant; }
+SnpParser::~SnpParser() {
+  if (removedIndelsLog.is_open()) {
+    removedIndelsLog.close();
+  }
+  delete chrVariant;
+}
 
 std::map<int, SnpVariant> SnpParser::getVariants(std::string chrName) {
   std::map<int, SnpVariant> targetVariants;
@@ -396,7 +502,7 @@ int SnpParser::getLastSNP(std::string chrName) {
   return (*lastVariantIter).first;
 }
 
-void SnpParser::writeResult(PhasingResult phasingResult) {
+void SnpParser::writeResult(PhasingResult &phasingResult) {
   dispatchWriteResult(params->snpFile, params->resultPrefix + ".vcf",
                       phasingResult);
 }
@@ -415,6 +521,10 @@ void SnpParser::writeMetaHeader(const std::string &input, bool &ps_def,
                    "filtered due to QUAL below threshold ("
                 << params->indelQuality << ")\">\n";
     }
+    // Emit PE/H1/H2 INFO headers right after ##FILTER=<ID=PASS so they
+    // sit in a natural place near the other INFO declarations. Safe if
+    // called more than once (writePeInfoHeaders is idempotent).
+    writePeInfoHeaders(resultVcf);
   } else {
     resultVcf << input << "\n";
   }
@@ -499,9 +609,15 @@ void SnpParser::writeDataLine(const std::string &input,
     fields[9][modify_start] = (*psElementIter).second.RAstatus[0];
     fields[9][modify_start + 1] = '|';
     fields[9][modify_start + 2] = (*psElementIter).second.RAstatus[2];
+
+    // Attach PE / H1 / H2 to INFO for phased positions only.
+    // Rule: if INFO was ".", replace it; otherwise append with ';'.
+    appendPeHapInfoToInfoField(fields[7], (*psElementIter).second);
   }
   // this pos has not been phased
   else {
+    // drop stale PE/H1/H2 left over from a previously phased input
+    removePeHapFromInfoField(fields[7]);
     // add PS flag and value
     fields[8] = fields[8] + ":PS";
     fields[9] = fields[9] + ":.";
@@ -724,9 +840,25 @@ std::map<int, std::map<int, bool>> SVParser::getVariants(std::string chrName) {
   return targetVariants;
 }
 
-void SVParser::writeResult(PhasingResult phasingResult) {
+void SVParser::writeResult(PhasingResult &phasingResult) {
   dispatchWriteResult(params->svFile, params->resultPrefix + "_SV.vcf",
                       phasingResult);
+}
+
+void SVParser::writeMetaHeader(const std::string &input, bool &ps_def,
+                               std::ofstream &resultVcf) {
+  if (input.substr(0, 16) == "##FORMAT=<ID=PS,") {
+    ps_def = true;
+  }
+  // SV VCFs vary widely (Sniffles / cuteSV / DELLY etc.) and may or may
+  // not have ##FILTER=<ID=PASS. To be robust, hook off any ##INFO line
+  // and slip the PE/H1/H2 declarations in alongside them. If no ##INFO
+  // lines exist at all, writeColumnHeader's safety net will still emit
+  // them before #CHROM.
+  resultVcf << input << "\n";
+  if (input.substr(0, 7) == "##INFO=") {
+    writePeInfoHeaders(resultVcf);
+  }
 }
 
 void SVParser::writeDataLine(const std::string &input,
@@ -798,9 +930,15 @@ void SVParser::writeDataLine(const std::string &input,
     fields[9][modify_start] = (*psElementIter).second.RAstatus[0];
     fields[9][modify_start + 1] = '|';
     fields[9][modify_start + 2] = (*psElementIter).second.RAstatus[2];
+
+    // Attach PE / H1 / H2 to INFO for phased positions only.
+    // Rule: if INFO was ".", replace it; otherwise append with ';'.
+    appendPeHapInfoToInfoField(fields[7], (*psElementIter).second);
   }
   // this pos has not been phased
   else {
+    // drop stale PE/H1/H2 left over from a previously phased input
+    removePeHapFromInfoField(fields[7]);
     // add PS flag and value
     fields[8] = fields[8] + ":PS";
     fields[9] = fields[9] + ":.";
@@ -1365,9 +1503,23 @@ METHParser::METHParser(PhasingParameters &in_params, SnpParser &in_snpFile,
   }
 }
 
-void METHParser::writeResult(PhasingResult phasingResult) {
+void METHParser::writeResult(PhasingResult &phasingResult) {
   dispatchWriteResult(params->modFile, params->resultPrefix + "_mod.vcf",
                       phasingResult);
+}
+
+void METHParser::writeMetaHeader(const std::string &input, bool &ps_def,
+                                 std::ofstream &resultVcf) {
+  if (input.substr(0, 16) == "##FORMAT=<ID=PS,") {
+    ps_def = true;
+  }
+  // Same strategy as SVParser: piggy-back PE/H1/H2 on existing ##INFO
+  // declarations. modcall's output always emits RS / MR / NR under
+  // ##INFO=, so this reliably places them together.
+  resultVcf << input << "\n";
+  if (input.substr(0, 7) == "##INFO=") {
+    writePeInfoHeaders(resultVcf);
+  }
 }
 
 METHParser::~METHParser() {
@@ -1502,9 +1654,15 @@ void METHParser::writeDataLine(const std::string &input,
     fields[9][modify_start] = (*psElementIter).second.RAstatus[0];
     fields[9][modify_start + 1] = '|';
     fields[9][modify_start + 2] = (*psElementIter).second.RAstatus[2];
+
+    // Attach PE / H1 / H2 to INFO for phased positions only.
+    // Rule: if INFO was ".", replace it; otherwise append with ';'.
+    appendPeHapInfoToInfoField(fields[7], (*psElementIter).second);
   }
   // this pos has not been phased
   else {
+    // drop stale PE/H1/H2 left over from a previously phased input
+    removePeHapFromInfoField(fields[7]);
     // add PS flag and value
     fields[8] = fields[8] + ":PS";
     fields[9] = fields[9] + ":.";

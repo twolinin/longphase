@@ -3,21 +3,25 @@
 #include "Phasing.h"
 #include "Haplotag.h"
 #include "ModCall.h"
+#include "Compare.h"
+#include "GNN.h"
 
 
-#define PROGRAM_BIN "main"
-#define VERSION "2.0.2"
+#define PROGRAM_BIN "longphase"
+#define VERSION "2.1"
 
 
 
 static std::string version = VERSION;
 
 static const char *STRIDE_USAGE_MESSAGE =
-"Version: " VERSION " \n"
+"LongPhase Ver " VERSION "\n"
 "Usage: " PROGRAM_BIN " <command> [options]\n"  
 "               phase      run phasing algorithm.\n"
 "               haplotag   tag reads by haplotype.\n"
 "               modcall    convert bam file to modification vcf file.\n"
+"               compare    compare two phased VCF files.\n"
+"               gnn        GNN-based post-hoc phasing correction.\n"
 
 "\n";
 
@@ -42,6 +46,14 @@ int main(int argc, char** argv)
     else if(command=="modcall")
     {
          ModCallMain(argc - 1, argv + 1, version);
+    }
+    else if(command=="compare")
+    {
+         CompareMain(argc - 1, argv + 1, version);
+    }
+    else if(command=="gnn")
+    {
+         GNNMain(argc - 1, argv + 1, version);
     }
     else{
         std::cout << STRIDE_USAGE_MESSAGE;

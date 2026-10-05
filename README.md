@@ -1,6 +1,10 @@
 # LongPhase
 LongPhase is an ultra-fast program for simultaneously co-phasing SNPs, small indels, large SVs, and (5mC) modifications for Nanopore and PacBio platforms. It can produce nearly chromosome-scale haplotype blocks by using Nanpore ultra-long reads without the need for additional trios, chromosome conformation, and strand-seq data. LongPhase can phase a 30x human genome in ~1 minute (see [Speed](#speed)).
 
+For somatic phasing using paired tumor/normal samples, please use [longphase-s](https://github.com/CCU-Bioinformatics-Lab/longphase-s).
+
+For somatic phasing using tumor-only samples, please use [longphase-to](https://github.com/CCU-Bioinformatics-Lab/longphase-to).
+
 ---
 - [Installation](#installation)
 - [Usage](#usage)
@@ -12,10 +16,16 @@ LongPhase is an ultra-fast program for simultaneously co-phasing SNPs, small ind
 		- [The complete list of phase parameters](#the-complete-list-of-phase-parameters)
 		- [Output of SNP and indel phasing](#output-of-snp-and-indel-phasing)
 		- [Output files of SNP and SV co-phasing](#output-files-of-snp-and-sv-co-phasing)
+	- [GNN command](#gnn-command)
+		- [SNP-only command](#snp-only-command)
+		- [SNP, SV and modification co-phasing command](#snp-sv-and-modification-co-phasing-command)
+  		- [The complete list of gnn parameters](#the-complete-list-of-gnn-parameters)
 	- [Haplotag command](#haplotag-command)
 		- [The complete list of haplotag parameters](#the-complete-list-of-haplotag-parameters)
   	- [Modcall command](#modcall-command)
   		- [The complete list of modcall parameters](#the-complete-list-of-modcall-parameters)
+  	- [Compare command](#compare-command)
+  		- [The complete list of compare parameters](#the-complete-list-of-compare-parameters)
 - [Input Preparation](#input-preparation)
 	- [Generate reference index](#generate-reference-index)
 	- [Generate alignment and index files](#generate-alignment-and-index-files)
@@ -27,10 +37,10 @@ LongPhase is an ultra-fast program for simultaneously co-phasing SNPs, small ind
 - [Contact](#contact)
 ---
 ## Installation
-You are recommended to download a [linux 64bit binary release](https://github.com/twolinin/longphase/releases/download/v2.0.2/longphase_linux-x64.tar.xz) without compilation. 
+You are recommended to download a [linux 64bit binary release](https://github.com/twolinin/longphase/releases/download/v2.1/longphase_linux-x64.tar.xz) without compilation. 
 
 ```
-wget https://github.com/twolinin/longphase/releases/download/v2.0.2/longphase_linux-x64.tar.xz
+wget https://github.com/twolinin/longphase/releases/download/v2.1/longphase_linux-x64.tar.xz
 tar -xJf longphase_linux-x64.tar.xz
 ```
 
@@ -154,6 +164,18 @@ When phasing SNPs alone, LongPhase outputs the results into a VCF file. The alle
 1       24132   .       C       T       11.1    PASS    .       GT:GQ:DP:AD:VAF:PL:PS   1|0:11:63:41,17:0.269841:10,0,29:16809
 ```
 
+Since v2.1, the INFO column of every phased record (SNP, indel, SV and modification VCFs) also carries three fields describing how confidently the variant was phased. Unphased records do not have them.
+
+| Field | Description |
+|---|---|
+| `PE` | Phasing entropy in bits, computed from `H1` and `H2`. 0 means either a unanimous vote or no incoming votes (the first variant of a block); 1 means maximally ambiguous. |
+| `H1` | Weighted read votes placing this variant on haplotype 1 relative to the preceding variants of its block. |
+| `H2` | Weighted read votes placing this variant on haplotype 2. |
+
+These fields are used by the `gnn` command, which needs a VCF produced by `phase` v2.1 or later.
+
+With `--dot`, `phase` also writes one Graphviz DOT file per chromosome, named `<out-prefix>.<chrom>.dot`. Each edge links one allele of a variant (`<pos>.1` or `<pos>.2`) to an allele of a later variant and carries `[label=<weight>]`, the read-support weight of that edge. The `gnn` command reads these files.
+
 ---
 ### Output files of SNP and SV co-phasing
 When co-phasing SNPs and SVs, two VCFs (one for SNPs and one for SVs) are outputted. Similarly, the phased SVs are stored in the GT field and the block ID is in the PS field. For instance, the following example illustrates two haplotypes of five SNPs and two SVs, A\<INS\>G\<noSV\>TCC and G\<noSV\>A\<INS\>ATT, which are co-phased in the same block 382189.
@@ -177,6 +199,66 @@ An example of SV VCF file
 1       534057  7       N       AAATTCGCGCATATCACGGGTGCCGCCTCTGTGCAGCTCACGAAACGCCATACTACGGTGCTGCTCAGCAGCTACGGAATCGCTATACCTACGCGAGCTGCCTCAGCAGCCAC       .       PASS    IMPRECISE;SVMETHOD=Snifflesv1.0.11;CHR2=1;END=534128;STD_quant_start=25.369041;STD_quant_stop=29.191054;Kurtosis_quant_start=-0.239012;Kurtosis_quant_stop=-1.333733;SVTYPE=INS;RNAMES=0120d560-50f0-4298-8b03-7bd30f3cf139,030ac5d4-e616-4ce9-8ad3-243835335085,0cf1b0d9-2b4d-463d-a658-01b4b040dc63,1c9e982a-8af7-4ba0-8cc2-154a679c72e2,22e11f79-0067-4735-8b69-97d951ca702f,2ca8a6f4-be9d-4df5-80d2-dc1743f97a84,35dff960-22b6-4216-af69-8878b8860362,390d2fb4-9224-41a1-a9fe-6cb3bbe4273a,3e333422-12ca-4f16-afb8-ed7611dcbc2c,3e8ed78a-b857-4941-bbc1-52ca51e26c08,4191371c-49ea-466d-aadc-06f27cdf1050,4aaae789-54fe-4fa5-84b3-5524dc2b3796,581e0cfb-2491-44d7-a2e1-ba1516ba0f2f,59749531-9abf-4ff4-a4a1-31484ba3d32d,5c97b0a9-925e-4153-952d-0f437171d3dc,6067590e-956c-442f-bbb7-cae597d616ad,623804bb-e2fe-415d-96ae-3d06aec63e5d,672244ce-2d5d-45cf-beb2-ddeddae917e8,6b79aa23-7c9c-49dc-9b88-8419c88c7a36,6e60d235-6654-4ef8-9feb-70f12a397721,6fbb55c5-57fc-43bc-8a24-b0058778054c,8e10bf13-9674-489c-924e-182a42e08a34,aa6ba092-4221-4d54-8819-811448c34983,af2169b3-b308-4db5-9675-15ff5f68d8dd,b214fcbd-77de-4dd5-84db-6d2b7e1f3158,c140eaba-e0e7-44e7-9f16-c8c67fd4a2f2,c7835cf7-44c0-44da-b10e-b2468fc8caab,ca4aa84d-34d1-4639-8634-b6a5540129ca,caba4bde-cdc5-4344-9803-a3c158525b0c,e0747feb-60bb-40db-a144-a9b43dd13256,e6992c7d-c00e-40e7-b80b-562094a9b60f,e8bb376c-20e0-4bed-a61f-b82b5c37ef6f,f3242a61-deec-49e7-b99f-335a1ba13791,f87dfdf7-7b68-421b-b395-3769a5fa3ac1,f91a7627-7fdb-4f03-8f33-0ed1649d96fe;SUPTYPE=AL;SVLEN=43;STRANDS=+-;RE=35;REF_strand=44;AF=0.795455    GT:DR:DV:PS     0|1:9:35:382189
 1       545892  8       N       ACACGCGGGCCGTGGCCAGCAGGCGGCGCTGCAGGAGAGGAGATGCCCAGGCCTGGCGGCC   .       PASS    IMPRECISE;SVMETHOD=Snifflesv1.0.11;CHR2=1;END=545893;STD_quant_start=28.919840;STD_quant_stop=28.543200;Kurtosis_quant_start=-0.382251;Kurtosis_quant_stop=-0.130808;SVTYPE=INS;RNAMES=0120d560-50f0-4298-8b03-7bd30f3cf139,030ac5d4-e616-4ce9-8ad3-243835335085,0cf1b0d9-2b4d-463d-a658-01b4b040dc63,22e11f79-0067-4735-8b69-97d951ca702f,2ca8a6f4-be9d-4df5-80d2-dc1743f97a84,3977c988-9901-4e5b-9f9c-b8ebfcce8e93,3e333422-12ca-4f16-afb8-ed7611dcbc2c,4191371c-49ea-466d-aadc-06f27cdf1050,4aaae789-54fe-4fa5-84b3-5524dc2b3796,5933e1b7-1aeb-4437-a875-3befbf703420,623804bb-e2fe-415d-96ae-3d06aec63e5d,672244ce-2d5d-45cf-beb2-ddeddae917e8,6b79aa23-7c9c-49dc-9b88-8419c88c7a36,7842d9f1-9a77-4c9a-ab5b-5a644ed2d355,7ba26d64-d9b0-475f-8d5f-1fa73fc42d93,8e10bf13-9674-489c-924e-182a42e08a34,a2b1b2ef-1e28-465e-8b3f-c44e15990d8b,a45514f1-4aae-40eb-94eb-2969722a7b05,b8181546-6839-49cd-b64f-b65c96369a2b,c140eaba-e0e7-44e7-9f16-c8c67fd4a2f2,c7835cf7-44c0-44da-b10e-b2468fc8caab,ca4aa84d-34d1-4639-8634-b6a5540129ca,d56f0abe-4389-4197-a151-0eb567fb99f0,e6992c7d-c00e-40e7-b80b-562094a9b60f,e8bb376c-20e0-4bed-a61f-b82b5c37ef6f,ec325153-0c55-4ece-8f3c-c432701e6750,f3242a61-deec-49e7-b99f-335a1ba13791,f91a7627-7fdb-4f03-8f33-0ed1649d96fe;SUPTYPE=AL;SVLEN=62;STRANDS=+-;RE=28;REF_strand=51;AF=0.54902        GT:DR:DV:PS     1|0:23:28:382189
 ```
+
+### GNN command
+The `gnn` command refines the output of `phase` with a graph neural network that detects unreliable phasing decisions and unphases them, splitting phase blocks where needed. To use it, run phase with the --dot option: this writes one DOT file per chromosome (`<out-prefix>.<chrom>.dot`) to the same directory as the phased VCF.
+
+By default, `gnn` looks for the DOT files next to the phased SNP VCF given with `-s`, using the VCF path without its `.vcf` / `.vcf.gz` extension as the prefix. For example, `-s /data/phased.vcf` reads `/data/phased.chr1.dot`, `/data/phased.chr2.dot`, and so on. Keep the DOT files in the same directory as the phased SNP VCF and do not rename either, or point to them explicitly with `--dot-prefix`. The phased SV and modification VCFs have no location requirement.
+
+Providing the reference with `-r` is strongly recommended: the model uses sequence-context features computed from the reference, and accuracy is lower without it.
+
+The model weights are compiled into the `longphase` binary. The training pipeline (data preparation, training and weight export) is not included in this repository; it is available from the authors on request.
+
+#### SNP-only command
+
+```
+longphase gnn \
+-r reference.fasta \
+-s phased_snp.vcf \
+-o gnn_correction
+```
+
+#### SNP, SV and modification co-phasing command
+
+```
+longphase gnn \
+-r reference.fasta \
+-s phased_snp.vcf \
+--sv-file phased_sv.vcf \
+--mod-file phased_mod.vcf \
+-o gnn_correction
+```
+
+#### The complete list of gnn parameters
+
+```
+Usage: longphase gnn [OPTION]
+      -h, --help                      display this help and exit.
+
+require arguments:
+      -s, --snp-file=NAME             input phased SNP/SNV vcf file (from longphase phase).
+      -o, --out-prefix=NAME           prefix of corrected result. default:result
+optional arguments:
+      -r, --reference=NAME            reference fasta. improves accuracy.
+      --sv-file=NAME                  input phased SV vcf file.
+      --mod-file=NAME                 input phased modified vcf file.
+      --dot-prefix=NAME               DOT file prefix. default: same as --snp-file without .vcf
+      -B, --break-threshold=[0~1]     unphase a variant when GNN error probability exceeds
+                                      this value. default:0.30
+      --pe-threshold=[0~1]            phasing entropy threshold to trigger GNN. default:0.80
+      --window=NUM                    window size in variants. default:20
+      --respect-bridge                do not unphase bridge vertices. default:false
+      --no-split-blocks               do not split PS blocks that become disconnected
+                                      after a bridge variant is unphased. default:false
+      -t, --threads=NUM               number of thread. default:4
+
+Output files (based on -o prefix):
+      <prefix>.vcf                    corrected SNP vcf
+      <prefix>_SV.vcf                 corrected SV vcf   (only if --sv-file given)
+      <prefix>_mod.vcf                corrected mod vcf  (only if --mod-file given)
+
+```
+
 
 ### Haplotag command
 This command tags (assigns) each read (in BAM) to one haplotype in the phased SNP/SV VCF. i.e., reads will be tagged as HP:i:1 or HP:i:2. In addition, the haplotype block of each read is stored in the PS tag. The phased VCF can be also generated by other programs as long as the PS or HP tags are encoded. The author can specify ```--log``` for additionally output a plain-text file containing haplotype tags of each read without parsing BAM.
@@ -272,6 +354,82 @@ phasing arguments:
                                     higher threshold requires greater consistency in the reads. default: 0.9
 ```
 
+### Compare command
+The `compare` command evaluates a phased VCF against a truth set (for example a GIAB benchmark) and reports switch errors, Hamming distance and phase-block statistics. Its metrics follow the definitions of `whatshap compare`, and the per-block computations run in parallel. The first VCF is the truth and the second is the query being evaluated. Use `--ignore-sample-name` when the two VCFs contain one sample each but under different sample names, as is usual when comparing against a benchmark. The report is written to `<out-prefix>.tsv` (default `compare_result.tsv`).
+```
+longphase compare \
+benchmark.vcf \
+phased_snp.vcf \
+-t 4 \
+--ignore-sample-name \
+-o compare_result
+```
+The report has three parts.
+Lines starting with `##` describe the query VCF as a whole, regardless of the truth set: the number of phased SNVs and the number, N50 and total length of its phase blocks.
+```
+##Total phased SNV = 2151703
+##Total Block = 7016
+##Total Block N50 = 939235
+##Total Block Sum = 2544941127
+```
+Lines starting with `###` summarise the comparison over the chromosomes present in both VCFs. Only these chromosomes can be assessed, so these values can differ from the `##` totals.
+`Phased_SNV` counts heterozygous SNVs that are phased in both VCFs. The denominator of `Phased_SNV(%)` is the number of heterozygous SNVs in the truth on the assessed chromosomes, including those the truth leaves unphased, so comparing a VCF with itself does not give 100%. `Phased_INDEL(%)` is defined the same way for indels.
+The metrics follow the definitions used by whatshap compare, so switch errors and Hamming distances are directly comparable with results produced by WhatsHap.
+```
+###Sample       Phased_SNV      Phased_SNV(%)   Phased_INDEL    Phased_INDEL(%) SNV_SW  SNV_SW(%)       Hamming_Dis.(%) No._of_Block    Block_N50(bp)   Block_Sum
+###longphase_10x_1.vcf  1873883 78.11491        0       0.00000 2277    0.12187 6.92789 6029    939511  2480308905
+```
+The remaining lines give the same comparison for each chromosome separately.
+```
+#sample chromosome      dataset1        dataset2        common_het      phased_SNV      phased_SNV(%)   phased_INDEL    phased_INDEL(%) intersection_blocks     covered_variants
+        all_assessed_pairs      all_switches    all_switch_rate(%)      switchflips(sw/fl)      switchflip_rate(%)      blockwise_hamming       blockwise_hamming_rate(%)       SNV_SW
+        SNV_SW(%)       No._of_Block    Block_N50(bp)   Block_Sum
+longphase_10x_1.vcf     chr1    file0   file1   158325  142906  76.98515        0       0.00000 427     142882  142455  197     0.13829 149/24  0.12144 7542    5.27848 197     0.1382
+9       494     986853  224903506
+longphase_10x_1.vcf     chr10   file0   file1   107839  97831   79.31622        0       0.00000 218     97820   97602   138     0.14139 98/20   0.12090 11305   11.55694        138           0.14139 266     1132423 119117769
+longphase_10x_1.vcf     chr11   file0   file1   96777   87873   80.79681        0       0.00000 271     87849   87578   92      0.10505 78/7    0.09706 8236    9.37518 92      0.10505       311     970097  121221995
+...
+```
+
+#### The complete list of compare parameters
+```
+Usage:  compare [OPTION] ... TRUTH.vcf  QUERY.vcf
+        Compare two phased VCF files (the first is treated as truth,
+        the second as the query being evaluated).
+
+  -h, --help                     display this help and exit.
+
+require arguments:
+      Exactly two phased VCF/BCF files.  The first one is treated
+      as the ground-truth phasing; the second is the query.
+
+optional arguments:
+  -o, --out-prefix=NAME          prefix of output TSV file.
+                                 default: compare_result
+  -t, --threads=NUM              number of threads used for the parallel
+                                 switch / Hamming computation. default: 1
+  -n, --names=TRUTH,QUERY        comma-separated pair of data-set names
+                                 used in the report (truth first).
+  -s, --sample=SAMPLE            name of the sample to process.
+                                 default: first sample found in VCF
+      --ignore-sample-name       for single-sample VCFs, ignore sample
+                                 name and assume all samples are the same.
+      --only-snvs                only process SNVs, ignore all other
+                                 variants.
+      --sw-bed=FILE              write per-switch-error BED records to
+                                 FILE (useful for debugging).  Columns:
+                                 chrom, start(0-based), end(exclusive),
+                                 type, ps_truth, ps_query, dataset_pair.
+      --regions=REGIONS          restrict comparison to these regions.
+                                 Comma-separated list, each entry is
+                                 'chrN', 'chrN:start-end', or 'chrN:pos'
+                                 using 1-based inclusive coordinates.
+                                 Example: --regions=chr1:1000000-2000000
+      --regions-bed=FILE         restrict comparison to intervals in a
+                                 BED file (0-based half-open).  Can be
+                                 combined with --regions.
+```
+
 ---
 ## Input Preparation
 #### Generate reference index
@@ -348,20 +506,30 @@ minimap2 -ax map-ont -y reference.fasta methylcall.raw.fastq
 
 ---
 ## Comparison with other SNP-phasing programs
-LongPhase is >30x faster than WhatsHap and Margin and produces much larger blocks when tested on HG002, HG003,and HG004.
-![btac058f3](https://github.com/twolinin/longphase/assets/6086073/af3a75a1-6268-4700-9dcc-4a6f34e86f7a)
+- SNP-only (program comparison): v2.0 maintains ~0.055–0.056% switch error; N50 is consistently higher than WhatsHap.
+<img width="3789" height="1988" alt="snp_phasing_comparison_new" src="https://github.com/user-attachments/assets/1bfbbed8-1417-4023-90c9-bae71d65d94f" />
+
+- SNP+INDEL (program comparison): v2.0 achieves lower error and higher N50 than WhatsHap.
+<img width="3789" height="1988" alt="snp_indel_phasing_comparison_new" src="https://github.com/user-attachments/assets/b4c00074-ec49-45bd-a67b-d508b2c5a8ce" />
+
+- SNP-Methylation (program comparison): v2.0 ModCall-only yields higher N50 than both v2.0 SNP-based and MethPhaser.
+<img width="4800" height="2400" alt="477704574-45001492-2e2f-4370-a533-83146560502d" src="https://github.com/user-attachments/assets/f9785ef9-2643-4bc3-95bf-e5723a75e099" />
+
+- Strategy comparison (SNP / SNP+INDEL / SNP+Methylation / SNP+INDEL+Methylation): adding Methylation—especially tri-modal—markedly raises N50 while keeping switch error low.
+<img width="4800" height="2400" alt="Strategy comparison" src="https://github.com/user-attachments/assets/8364cb36-546a-4e78-8724-8ff09136828f" />
 
 ## Speed
-LongPhase can phase a human genome within 1-2 minutes.
-phase (-t 24) | v1.6 (Time) | v1.6 (Memory)
+LongPhase can phase a human genome within 1-3 minutes.
+phase (-t 24) | v2.0 (Time) | v2.0 (Memory)
 -- | -- | -- 
-HG002 ONT R10.4.1 10x |  39s | 15.1G
-HG002 ONT R10.4.1 20x |  53s | 15.6G
-HG002 ONT R10.4.1 30x |  68s | 24.4G
-HG002 ONT R10.4.1 40x |  217s | 26.6G
-HG002 ONT R10.4.1 50x |  262s | 22.2G
-HG002 ONT R10.4.1 60x |  113s | 33.4G
+HG002 ONT R10.4.1 10x |  39s | 26.9G
+HG002 ONT R10.4.1 20x |  75s | 33.8G
+HG002 ONT R10.4.1 30x |  102s | 39.3G
+HG002 ONT R10.4.1 40x |  124s | 44.5G
+HG002 ONT R10.4.1 50x |  171s | 47.6G
+HG002 ONT R10.4.1 60x |  180s | 52.8G
 
+*If the device is running low on memory, you can control memory usage by reducing the number of threads (-t).
 
 ---
 ## Citation

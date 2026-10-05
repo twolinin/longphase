@@ -44,19 +44,19 @@ public:
 
 class BaseVairantParser {
 public:
-  BaseVairantParser() : params(nullptr), commandLine(false) {}
+  BaseVairantParser() : params(nullptr), commandLine(false), pe_def(false) {}
   // input parser
   void compressParser(std::string &variantFile);
   void unCompressParser(std::string &variantFile);
   virtual void parserProcess(std::string &input) = 0;
   // output parser
   void compressInput(std::string variantFile, std::string resultFile,
-                     PhasingResult phasingResult);
+                     PhasingResult &phasingResult);
   void unCompressInput(std::string variantFile, std::string resultFile,
-                       PhasingResult phasingResult);
+                       PhasingResult &phasingResult);
   void dispatchWriteResult(const std::string &inputFile,
                            const std::string &outputFile,
-                           PhasingResult phasingResult);
+                           PhasingResult &phasingResult);
   void writeLine(std::string &input, bool &ps_def,
                  std::ofstream &resultVcf,
                  PhasingResult &phasingResult);
@@ -64,6 +64,13 @@ public:
 protected:
   PhasingParameters *params;
   bool commandLine;
+  // Tracks whether ##INFO=<ID=PE|H1|H2,...> headers have been emitted
+  // so the three lines are written exactly once per output VCF, even
+  // when the input already declares them.
+  bool pe_def;
+  // Emit the three ##INFO header lines for PE / H1 / H2 exactly once.
+  // Idempotent: repeated calls are no-ops after the first successful call.
+  void writePeInfoHeaders(std::ofstream &resultVcf);
   virtual void writeMetaHeader(const std::string &input, bool &ps_def,
                                std::ofstream &resultVcf);
   void writeColumnHeader(const std::string &input, bool &ps_def,
@@ -90,6 +97,8 @@ private:
 
   // Track the position of filtered indels
   std::map<std::string, std::set<int>> filteredIndelPositions;
+  // <prefix>_removed_indels.log, open only when --indelQuality is set
+  std::ofstream removedIndelsLog;
 
   // override input parser
   void parserProcess(std::string &input);
@@ -112,7 +121,7 @@ public:
 
   int getLastSNP(std::string chrName);
 
-  void writeResult(PhasingResult phasingResult);
+  void writeResult(PhasingResult &phasingResult);
 
   bool findSNP(std::string chr, int posistion);
 
@@ -133,6 +142,8 @@ private:
   // override input parser
   void parserProcess(std::string &input);
   // override output parser
+  void writeMetaHeader(const std::string &input, bool &ps_def,
+                       std::ofstream &resultVcf);
   void writeDataLine(const std::string &input, std::ofstream &resultVcf,
                      PhasingResult &phasingResult);
 
@@ -142,7 +153,7 @@ public:
 
   std::map<int, std::map<int, bool>> getVariants(std::string chrName);
 
-  void writeResult(PhasingResult phasingResult);
+  void writeResult(PhasingResult &phasingResult);
 
   bool findSV(std::string chr, int posistion);
 };
@@ -168,6 +179,8 @@ private:
   // override input parser
   void parserProcess(std::string &input);
   // override output parser
+  void writeMetaHeader(const std::string &input, bool &ps_def,
+                       std::ofstream &resultVcf);
   void writeDataLine(const std::string &input, std::ofstream &resultVcf,
                      PhasingResult &phasingResult);
 
@@ -178,7 +191,7 @@ public:
   METHParser(PhasingParameters &params, SnpParser &snpFile, SVParser &svFile);
   ~METHParser();
 
-  void writeResult(PhasingResult phasingResult);
+  void writeResult(PhasingResult &phasingResult);
 };
 
 struct Alignment {

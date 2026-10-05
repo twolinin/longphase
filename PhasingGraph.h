@@ -4,6 +4,7 @@
 #include "Util.h"
 #include "ParsingBam.h"
 #include "PhasingProcess.h"
+#include <set>
 
 
 typedef std::pair<int, int> PosAllele;
@@ -63,14 +64,6 @@ class SubEdge{
     
     private:
         int readCount;
-        // Edge information. The vector store next pos
-        // < next position, read name >
-        std::map<int, std::vector<std::string> > *refRead;
-        std::map<int, std::vector<std::string> > *altRead;
-        // sum of edge pair quality, pos1 quality + pos2 quality
-        // < next position, quality sum >
-        std::map<int, int> *refQuality;
-        std::map<int, int> *altQuality;
         // < next position, read count >
         std::map<int, float> *refReadCount;
         std::map<int, float> *altReadCount;
@@ -82,16 +75,13 @@ class SubEdge{
         
         void destroy();
         
-        void addSubEdge(int currentQuality, Variant connectNode, std::string readName, int baseQuality, double edgeWeight);
+        void addSubEdge(int currentQuality, Variant connectNode, const std::string &readName, int baseQuality, double edgeWeight);
         std::pair<float,float> BestPair(int targetPos);
         float getRefReadCount(int targetPos);
         float getAltReadCount(int targetPos);        
         
         std::vector<std::string> showEdge(std::string message);
         std::vector<std::pair<int,int>> getConnectPos();
- 
-        int getQuality(PosAllele targetPos);
-        int getAvgQuality(PosAllele targetPos);
 
 };
 
@@ -145,16 +135,15 @@ class VairiantGraph{
         std::string *chrName;
         PhasingParameters *params;
         std::string *ref;
-        std::vector<std::string> dotResult;
+        std::string dotResult;
         std::vector<ReadVariant> *readVariant;
         
         // By default, a Map in C++ is sorted in increasing order based on its key.
         // position, edge
         std::map<int,VariantEdge*> *edgeList;
 
-        // Each position will record the included reads and their corresponding base qualities.
-        // position, < read name, quality>
-        std::map<int,ReadBaseMap*> *totalVariantInfo;
+        // Variant positions in genomic order.
+        std::set<int> variantPositions;
         // position, type < 0=SNP 1=SV 2=MOD 3=INDEL >
         std::map<int,int> *variantType;
 
@@ -167,6 +156,15 @@ class VairiantGraph{
         std::map<PosAllele,int> *subNodeHP;
         // store phased read and read's haplotype
         std::map<std::string,int> *readHpMap;
+
+        // per-position vote diagnostics recorded during
+        // scanVariantsAndBuildBlocks() and consumed in exportResult().
+        // position -> Shannon entropy of (h1, h2) in bits (0..1)
+        std::map<int, float> *variantEntropy;
+        // position -> weighted HP1 vote count used to derive entropy
+        std::map<int, float> *h1weight;
+        // position -> weighted HP2 vote count used to derive entropy
+        std::map<int, float> *h2weight;
 
         // produce PS tag and determine phased GT tag
         void storeResultPath();
@@ -184,7 +182,7 @@ class VairiantGraph{
         void scanVariantsAndBuildBlocks(
             std::map<int, int>& hpResult,
             PhasedBlocks& phasedBlocks,
-            std::vector<std::string>& outDotResult);
+            std::string& outDotResult);
 
         void materializeBlockResults(
             const std::map<int, int>& hpResult,
