@@ -42,13 +42,24 @@ static const char *CORRECT_USAGE_MESSAGE =
 
 "haplotag read correction arguments:\n"
 "   -m, --readConfidence=[0.5~1]           The confidence of a read being assigned to any haplotype. default:0.65\n"
-"   -n, --snpConfidence=[0.5~1]            The confidence of assigning two alleles of a SNP to different haplotypes. default:0.75\n"
+"   -n, --snpConfidence=[0.5~1]            The confidence of assigning two alleles of a SNP to different haplotypes. default:0.75\n\n"
+
+"GNN arguments:\n"
+"   --disableGNN                           phase without the GNN model. default: False\n"
+"   --gnnBreakThreshold=[0~1]              unphase a variant when its GNN error probability exceeds\n"
+"                                          this value. default:0.30\n"
+"   --gnnPeThreshold=[0~1]                 phasing entropy at which a variant is checked by the GNN. default:0.80\n"
+"   --gnnWindow=[1~63]                     variants on each side of a checked variant given to the GNN. default:20\n"
+"   --gnnRespectBridge                     do not unphase bridge variants. default: False\n"
+"   --gnnNoSplitBlocks                     do not split phase blocks that become disconnected\n"
+"                                          after a bridge variant is unphased. default: False\n"
 
 "\n";
 
 static const char* shortopts = "s:b:o:t:r:d:1:a:q:x:p:e:n:m:L:w:h:";
 
-enum { OPT_HELP = 1 , DOT_FILE, SV_FILE, MOD_FILE, IS_ONT, IS_PB, PHASE_INDEL, INDEL_QUALITY, VERSION};
+enum { OPT_HELP = 1 , DOT_FILE, SV_FILE, MOD_FILE, IS_ONT, IS_PB, PHASE_INDEL, INDEL_QUALITY, VERSION,
+       DISABLE_GNN, GNN_BREAK_THRESHOLD, GNN_PE_THRESHOLD, GNN_WINDOW, GNN_RESPECT_BRIDGE, GNN_NO_SPLIT_BLOCKS};
 
 static const struct option longopts[] = { 
     { "help",                 no_argument,        NULL, OPT_HELP },
@@ -77,6 +88,12 @@ static const struct option longopts[] = {
     { "overlapThreshold",     required_argument,  NULL, 'L' },
     { "svWindow",             required_argument,  NULL, 'w' },
     { "svThreshold",          required_argument,  NULL, 'h' },
+    { "disableGNN",           no_argument,        NULL, DISABLE_GNN },
+    { "gnnBreakThreshold",    required_argument,  NULL, GNN_BREAK_THRESHOLD },
+    { "gnnPeThreshold",       required_argument,  NULL, GNN_PE_THRESHOLD },
+    { "gnnWindow",            required_argument,  NULL, GNN_WINDOW },
+    { "gnnRespectBridge",     no_argument,        NULL, GNN_RESPECT_BRIDGE },
+    { "gnnNoSplitBlocks",     no_argument,        NULL, GNN_NO_SPLIT_BLOCKS },
     { NULL, 0, NULL, 0 }
 };
 
@@ -106,6 +123,12 @@ namespace opt
     static double overlapThreshold = 0.2;
     static int svWindow = 20;
     static double svThreshold = 0.1;
+    static bool enableGNN = true;
+    static float gnnBreakThreshold = 0.30f;
+    static float gnnPeThreshold = 0.80f;
+    static int gnnWindow = 20;
+    static bool gnnRespectBridge = false;
+    static bool gnnSplitBlocks = true;
     static std::string command;
 }
 
@@ -147,6 +170,12 @@ void PhasingOptions(int argc, char** argv)
         case DOT_FILE: opt::generateDot=true; break;
         case IS_ONT: opt::isONT=true; break;
         case IS_PB: opt::isPB=true; break;
+        case DISABLE_GNN: opt::enableGNN=false; break;
+        case GNN_BREAK_THRESHOLD: arg >> opt::gnnBreakThreshold; break;
+        case GNN_PE_THRESHOLD: arg >> opt::gnnPeThreshold; break;
+        case GNN_WINDOW: arg >> opt::gnnWindow; break;
+        case GNN_RESPECT_BRIDGE: opt::gnnRespectBridge=true; break;
+        case GNN_NO_SPLIT_BLOCKS: opt::gnnSplitBlocks=false; break;
         
         case OPT_HELP:
             std::cout << CORRECT_USAGE_MESSAGE;
@@ -310,6 +339,29 @@ void PhasingOptions(int argc, char** argv)
         }
     }
     
+    if ( opt::gnnBreakThreshold < 0 || opt::gnnBreakThreshold > 1 ){
+        std::cerr << SUBPROGRAM " invalid gnnBreakThreshold. value: "
+                  << opt::gnnBreakThreshold
+                  << "\n please check --gnnBreakThreshold=[0~1]\n";
+        die = true;
+    }
+
+    if ( opt::gnnPeThreshold < 0 || opt::gnnPeThreshold > 1 ){
+        std::cerr << SUBPROGRAM " invalid gnnPeThreshold. value: "
+                  << opt::gnnPeThreshold
+                  << "\n please check --gnnPeThreshold=[0~1]\n";
+        die = true;
+    }
+
+    // Each variant adds two graph nodes and the model takes at most 256,
+    // so (2*window+1)*2 <= 256.
+    if ( opt::gnnWindow < 1 || opt::gnnWindow > 63 ){
+        std::cerr << SUBPROGRAM " invalid gnnWindow. value: "
+                  << opt::gnnWindow
+                  << "\n please check --gnnWindow=[1~63]\n";
+        die = true;
+    }
+
     if (die)
     {
         std::cerr << "\n" << CORRECT_USAGE_MESSAGE;
@@ -354,6 +406,13 @@ int PhasingMain(int argc, char** argv, std::string in_version)
     
     ecParams.svWindow=opt::svWindow;
     ecParams.svThreshold=opt::svThreshold;
+
+    ecParams.enableGNN=opt::enableGNN;
+    ecParams.gnnBreakThreshold=opt::gnnBreakThreshold;
+    ecParams.gnnPeThreshold=opt::gnnPeThreshold;
+    ecParams.gnnWindow=opt::gnnWindow;
+    ecParams.gnnRespectBridge=opt::gnnRespectBridge;
+    ecParams.gnnSplitBlocks=opt::gnnSplitBlocks;
 
     ecParams.version=in_version;
     ecParams.command=opt::command;

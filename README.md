@@ -20,6 +20,8 @@ For somatic phasing using tumor-only samples, please use [longphase-to](https://
 		- [The complete list of haplotag parameters](#the-complete-list-of-haplotag-parameters)
   	- [Modcall command](#modcall-command)
   		- [The complete list of modcall parameters](#the-complete-list-of-modcall-parameters)
+  	- [Compare command](#compare-command)
+  		- [The complete list of compare parameters](#the-complete-list-of-compare-parameters)
 - [Input Preparation](#input-preparation)
 	- [Generate reference index](#generate-reference-index)
 	- [Generate alignment and index files](#generate-alignment-and-index-files)
@@ -31,10 +33,10 @@ For somatic phasing using tumor-only samples, please use [longphase-to](https://
 - [Contact](#contact)
 ---
 ## Installation
-You are recommended to download a [linux 64bit binary release](https://github.com/twolinin/longphase/releases/download/v2.0.2/longphase_linux-x64.tar.xz) without compilation. 
+You are recommended to download a [linux 64bit binary release](https://github.com/twolinin/longphase/releases/download/v2.1/longphase_linux-x64.tar.xz) without compilation. 
 
 ```
-wget https://github.com/twolinin/longphase/releases/download/v2.0.2/longphase_linux-x64.tar.xz
+wget https://github.com/twolinin/longphase/releases/download/v2.1/longphase_linux-x64.tar.xz
 tar -xJf longphase_linux-x64.tar.xz
 ```
 
@@ -119,6 +121,7 @@ optional arguments:
    -t, --threads=Num                      number of thread. default:1
    -o, --out-prefix=NAME                  prefix of phasing result. default: result
    --indels                               phase small indel. default: False
+   --indelQuality=Num                     filter indels with QUAL less than threshold (only effective when --indels is enabled). default: 0
    --dot                                  each contig/chromosome will generate dot file.
 
 parse alignment arguments:
@@ -141,6 +144,15 @@ haplotag read correction arguments:
    -m, --readConfidence=[0.5~1]           The confidence of a read being assigned to any haplotype. default:0.65
    -n, --snpConfidence=[0.5~1]            The confidence of assigning two alleles of a SNP to different haplotypes. default:0.75
 
+GNN arguments:
+   --disableGNN                           phase without the GNN model. default: False
+   --gnnBreakThreshold=[0~1]              unphase a variant when its GNN error probability exceeds
+                                          this value. default:0.30
+   --gnnPeThreshold=[0~1]                 phasing entropy at which a variant is checked by the GNN. default:0.80
+   --gnnWindow=[1~63]                     variants on each side of a checked variant given to the GNN. default:20
+   --gnnRespectBridge                     do not unphase bridge variants. default: False
+   --gnnNoSplitBlocks                     do not split phase blocks that become disconnected
+                                          after a bridge variant is unphased. default: False
 
 ```
 ---
@@ -276,6 +288,82 @@ phasing arguments:
                                     higher threshold requires greater consistency in the reads. default: 0.9
 ```
 
+### Compare command
+The `compare` command evaluates a phased VCF against a truth set (for example a GIAB benchmark) and reports switch errors, Hamming distance and phase-block statistics. Its metrics follow the definitions of `whatshap compare`, and the per-block computations run in parallel. The first VCF is the truth and the second is the query being evaluated. Use `--ignore-sample-name` when the two VCFs contain one sample each but under different sample names, as is usual when comparing against a benchmark. The report is written to `<out-prefix>.tsv` (default `compare_result.tsv`).
+```
+longphase compare \
+benchmark.vcf \
+phased_snp.vcf \
+-t 4 \
+--ignore-sample-name \
+-o compare_result
+```
+The report has three parts.
+Lines starting with `##` describe the query VCF as a whole, regardless of the truth set: the number of phased SNVs and the number, N50 and total length of its phase blocks.
+```
+##Total phased SNV = 2151703
+##Total Block = 7016
+##Total Block N50 = 939235
+##Total Block Sum = 2544941127
+```
+Lines starting with `###` summarise the comparison over the chromosomes present in both VCFs. Only these chromosomes can be assessed, so these values can differ from the `##` totals.
+`Phased_SNV` counts heterozygous SNVs that are phased in both VCFs. The denominator of `Phased_SNV(%)` is the number of heterozygous SNVs in the truth on the assessed chromosomes, including those the truth leaves unphased, so comparing a VCF with itself does not give 100%. `Phased_INDEL(%)` is defined the same way for indels.
+The metrics follow the definitions used by whatshap compare, so switch errors and Hamming distances are directly comparable with results produced by WhatsHap.
+```
+###Sample       Phased_SNV      Phased_SNV(%)   Phased_INDEL    Phased_INDEL(%) SNV_SW  SNV_SW(%)       Hamming_Dis.(%) No._of_Block    Block_N50(bp)   Block_Sum
+###longphase_10x_1.vcf  1873883 78.11491        0       0.00000 2277    0.12187 6.92789 6029    939511  2480308905
+```
+The remaining lines give the same comparison for each chromosome separately.
+```
+#sample chromosome      dataset1        dataset2        common_het      phased_SNV      phased_SNV(%)   phased_INDEL    phased_INDEL(%) intersection_blocks     covered_variants
+        all_assessed_pairs      all_switches    all_switch_rate(%)      switchflips(sw/fl)      switchflip_rate(%)      blockwise_hamming       blockwise_hamming_rate(%)       SNV_SW
+        SNV_SW(%)       No._of_Block    Block_N50(bp)   Block_Sum
+longphase_10x_1.vcf     chr1    file0   file1   158325  142906  76.98515        0       0.00000 427     142882  142455  197     0.13829 149/24  0.12144 7542    5.27848 197     0.1382
+9       494     986853  224903506
+longphase_10x_1.vcf     chr10   file0   file1   107839  97831   79.31622        0       0.00000 218     97820   97602   138     0.14139 98/20   0.12090 11305   11.55694        138           0.14139 266     1132423 119117769
+longphase_10x_1.vcf     chr11   file0   file1   96777   87873   80.79681        0       0.00000 271     87849   87578   92      0.10505 78/7    0.09706 8236    9.37518 92      0.10505       311     970097  121221995
+...
+```
+
+#### The complete list of compare parameters
+```
+Usage:  compare [OPTION] ... TRUTH.vcf  QUERY.vcf
+        Compare two phased VCF files (the first is treated as truth,
+        the second as the query being evaluated).
+
+  -h, --help                     display this help and exit.
+
+require arguments:
+      Exactly two phased VCF/BCF files.  The first one is treated
+      as the ground-truth phasing; the second is the query.
+
+optional arguments:
+  -o, --out-prefix=NAME          prefix of output TSV file.
+                                 default: compare_result
+  -t, --threads=NUM              number of threads used for the parallel
+                                 switch / Hamming computation. default: 1
+  -n, --names=TRUTH,QUERY        comma-separated pair of data-set names
+                                 used in the report (truth first).
+  -s, --sample=SAMPLE            name of the sample to process.
+                                 default: first sample found in VCF
+      --ignore-sample-name       for single-sample VCFs, ignore sample
+                                 name and assume all samples are the same.
+      --only-snvs                only process SNVs, ignore all other
+                                 variants.
+      --sw-bed=FILE              write per-switch-error BED records to
+                                 FILE (useful for debugging).  Columns:
+                                 chrom, start(0-based), end(exclusive),
+                                 type, ps_truth, ps_query, dataset_pair.
+      --regions=REGIONS          restrict comparison to these regions.
+                                 Comma-separated list, each entry is
+                                 'chrN', 'chrN:start-end', or 'chrN:pos'
+                                 using 1-based inclusive coordinates.
+                                 Example: --regions=chr1:1000000-2000000
+      --regions-bed=FILE         restrict comparison to intervals in a
+                                 BED file (0-based half-open).  Can be
+                                 combined with --regions.
+```
+
 ---
 ## Input Preparation
 #### Generate reference index
@@ -352,28 +440,28 @@ minimap2 -ax map-ont -y reference.fasta methylcall.raw.fastq
 
 ---
 ## Comparison with other SNP-phasing programs
-- SNP-only (program comparison): v2.0 maintains ~0.055–0.056% switch error; N50 is consistently higher than WhatsHap.
-<img width="3789" height="1988" alt="snp_phasing_comparison_new" src="https://github.com/user-attachments/assets/1bfbbed8-1417-4023-90c9-bae71d65d94f" />
+- SNP-only: LongPhase v2.1 reports 2.9–3.6× fewer switch errors than WhatsHap and 3.3–4.6× fewer than HapCUT2 across 10–60×, with comparable block N50.
+<img width="3603" height="1449" alt="Screenshot from 2026-10-06 09-31-25" src="https://github.com/user-attachments/assets/e15619d6-7dfc-4e66-86d0-4203010de4f8" />
 
-- SNP+INDEL (program comparison): v2.0 achieves lower error and higher N50 than WhatsHap.
-<img width="3789" height="1988" alt="snp_indel_phasing_comparison_new" src="https://github.com/user-attachments/assets/b4c00074-ec49-45bd-a67b-d508b2c5a8ce" />
+- SNP+INDEL: LongPhase v2.1 halves WhatsHap's switch error rate at every coverage (0.027% vs 0.097% at 60×) at a block N50 within 12% of WhatsHap's.
+<img width="3651" height="1457" alt="Screenshot from 2026-10-06 09-30-42" src="https://github.com/user-attachments/assets/e6db7057-ac4a-40f6-8f5e-8767cc5b7736" />
 
-- SNP-Methylation (program comparison): v2.0 ModCall-only yields higher N50 than both v2.0 SNP-based and MethPhaser.
-<img width="4800" height="2400" alt="477704574-45001492-2e2f-4370-a533-83146560502d" src="https://github.com/user-attachments/assets/f9785ef9-2643-4bc3-95bf-e5723a75e099" />
+- SNP+Methylation: LongPhase v2.1 reports both a lower switch error rate and a longer block N50 than MethPhaser (0.023% vs 0.034% and 3.09 vs 2.91 Mb at 60×). MethPhaser was run on the same LongPhase phasing rather than its default WhatsHap input, so the comparison isolates the methylation step.
+<img width="3651" height="1457" alt="Screenshot from 2026-10-06 09-31-00" src="https://github.com/user-attachments/assets/78aeccf6-ce58-4a5e-85c8-7e589ddf2fb9" />
 
-- Strategy comparison (SNP / SNP+INDEL / SNP+Methylation / SNP+INDEL+Methylation): adding Methylation—especially tri-modal—markedly raises N50 while keeping switch error low.
-<img width="4800" height="2400" alt="Strategy comparison" src="https://github.com/user-attachments/assets/8364cb36-546a-4e78-8724-8ff09136828f" />
+- Strategy comparison (SNP / SNP+INDEL / SNP+Methylation / SNP+INDEL+Methylation): methylation lengthens blocks essentially for free — N50 rises from 2.86 to 3.09 Mb at 60× with no change in switch error rate — whereas indels buy more contiguity (3.69 Mb) at a small cost in accuracy (0.027% vs 0.023%). Combining all three gives the longest blocks (4.10 Mb) at the indel-level error rate.
+<img width="3651" height="1457" alt="Screenshot from 2026-10-06 09-30-27" src="https://github.com/user-attachments/assets/5eb8f510-f712-468f-a616-96c4c30e9c20" />
 
 ## Speed
-LongPhase can phase a human genome within 1-3 minutes.
-phase (-t 24) | v2.0 (Time) | v2.0 (Memory)
+LongPhase can phase a human genome within 1-4 minutes.
+phase (-t 24) | v2.1 (Time) | v2.1 (Memory)
 -- | -- | -- 
-HG002 ONT R10.4.1 10x |  39s | 26.9G
-HG002 ONT R10.4.1 20x |  75s | 33.8G
-HG002 ONT R10.4.1 30x |  102s | 39.3G
-HG002 ONT R10.4.1 40x |  124s | 44.5G
-HG002 ONT R10.4.1 50x |  171s | 47.6G
-HG002 ONT R10.4.1 60x |  180s | 52.8G
+HG002 ONT R10.4.1 10x |  67s | 20.3G
+HG002 ONT R10.4.1 20x |  110s | 24.2G
+HG002 ONT R10.4.1 30x |  151s | 26.1G
+HG002 ONT R10.4.1 40x |  187s | 27.3G
+HG002 ONT R10.4.1 50x |  227s | 29.5G
+HG002 ONT R10.4.1 60x |  240s | 30.9G
 
 *If the device is running low on memory, you can control memory usage by reducing the number of threads (-t).
 

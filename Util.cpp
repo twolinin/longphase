@@ -18,6 +18,41 @@ std::string getTargetString(std::string line, std::string start_sign, std::strin
     return line.substr(start,target_length);
 }
 
+int findFieldValueStart(const std::string &format, const std::string &sample,
+                        const std::string &tag) {
+  int colon_pos = 0;
+  int tag_pos = format.find(tag);
+  for (int i = 0; i < tag_pos; i++) {
+    if (format[i] == ':')
+      colon_pos++;
+  }
+  int current_colon = 0;
+  int value_start = 0;
+  for (unsigned int i = 0; i < sample.length(); i++) {
+    if (current_colon >= colon_pos)
+      break;
+    if (sample[i] == ':')
+      current_colon++;
+    value_start++;
+  }
+  return value_start;
+}
+
+bool isDangerIndel(int variant_pos, const std::string &ref, size_t ref_allele_len,
+                   size_t alt_allele_len) {
+  if (ref_allele_len <= 1 && alt_allele_len <= 1)
+    return false;
+
+  std::string repeat = ref.substr(variant_pos + 1, 2);
+  int ref_pos = variant_pos;
+  for (int i = 0; i < 5; i++) {
+    if (repeat[0] != ref[ref_pos + 1] || repeat[1] != ref[ref_pos + 2])
+      return false;
+    ref_pos += 2;
+  }
+  return true;
+}
+
 int homopolymerLength(int snp_pos, const std::string &ref_string){
     int homopolymer_length = 1;
     int ref_len = ref_string.length();

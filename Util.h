@@ -19,6 +19,12 @@ struct PhasingElement{
     // i.e. 0|1  or   1|0
     std::string RAstatus;
     int block;
+    // vote-based diagnostics attached only when the position was phased.
+    // Consumers (writeDataLine) check whether the element exists in
+    // PhasingResult; if it does, these three values are always valid.
+    float h1 = 0.0f;      // weighted HP1 vote count at this position
+    float h2 = 0.0f;      // weighted HP2 vote count at this position
+    float entropy = 0.0f; // Shannon entropy of (h1, h2), in bits (0..1)
 };
 typedef std::map<std::string,PhasingElement> PhasingResult;
 typedef std::map<std::string,PhasingResult> ChrPhasingResult;
@@ -107,6 +113,14 @@ struct less_than_key
 
 
 std::string getTargetString(std::string line, std::string start_sign, std::string end_sign);
+
+// Returns the character start position in `sample` for the value of `tag` in `format`.
+int findFieldValueStart(const std::string &format, const std::string &sample,
+                        const std::string &tag);
+
+// Marks indels in tandem repeats (2-mer repeated >= 5 times) as dangerous.
+bool isDangerIndel(int variant_pos, const std::string &ref, size_t ref_allele_len,
+                   size_t alt_allele_len);
 
 int homopolymerLength(int snp_pos, const std::string &ref_string);
 

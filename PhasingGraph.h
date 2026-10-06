@@ -4,16 +4,23 @@
 #include "Util.h"
 #include "ParsingBam.h"
 #include "PhasingProcess.h"
+#include <set>
 
 
 typedef std::pair<int, int> PosAllele;
 typedef std::map<std::string, int> ReadBaseMap;
-using PosVec = std::vector<int>;
+using HpAlleleCountMap = std::map<int, std::map<int, std::map<double, double>>>;
+using PhasedBlocks = std::map<int, std::vector<int>>;
 
 class Clip{
     private:
         std::string chr;
-        PosVec CNVtoLOHInterval(SnpParser &snpMap);
+
+        static const int CNV_AREA_SIZE             = 30000;
+        static const int CNV_PUSH_THRESHOLD        = 5;
+        static const int CNV_EXTEND_THRESHOLD      = 30;
+        static const int CNV_MAX_LENGTH            = 200000;
+        static const int CNV_SLOWUP_COMMIT_THRESHOLD = 20;
 
         struct cnvState{
             cnvState():push(false),slowUp(false),slowDown(false),currCount(0),rejectCount(0),pullDownCount(0),slowDownCount(0),candidateStartPos(-1),candidateEndPos(-1){}
@@ -42,28 +49,21 @@ class Clip{
         };
         cnvState state;
         void updateThreshold(int upCount);
+        void handleIdleState(int upCount, int downCount, int pos);
+        void handleActiveState(int upCount, int downCount, int pos);
+        void handleSlowUpState(int upCount, int downCount, int pos);
 
     public:
         Clip(std::string &chr, ClipCount &inClipCount);
         ~Clip();
         std::vector<std::pair<int, int>> cnvVec;
-        void getCNVInterval(ClipCount &clipCount, std::string &chr);
-        PosVec detectLOH(SnpParser &snpMap);
-        std::string getChr() const { return chr;}
+        void getCNVInterval(ClipCount &clipCount);
 };
 
 class SubEdge{
     
     private:
         int readCount;
-        // Edge information. The vector store next pos
-        // < next position, read name >
-        std::map<int, std::vector<std::string> > *refRead;
-        std::map<int, std::vector<std::string> > *altRead;
-        // sum of edge pair quality, pos1 quality + pos2 quality
-        // < next position, quality sum >
-        std::map<int, int> *refQuality;
-        std::map<int, int> *altQuality;
         // < next position, read count >
         std::map<int, float> *refReadCount;
         std::map<int, float> *altReadCount;
@@ -75,16 +75,13 @@ class SubEdge{
         
         void destroy();
         
-        void addSubEdge(int currentQuality, Variant connectNode, std::string readName, int baseQuality, double edgeWeight);
+        void addSubEdge(int currentQuality, Variant connectNode, const std::string &readName, int baseQuality, double edgeWeight);
         std::pair<float,float> BestPair(int targetPos);
         float getRefReadCount(int targetPos);
         float getAltReadCount(int targetPos);        
         
         std::vector<std::string> showEdge(std::string message);
         std::vector<std::pair<int,int>> getConnectPos();
- 
-        int getQuality(PosAllele targetPos);
-        int getAvgQuality(PosAllele targetPos);
 
 };
 
@@ -138,16 +135,17 @@ class VairiantGraph{
         std::string *chrName;
         PhasingParameters *params;
         std::string *ref;
-        std::vector<std::string> dotResult;
+        std::string dotResult;
+        // graph edges for the GNN
+        std::vector<DotEdge> gnnEdges;
         std::vector<ReadVariant> *readVariant;
         
         // By default, a Map in C++ is sorted in increasing order based on its key.
         // position, edge
         std::map<int,VariantEdge*> *edgeList;
 
-        // Each position will record the included reads and their corresponding base qualities.
-        // position, < read name, quality>
-        std::map<int,ReadBaseMap*> *totalVariantInfo;
+        // Variant positions in genomic order.
+        std::set<int> variantPositions;
         // position, type < 0=SNP 1=SV 2=MOD 3=INDEL >
         std::map<int,int> *variantType;
 
@@ -161,12 +159,38 @@ class VairiantGraph{
         // store phased read and read's haplotype
         std::map<std::string,int> *readHpMap;
 
+        // per-position vote diagnostics recorded during
+        // scanVariantsAndBuildBlocks() and consumed in exportResult().
+        // position -> Shannon entropy of (h1, h2) in bits (0..1)
+        std::map<int, float> *variantEntropy;
+        // position -> weighted HP1 vote count used to derive entropy
+        std::map<int, float> *h1weight;
+        // position -> weighted HP2 vote count used to derive entropy
+        std::map<int, float> *h2weight;
+
         // produce PS tag and determine phased GT tag
         void storeResultPath();
         
         void readCorrection();
 
+        void accumulateReadHaplotypeEvidence(const Variant& variant, double& refCount, double& altCount);
+
+        void assignReadHaplotypesAndCollectAlleleCounts(HpAlleleCountMap& hpAlleleCountMap);
+
+        void reassignVariantHaplotypes(const HpAlleleCountMap& hpAlleleCountMap);
+
         void edgeConnectResult();
+
+        void scanVariantsAndBuildBlocks(
+            std::map<int, int>& hpResult,
+            PhasedBlocks& phasedBlocks,
+            std::string& outDotResult);
+
+        void materializeBlockResults(
+            const std::map<int, int>& hpResult,
+            const PhasedBlocks& phasedBlocks,
+            std::map<PosAllele, int>& outBkResult,
+            std::map<PosAllele, int>& outSubNodeHP);
 
         void calculateCnvMismatchRate(std::vector<ReadVariant>& in_readVariant, Clip &clip);
 
@@ -175,6 +199,12 @@ class VairiantGraph{
         void calculateAverageMismatchRate(const Clip& clip, const std::map<int, std::map<int, std::vector<int>>>& cnvReadMmrate, std::map<int, double>& missRateMap);
 
         void filterHighMismatchVariants(std::vector<ReadVariant>& in_readVariant, const Clip& clip, const std::map<int, double>& missRateMap);
+
+        void filterOverlappingAlignments(std::vector<ReadVariant>& in_readVariant);
+
+        void applyCnvFilter(std::vector<ReadVariant>& in_readVariant, Clip& clip);
+
+        void buildVariantGraph(std::vector<ReadVariant>& in_readVariant);
 
         bool isPositionInRange(int position, int start, int end);
         
@@ -188,6 +218,7 @@ class VairiantGraph{
         
         void phasingProcess();
         void writingDotFile(std::string dotPrefix);
+        void exportGnnEdges(std::vector<DotEdge> &out);
         std::map<std::string,int>* getReadHP();
         void exportResult(std::string chrName, PhasingResult &result);
         int totalNode();
