@@ -441,16 +441,16 @@ minimap2 -ax map-ont -y reference.fasta methylcall.raw.fastq
 ---
 ## Comparison with other SNP-phasing programs
 - SNP-only: LongPhase v2.1 reports 2.9–3.6× fewer switch errors than WhatsHap and 3.3–4.6× fewer than HapCUT2 across 10–60×, with comparable block N50.
-<img width="865" height="608" alt="snvonly" src="https://github.com/user-attachments/assets/d0738f39-00f7-435f-810b-53d7453cda1b" />
+<img width="3603" height="1449" alt="Screenshot from 2026-10-06 09-31-25" src="https://github.com/user-attachments/assets/e15619d6-7dfc-4e66-86d0-4203010de4f8" />
 
 - SNP+INDEL: LongPhase v2.1 halves WhatsHap's switch error rate at every coverage (0.027% vs 0.097% at 60×) at a block N50 within 12% of WhatsHap's.
-<img width="845" height="603" alt="snv_indel" src="https://github.com/user-attachments/assets/9fa555dd-559d-4399-84da-492295b21545" />
+<img width="3651" height="1457" alt="Screenshot from 2026-10-06 09-30-42" src="https://github.com/user-attachments/assets/e6db7057-ac4a-40f6-8f5e-8767cc5b7736" />
 
 - SNP+Methylation: LongPhase v2.1 reports both a lower switch error rate and a longer block N50 than MethPhaser (0.023% vs 0.034% and 3.09 vs 2.91 Mb at 60×). MethPhaser was run on the same LongPhase phasing rather than its default WhatsHap input, so the comparison isolates the methylation step.
-<img width="856" height="601" alt="methphaser" src="https://github.com/user-attachments/assets/d39e45f5-310b-428a-b36d-58e76b0b443a" />
+<img width="3651" height="1457" alt="Screenshot from 2026-10-06 09-31-00" src="https://github.com/user-attachments/assets/78aeccf6-ce58-4a5e-85c8-7e589ddf2fb9" />
 
 - Strategy comparison (SNP / SNP+INDEL / SNP+Methylation / SNP+INDEL+Methylation): methylation lengthens blocks essentially for free — N50 rises from 2.86 to 3.09 Mb at 60× with no change in switch error rate — whereas indels buy more contiguity (3.69 Mb) at a small cost in accuracy (0.027% vs 0.023%). Combining all three gives the longest blocks (4.10 Mb) at the indel-level error rate.
-<img width="854" height="615" alt="cophasing" src="https://github.com/user-attachments/assets/065fdfe4-cb81-430e-bba2-ccea461415de" />
+<img width="3651" height="1457" alt="Screenshot from 2026-10-06 09-30-27" src="https://github.com/user-attachments/assets/5eb8f510-f712-468f-a616-96c4c30e9c20" />
 
 ## Speed
 LongPhase can phase a human genome within 1-4 minutes.
