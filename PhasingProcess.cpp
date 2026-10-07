@@ -378,6 +378,7 @@ int GNNModule::run() {
         std::cerr << "\n[GNN] WARNING: " << skipped_windows_.load()
                   << " windows skipped because they exceed " << MAX_NODES
                   << " graph nodes; reduce --window\n";
+    shareMergedPredictions();
 
     int total = 0, unph = 0;
     for (auto& kv_ch : predictions_)
@@ -967,6 +968,33 @@ void GNNModule::computeBlockSplits() {
     std::cerr << "[GNN] PS blocks split: " << total_splits.load()
               << ", new blocks: " << total_new.load()
               << ", variants reassigned: " << total_reassigned.load() << "\n";
+}
+
+// phase merges a run of consecutive 5mC positions into one graph node, so
+// the sites of a run were phased as one and must be unphased as one. The
+// node's own position carries the graph edges, so its prediction decides
+// for every site of the run.
+void GNNModule::shareMergedPredictions() {
+    int n = 0;
+    for (auto& kv : variants_) {
+        const std::string& ch = kv.first;
+        auto pit = predictions_.find(ch);
+        if (pit == predictions_.end()) continue;
+        auto& preds = pit->second;
+        std::unordered_set<int> phased_pos;
+        for (auto& v : kv.second) phased_pos.insert(v.pos);
+        for (auto& v : kv.second) {
+            if (v.link_pos < 0 || !phased_pos.count(v.link_pos)) continue;
+            auto it = preds.find(v.link_pos);
+            if (it != preds.end()) {
+                Prediction shared = it->second;   // copy before a possible rehash
+                preds[v.pos] = shared;
+            }
+            else preds.erase(v.pos);
+            n++;
+        }
+    }
+    std::cerr << "[GNN] 5mC sites sharing their merged node's prediction: " << n << "\n";
 }
 
 bool GNNModule::shouldUnphase(const Prediction& pr) const {

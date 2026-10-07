@@ -143,6 +143,7 @@ private:
     void computeGenomicFeatures();
     void computeBlockSplits();
     void computeOrphans();
+    void shareMergedPredictions();
     bool shouldUnphase(const Prediction& pr) const;
     // Pre-computed per-chromosome data
     struct ChromData {
