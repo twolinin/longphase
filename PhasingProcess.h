@@ -79,6 +79,10 @@ struct VariantInfo {
     int   indel_len;      // |len(alt) - len(ref)|
     float hp_len, gc_content, str_context, seq_entropy;
     GnnVariantType vtype = GVT_SNV;
+    // 5mC only: phase merges a run of consecutive 5mC positions (the two
+    // strands of a CpG) into one graph node at the first position of the
+    // run. Position of that node when it is another site, otherwise -1.
+    int   link_pos = -1;
 };
 
 struct Prediction {
@@ -128,12 +132,18 @@ private:
     // was split after a bridge was unphased)
     std::map<std::string, std::unordered_map<int, int>> ps_reassign_;
 
+    // Variants unphased only because GNN correction left them alone in
+    // their phase set: [chrom] = positions
+    std::map<std::string, std::unordered_set<int>> orphans_;
+
     void loadModel();
     void parseVCF();
     void parseSecondaryVCF(const std::string& path, GnnVariantType vtype);
     void loadDotEdges();
     void computeGenomicFeatures();
     void computeBlockSplits();
+    void computeOrphans();
+    bool shouldUnphase(const Prediction& pr) const;
     // Pre-computed per-chromosome data
     struct ChromData {
         std::unordered_map<int, int> ps_count;
