@@ -446,7 +446,7 @@ minimap2 -ax map-ont -y reference.fasta methylcall.raw.fastq
 - SNP+INDEL: LongPhase v2.1 halves WhatsHap's switch error rate at every coverage (0.027% vs 0.097% at 60×) at a block N50 within 12% of WhatsHap's.
 <img width="3651" height="1457" alt="Screenshot from 2026-10-06 09-30-42" src="https://github.com/user-attachments/assets/e6db7057-ac4a-40f6-8f5e-8767cc5b7736" />
 
-- SNP+Methylation: LongPhase v2.1 reports both a lower switch error rate and a longer block N50 than MethPhaser (0.023% vs 0.034% and 3.09 vs 2.91 Mb at 60×). MethPhaser was run on the same LongPhase phasing rather than its default WhatsHap input, so the comparison isolates the methylation step.
+- SNP+Methylation: LongPhase v2.1 reports a 1.5–1.7× lower switch error rate than MethPhaser at every coverage (0.023% vs 0.035% at 60×) and a lower Hamming distance (1.60% vs 3.95% at 60×). MethPhaser builds longer blocks by joining the blocks of its input (block N50 5.49 vs 3.09 Mb at 60×). MethPhaser was run on the same LongPhase phasing (without GNN correction) rather than its default WhatsHap input, so the comparison isolates the methylation step.
 <img width="3603" height="1449" alt="Screenshot from 2026-10-10 15-43-05" src="https://github.com/user-attachments/assets/1b6c5b45-e374-40b0-8f91-7f5e4727e7b9" />
 
 - Strategy comparison (SNP / SNP+INDEL / SNP+Methylation / SNP+INDEL+Methylation): methylation lengthens blocks essentially for free — N50 rises from 2.86 to 3.09 Mb at 60× with no change in switch error rate — whereas indels buy more contiguity (3.69 Mb) at a small cost in accuracy (0.027% vs 0.023%). Combining all three gives the longest blocks (4.10 Mb) at the indel-level error rate.
