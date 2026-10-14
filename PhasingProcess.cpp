@@ -1187,10 +1187,11 @@ void GNNModule::parseSecondaryVCF(const std::string& path, GnnVariantType vtype)
 }
 
 // ═══════════════════════════════════════════════════════════
+// As in training: every symbol except N counts, IUPAC codes included.
 float GNNModule::calcSeqEntropy(const std::string& s) {
-    int c[4]={}; for(char ch:s) switch(std::toupper(ch)){case'A':c[0]++;break;case'C':c[1]++;break;case'G':c[2]++;break;case'T':c[3]++;break;}
-    int t=c[0]+c[1]+c[2]+c[3]; if(!t) return 0;
-    float e=0; for(int i=0;i<4;++i) if(c[i]>0){float p=(float)c[i]/t; e-=p*std::log2(p);} return e;
+    int c[256]={}, t=0; for(char ch:s){unsigned char u=std::toupper((unsigned char)ch); if(u!='N'){c[u]++;t++;}}
+    if(!t) return 0;
+    float e=0; for(int i=0;i<256;++i) if(c[i]>0){float p=(float)c[i]/t; e-=p*std::log2(p);} return e;
 }
 int GNNModule::calcHPLength(const std::string& s, int c) {
     if(c<0||c>=(int)s.size()) return 0;
@@ -1199,8 +1200,10 @@ int GNNModule::calcHPLength(const std::string& s, int c) {
     for(int i=c+1;i<(int)s.size()&&std::toupper(s[i])==b;++i) l++;
     return std::min(l,20);
 }
+// As in training (prepare_gnn_data.py): N counts in the denominator.
 float GNNModule::calcGCContent(const std::string& s) {
-    int gc=0,t=0; for(char c:s){char u=std::toupper(c);if(u=='G'||u=='C')gc++;if(u!='N')t++;} return t>0?(float)gc/t:0.5f;
+    if (s.empty()) return 0.5f;
+    int gc=0; for(char c:s){char u=std::toupper(c);if(u=='G'||u=='C')gc++;} return (float)gc/s.size();
 }
 float GNNModule::calcSTRContext(const std::string& s, int c) {
     if(s.size()<6||c<0||c>=(int)s.size()) return 0;
