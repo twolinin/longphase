@@ -463,6 +463,8 @@ HG002 ONT R10.4.1 40x |  187s | 27.3G
 HG002 ONT R10.4.1 50x |  227s | 29.5G
 HG002 ONT R10.4.1 60x |  240s | 30.9G
 
+*Measured with input and output files on an M.2 NVMe SSD (Crucial T710, 4 TB) and an AMD Ryzen 9 9950X3D CPU (16 cores, 32 threads).
+
 *If the device is running low on memory, you can control memory usage by reducing the number of threads (-t).
 
 ---
