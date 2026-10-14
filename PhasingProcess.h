@@ -96,7 +96,7 @@ public:
     struct Params {
         std::string vcf_path, reference_path, output_vcf;
         std::string sv_vcf, mod_vcf, output_sv_vcf, output_mod_vcf;
-        float break_threshold = 0.30f;
+        float break_threshold = 0.35f;
         float pe_threshold    = 0.80f;
         int   window          = 20;
         int   threads         = 4;

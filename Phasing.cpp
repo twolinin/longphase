@@ -47,7 +47,7 @@ static const char *CORRECT_USAGE_MESSAGE =
 "GNN arguments:\n"
 "   --disableGNN                           phase without the GNN model. default: False\n"
 "   --gnnBreakThreshold=[0~1]              unphase a variant when its GNN error probability exceeds\n"
-"                                          this value. default:0.30\n"
+"                                          this value. default:0.35\n"
 "   --gnnPeThreshold=[0~1]                 phasing entropy at which a variant is checked by the GNN. default:0.80\n"
 "   --gnnWindow=[1~63]                     variants on each side of a checked variant given to the GNN. default:20\n"
 "   --gnnRespectBridge                     do not unphase bridge variants. default: False\n"
@@ -124,7 +124,7 @@ namespace opt
     static int svWindow = 20;
     static double svThreshold = 0.1;
     static bool enableGNN = true;
-    static float gnnBreakThreshold = 0.30f;
+    static float gnnBreakThreshold = 0.35f;
     static float gnnPeThreshold = 0.80f;
     static int gnnWindow = 20;
     static bool gnnRespectBridge = false;
