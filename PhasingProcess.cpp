@@ -1075,6 +1075,20 @@ void GNNModule::writeOutputVCF(const std::string& in_path, const std::string& ou
     int nu = 0, nsplit = 0, norphan = 0;
     while (bcf_read(ifp, hdr, rec) == 0) {
         bcf_unpack(rec, BCF_UN_ALL);
+        // Only the phased record at a position is the one the GNN saw; other
+        // records at the same position are written unchanged (issue #133).
+        {
+            int32_t* gt=nullptr; int ng=0;
+            bool phased = bcf_get_genotypes(hdr,rec,&gt,&ng)>=2 && bcf_gt_is_phased(gt[1]);
+            free(gt);
+            if (!phased) {
+                if (bcf_write(ofp, hdr, rec) < 0) {
+                    std::cerr << "[GNN] ERROR: failed to write record to " << out_path << "\n";
+                    std::exit(EXIT_FAILURE);
+                }
+                continue;
+            }
+        }
         std::string ch = bcf_hdr_id2name(hdr, rec->rid);
         bool unph = false;
         if (predictions_.count(ch) && predictions_[ch].count(rec->pos)) {

@@ -597,9 +597,11 @@ void SnpParser::writeDataLine(const std::string &input,
     }
   }
 
-  // this pos is phase
+  // this pos is phase; only the record that was phased (same REF and ALT)
+  // gets the phase, not other records at the same position (issue #133)
   if (psElementIter != phasingResult.end() &&
-      posIter != (*chrVariant)[fields[0]].end()) {
+      posIter != (*chrVariant)[fields[0]].end() &&
+      posIter->second.Ref == fields[3] && posIter->second.Alt == fields[4]) {
     // add PS flag and value
     fields[8] = fields[8] + ":PS";
     fields[9] =
