@@ -99,6 +99,8 @@ private:
   std::map<std::string, std::set<int>> filteredIndelPositions;
   // <prefix>_removed_indels.log, open only when --indelQuality is set
   std::ofstream removedIndelsLog;
+  // column of the phased sample (--sample) in a VCF data line
+  size_t sampleCol = 9;
 
   // override input parser
   void parserProcess(std::string &input);

@@ -31,6 +31,8 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
     std::cerr<< "\n";
     std::cerr<< "--- File Parameter --- \n";
     std::cerr<< "SNP File           : " << params.snpFile      << "\n";
+    if (!params.sample.empty())
+        std::cerr<< "Sample             : " << params.sample       << "\n";
     std::cerr<< "SV  File           : " << params.svFile       << "\n";
     std::cerr<< "MOD File           : " << params.modFile      << "\n";
     std::cerr<< "REF File           : " << params.fastaFile    << "\n";
@@ -243,6 +245,7 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
         GNNModule::Params gnnParams;
         gnnParams.vcf_path        = phasedPrefix + ".vcf";
         gnnParams.reference_path  = params.fastaFile;
+        gnnParams.sample          = params.sample;
         gnnParams.output_vcf      = params.resultPrefix + ".vcf";
         if(params.svFile!=""){
             gnnParams.sv_vcf         = phasedPrefix + "_SV.vcf";
@@ -378,20 +381,21 @@ int GNNModule::run() {
         std::cerr << "\n[GNN] WARNING: " << skipped_windows_.load()
                   << " windows skipped because they exceed " << MAX_NODES
                   << " graph nodes; reduce --window\n";
+    shareMergedPredictions();
 
     int total = 0, unph = 0;
     for (auto& kv_ch : predictions_)
         for (auto& kv_pos : kv_ch.second) {
             auto& pr = kv_pos.second;
             total++;
-            if (pr.prob_error >= params_.break_threshold &&
-                (!params_.respect_bridge || !pr.is_bridge)) unph++;
+            if (shouldUnphase(pr)) unph++;
         }
     std::cerr << "\n[GNN] Predictions: " << total << ", unphase: " << unph << "\n";
     if (params_.split_blocks) {
         std::cerr << "[GNN] Checking block connectivity\n";
         computeBlockSplits();
     }
+    computeOrphans();
     writeOutputVCF();
     if (!params_.sv_vcf.empty() && !params_.output_sv_vcf.empty())
         writeOutputVCF(params_.sv_vcf, params_.output_sv_vcf);
@@ -411,6 +415,37 @@ void GNNModule::loadModel() {
 }
 
 // ═══════════════════════════════════════════════════════════
+// The sample of the SNP VCF to read and write: --sample, by default the
+// first one (phase has checked that the sample exists).
+int GNNModule::sampleIndex(bcf_hdr_t* hdr) const {
+    if (!params_.sample.empty()) {
+        int i = bcf_hdr_id2int(hdr, BCF_DT_SAMPLE, params_.sample.c_str());
+        if (i >= 0) return i;
+    }
+    return 0;
+}
+
+// Set the PS of sample si; missing removes it. With one sample the PS field
+// is removed from the record, as before; with several, only this sample's
+// value changes.
+void GNNModule::setSamplePS(bcf_hdr_t* hdr, bcf1_t* rec, int si, int32_t ps) {
+    const int nsmpl = bcf_hdr_nsamples(hdr);
+    if (nsmpl == 1) {
+        if (ps == bcf_int32_missing) bcf_update_format_int32(hdr, rec, "PS", nullptr, 0);
+        else bcf_update_format_int32(hdr, rec, "PS", &ps, 1);
+        return;
+    }
+    int32_t* v = nullptr; int nv = 0;
+    if (bcf_get_format_int32(hdr, rec, "PS", &v, &nv) != nsmpl) {
+        free(v);
+        v = (int32_t*)malloc(nsmpl * sizeof(int32_t));
+        for (int i = 0; i < nsmpl; ++i) v[i] = bcf_int32_missing;
+    }
+    v[si] = ps;
+    bcf_update_format_int32(hdr, rec, "PS", v, nsmpl);
+    free(v);
+}
+
 void GNNModule::parseVCF() {
     htsFile* fp = hts_open(params_.vcf_path.c_str(), "r");
     if (!fp) {
@@ -424,13 +459,16 @@ void GNNModule::parseVCF() {
     }
     bcf1_t* rec = bcf_init();
     int n = 0;
+    const int si = sampleIndex(hdr);
     while (bcf_read(fp, hdr, rec) == 0) {
         bcf_unpack(rec, BCF_UN_ALL);
         int32_t* gt = nullptr; int ng = 0;
         if (bcf_get_genotypes(hdr, rec, &gt, &ng) < 0) continue;
-        if (ng < 2) { free(gt); continue; }
-        if (!bcf_gt_is_phased(gt[1])) { free(gt); continue; }
-        int a0 = bcf_gt_allele(gt[0]), a1 = bcf_gt_allele(gt[1]);
+        const int ploidy = ng / bcf_hdr_nsamples(hdr);
+        if (ploidy < 2) { free(gt); continue; }
+        int32_t* sg = gt + si * ploidy;
+        if (!bcf_gt_is_phased(sg[1])) { free(gt); continue; }
+        int a0 = bcf_gt_allele(sg[0]), a1 = bcf_gt_allele(sg[1]);
         free(gt);
         if (a0 == a1) continue;
 
@@ -447,7 +485,8 @@ void GNNModule::parseVCF() {
         if (bcf_get_info_float(hdr, rec, "H1", &fv, &nv) > 0) { vi.h1 = fv[0]; free(fv); fv=nullptr; nv=0; }
         if (bcf_get_info_float(hdr, rec, "H2", &fv, &nv) > 0) { vi.h2 = fv[0]; free(fv); fv=nullptr; nv=0; }
         int32_t* ps = nullptr; int np = 0;
-        if (bcf_get_format_int32(hdr, rec, "PS", &ps, &np) > 0) { vi.ps = ps[0]; free(ps); }
+        if (bcf_get_format_int32(hdr, rec, "PS", &ps, &np) > si) vi.ps = ps[si];
+        free(ps);
         vi.hp_len = vi.gc_content = vi.str_context = vi.seq_entropy = 0;
         vi.vtype = (vi.indel_len == 0) ? GVT_SNV : GVT_INDEL;
         variants_[vi.chrom].push_back(vi);
@@ -535,6 +574,10 @@ void GNNModule::computeGenomicFeatures() {
                 if (i >= chroms.size()) { fai_destroy(fai); return; }
                 auto& ch = chroms[i];
                 for (auto& v : variants_[ch]) {
+                    // The model was trained with these four features set
+                    // to 0 for SVs, whose breakpoint context is not
+                    // meaningful, so leave them at 0 here too.
+                    if (v.vtype == GVT_SV) continue;
                     int len = 0;
                     int s1 = std::max(0, v.pos - HP_RADIUS);
                     char* seq = faidx_fetch_seq(fai, ch.c_str(), s1, v.pos+HP_RADIUS, &len);
@@ -852,8 +895,7 @@ void GNNModule::computeBlockSplits() {
                 for (auto& kv_pos : predictions_.at(ch)) {
                     const auto& pos = kv_pos.first;
                     auto& pr = kv_pos.second;
-                    if (pr.prob_error >= params_.break_threshold &&
-                        (!params_.respect_bridge || !pr.is_bridge))
+                    if (shouldUnphase(pr))
                         unphase_pos.insert(pos);
                 }
             }
@@ -887,6 +929,17 @@ void GNNModule::computeBlockSplits() {
                     adj[src].push_back(dst);
                     adj[dst].push_back(src);
                 }
+            }
+            // A 5mC site merged into another site's graph node has no edges
+            // of its own; it is connected through that node.
+            for (auto& v : vl) {
+                if (v.link_pos < 0) continue;
+                auto it_s = pos_to_ps.find(v.pos);
+                auto it_d = pos_to_ps.find(v.link_pos);
+                if (it_s == pos_to_ps.end() || it_d == pos_to_ps.end()) continue;
+                if (it_s->second != it_d->second) continue;
+                adj[v.pos].push_back(v.link_pos);
+                adj[v.link_pos].push_back(v.pos);
             }
 
             std::unordered_map<int, int> local_reassign;
@@ -955,6 +1008,80 @@ void GNNModule::computeBlockSplits() {
               << ", variants reassigned: " << total_reassigned.load() << "\n";
 }
 
+// phase merges a run of consecutive 5mC positions into one graph node, so
+// the sites of a run were phased as one and must be unphased as one. The
+// node's own position carries the graph edges, so its prediction decides
+// for every site of the run.
+void GNNModule::shareMergedPredictions() {
+    int n = 0;
+    for (auto& kv : variants_) {
+        const std::string& ch = kv.first;
+        auto pit = predictions_.find(ch);
+        if (pit == predictions_.end()) continue;
+        auto& preds = pit->second;
+        std::unordered_set<int> phased_pos;
+        for (auto& v : kv.second) phased_pos.insert(v.pos);
+        for (auto& v : kv.second) {
+            if (v.link_pos < 0 || !phased_pos.count(v.link_pos)) continue;
+            auto it = preds.find(v.link_pos);
+            if (it != preds.end()) {
+                Prediction shared = it->second;   // copy before a possible rehash
+                preds[v.pos] = shared;
+            }
+            else preds.erase(v.pos);
+            n++;
+        }
+    }
+    std::cerr << "[GNN] 5mC sites sharing their merged node's prediction: " << n << "\n";
+}
+
+bool GNNModule::shouldUnphase(const Prediction& pr) const {
+    return pr.prob_error >= params_.break_threshold &&
+           (!params_.respect_bridge || !pr.is_bridge);
+}
+
+// A phase set holding one variant carries no phase information. When GNN
+// correction (unphasing, and block splitting if enabled) leaves a variant
+// alone in its phase set, unphase it too. Phase sets that already held a
+// single variant before correction are left as phase wrote them. SNVs,
+// indels, SVs and 5mC sites share phase sets, so they are counted together.
+void GNNModule::computeOrphans() {
+    int total = 0;
+    for (auto& kv : variants_) {
+        const std::string& ch = kv.first;
+        auto& vl = kv.second;
+        auto pit = predictions_.find(ch);
+        auto rit = ps_reassign_.find(ch);
+
+        std::unordered_map<int, int> before, after;   // PS -> variants
+        struct Kept { int pos, ps_before, ps_after; };
+        std::vector<Kept> kept;
+        for (auto& v : vl) {
+            if (!v.is_phased || v.ps < 0) continue;
+            before[v.ps]++;
+            if (pit != predictions_.end()) {
+                auto it = pit->second.find(v.pos);
+                if (it != pit->second.end() && shouldUnphase(it->second)) continue;
+            }
+            int ps = v.ps;
+            if (rit != ps_reassign_.end()) {
+                auto it = rit->second.find(v.pos);
+                if (it != rit->second.end()) ps = it->second;
+            }
+            after[ps]++;
+            kept.push_back({v.pos, v.ps, ps});
+        }
+        for (auto& k : kept) {
+            if (after[k.ps_after] != 1) continue;
+            // Unchanged single-variant phase set from phase: keep it.
+            if (k.ps_after == k.ps_before && before[k.ps_before] == 1) continue;
+            orphans_[ch].insert(k.pos);
+            total++;
+        }
+    }
+    std::cerr << "[GNN] Variants left alone in their phase set: " << total << "\n";
+}
+
 
 
 // ═══════════════════════════════════════════════════════════
@@ -983,38 +1110,61 @@ void GNNModule::writeOutputVCF(const std::string& in_path, const std::string& ou
         std::exit(EXIT_FAILURE);
     }
     bcf1_t* rec = bcf_init();
-    int nu = 0, nsplit = 0;
+    int nu = 0, nsplit = 0, norphan = 0;
+    // --sample applies to the SNP VCF; the SV and 5mC VCFs written by phase
+    // carry the phase in their first sample column
+    const int si = (in_path == params_.vcf_path) ? sampleIndex(hdr) : 0;
+    const int nsmpl = bcf_hdr_nsamples(hdr);
     while (bcf_read(ifp, hdr, rec) == 0) {
         bcf_unpack(rec, BCF_UN_ALL);
+        // Only the phased record at a position is the one the GNN saw; other
+        // records at the same position are written unchanged (issue #133).
+        {
+            int32_t* gt=nullptr; int ng=0;
+            bool phased = false;
+            if (bcf_get_genotypes(hdr,rec,&gt,&ng) > 0 && ng / nsmpl >= 2)
+                phased = bcf_gt_is_phased(gt[si * (ng / nsmpl) + 1]);
+            free(gt);
+            if (!phased) {
+                if (bcf_write(ofp, hdr, rec) < 0) {
+                    std::cerr << "[GNN] ERROR: failed to write record to " << out_path << "\n";
+                    std::exit(EXIT_FAILURE);
+                }
+                continue;
+            }
+        }
         std::string ch = bcf_hdr_id2name(hdr, rec->rid);
         bool unph = false;
         if (predictions_.count(ch) && predictions_[ch].count(rec->pos)) {
             auto& pr = predictions_[ch][rec->pos];
-            if (pr.prob_error >= params_.break_threshold &&
-                (!params_.respect_bridge || !pr.is_bridge)) unph = true;
+            if (shouldUnphase(pr)) unph = true;
+        }
+        if (!unph && orphans_.count(ch) && orphans_[ch].count(rec->pos)) {
+            unph = true;
+            norphan++;
         }
         if (unph) {
             int32_t* gt=nullptr; int ng=0;
-            if (bcf_get_genotypes(hdr,rec,&gt,&ng)>=2) {
+            if (bcf_get_genotypes(hdr,rec,&gt,&ng) > 0 && ng / nsmpl >= 2) {
                 // An unphased genotype carries no order, and the VCF spec
                 // writes it ascending, so sort the alleles rather than
                 // leaving "1/0" behind.
-                int a0 = bcf_gt_allele(gt[0]), a1 = bcf_gt_allele(gt[1]);
+                int32_t* sg = gt + si * (ng / nsmpl);
+                int a0 = bcf_gt_allele(sg[0]), a1 = bcf_gt_allele(sg[1]);
                 if (a0 > a1) std::swap(a0, a1);
-                gt[0]=bcf_gt_unphased(a0);
-                gt[1]=bcf_gt_unphased(a1);
+                sg[0]=bcf_gt_unphased(a0);
+                sg[1]=bcf_gt_unphased(a1);
                 bcf_update_genotypes(hdr,rec,gt,ng);
             }
             free(gt);
-            bcf_update_format_int32(hdr,rec,"PS",nullptr,0);
+            setSamplePS(hdr, rec, si, bcf_int32_missing);
             nu++;
         } else if (params_.split_blocks && ps_reassign_.count(ch)) {
             // Variant stays phased but its block was split → new PS
             auto& rmap = ps_reassign_[ch];
             auto it = rmap.find(rec->pos);
             if (it != rmap.end()) {
-                int32_t new_ps = it->second;
-                bcf_update_format_int32(hdr, rec, "PS", &new_ps, 1);
+                setSamplePS(hdr, rec, si, it->second);
                 nsplit++;
             }
         }
@@ -1030,6 +1180,7 @@ void GNNModule::writeOutputVCF(const std::string& in_path, const std::string& ou
         std::exit(EXIT_FAILURE);
     }
     std::cerr << "[GNN] " << out_path << ": unphased " << nu
+              << " (" << norphan << " left alone in their block)"
               << ", PS-split " << nsplit << " variants\n";
 }
 
@@ -1049,15 +1200,26 @@ void GNNModule::parseSecondaryVCF(const std::string& path, GnnVariantType vtype)
     }
     bcf1_t* rec = bcf_init();
     int n = 0;
+    // Run of consecutive heterozygous 5mC positions, as phase merges them
+    int run_rid = -1, run_start = -1, run_last = -2;
     while (bcf_read(fp, hdr, rec) == 0) {
         bcf_unpack(rec, BCF_UN_ALL);
         int32_t* gt = nullptr; int ng = 0;
         if (bcf_get_genotypes(hdr, rec, &gt, &ng) < 0) continue;
         if (ng < 2) { free(gt); continue; }
-        if (!bcf_gt_is_phased(gt[1])) { free(gt); continue; }
+        bool phased = bcf_gt_is_phased(gt[1]);
         int a0 = bcf_gt_allele(gt[0]), a1 = bcf_gt_allele(gt[1]);
         free(gt);
         if (a0 == a1) continue;
+        int link_pos = -1;
+        if (vtype == GVT_METHYL) {
+            if (rec->rid != run_rid || rec->pos != run_last + 1)
+                run_start = (int)rec->pos;
+            run_rid = rec->rid;
+            run_last = (int)rec->pos;
+            if (run_start != rec->pos) link_pos = run_start;
+        }
+        if (!phased) continue;
         VariantInfo vi;
         vi.chrom = bcf_hdr_id2name(hdr, rec->rid);
         vi.pos = rec->pos; vi.gt_ref = a0; vi.gt_alt = a1;
@@ -1066,6 +1228,7 @@ void GNNModule::parseSecondaryVCF(const std::string& path, GnnVariantType vtype)
         int al = rec->n_allele > 1 ? (int)strlen(rec->d.allele[1]) : rl;
         vi.indel_len = abs(al - rl);
         vi.vtype = vtype;
+        vi.link_pos = link_pos;
         float* fv = nullptr; int nv = 0;
         if (bcf_get_info_float(hdr, rec, "PE", &fv, &nv) > 0) { vi.pe = fv[0]; free(fv); fv=nullptr; nv=0; }
         if (bcf_get_info_float(hdr, rec, "H1", &fv, &nv) > 0) { vi.h1 = fv[0]; free(fv); fv=nullptr; nv=0; }
@@ -1082,10 +1245,11 @@ void GNNModule::parseSecondaryVCF(const std::string& path, GnnVariantType vtype)
 }
 
 // ═══════════════════════════════════════════════════════════
+// As in training: every symbol except N counts, IUPAC codes included.
 float GNNModule::calcSeqEntropy(const std::string& s) {
-    int c[4]={}; for(char ch:s) switch(std::toupper(ch)){case'A':c[0]++;break;case'C':c[1]++;break;case'G':c[2]++;break;case'T':c[3]++;break;}
-    int t=c[0]+c[1]+c[2]+c[3]; if(!t) return 0;
-    float e=0; for(int i=0;i<4;++i) if(c[i]>0){float p=(float)c[i]/t; e-=p*std::log2(p);} return e;
+    int c[256]={}, t=0; for(char ch:s){unsigned char u=std::toupper((unsigned char)ch); if(u!='N'){c[u]++;t++;}}
+    if(!t) return 0;
+    float e=0; for(int i=0;i<256;++i) if(c[i]>0){float p=(float)c[i]/t; e-=p*std::log2(p);} return e;
 }
 int GNNModule::calcHPLength(const std::string& s, int c) {
     if(c<0||c>=(int)s.size()) return 0;
@@ -1094,8 +1258,10 @@ int GNNModule::calcHPLength(const std::string& s, int c) {
     for(int i=c+1;i<(int)s.size()&&std::toupper(s[i])==b;++i) l++;
     return std::min(l,20);
 }
+// As in training (prepare_gnn_data.py): N counts in the denominator.
 float GNNModule::calcGCContent(const std::string& s) {
-    int gc=0,t=0; for(char c:s){char u=std::toupper(c);if(u=='G'||u=='C')gc++;if(u!='N')t++;} return t>0?(float)gc/t:0.5f;
+    if (s.empty()) return 0.5f;
+    int gc=0; for(char c:s){char u=std::toupper(c);if(u=='G'||u=='C')gc++;} return (float)gc/s.size();
 }
 float GNNModule::calcSTRContext(const std::string& s, int c) {
     if(s.size()<6||c<0||c>=(int)s.size()) return 0;

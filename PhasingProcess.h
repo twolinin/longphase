@@ -8,6 +8,7 @@
 #include <mutex>
 #include <atomic>
 #include <memory>
+#include <htslib/vcf.h>
 
 
 
@@ -16,6 +17,8 @@ struct PhasingParameters
     int numThreads;
     int distance;
     std::string snpFile;
+    // --sample: the sample of a multi-sample VCF to phase (empty: the first)
+    std::string sample;
     std::string svFile;
     std::vector<std::string> bamFile;
     std::string modFile="";
@@ -79,6 +82,10 @@ struct VariantInfo {
     int   indel_len;      // |len(alt) - len(ref)|
     float hp_len, gc_content, str_context, seq_entropy;
     GnnVariantType vtype = GVT_SNV;
+    // 5mC only: phase merges a run of consecutive 5mC positions (the two
+    // strands of a CpG) into one graph node at the first position of the
+    // run. Position of that node when it is another site, otherwise -1.
+    int   link_pos = -1;
 };
 
 struct Prediction {
@@ -92,7 +99,9 @@ public:
     struct Params {
         std::string vcf_path, reference_path, output_vcf;
         std::string sv_vcf, mod_vcf, output_sv_vcf, output_mod_vcf;
-        float break_threshold = 0.30f;
+        // --sample; a VCF without this sample (SV, 5mC) uses its first sample
+        std::string sample;
+        float break_threshold = 0.35f;
         float pe_threshold    = 0.80f;
         int   window          = 20;
         int   threads         = 4;
@@ -128,12 +137,19 @@ private:
     // was split after a bridge was unphased)
     std::map<std::string, std::unordered_map<int, int>> ps_reassign_;
 
+    // Variants unphased only because GNN correction left them alone in
+    // their phase set: [chrom] = positions
+    std::map<std::string, std::unordered_set<int>> orphans_;
+
     void loadModel();
     void parseVCF();
     void parseSecondaryVCF(const std::string& path, GnnVariantType vtype);
     void loadDotEdges();
     void computeGenomicFeatures();
     void computeBlockSplits();
+    void computeOrphans();
+    void shareMergedPredictions();
+    bool shouldUnphase(const Prediction& pr) const;
     // Pre-computed per-chromosome data
     struct ChromData {
         std::unordered_map<int, int> ps_count;
@@ -146,6 +162,8 @@ private:
                            const ChromData& cd);
     void writeOutputVCF();
     void writeOutputVCF(const std::string& in_path, const std::string& out_path);
+    int  sampleIndex(bcf_hdr_t* hdr) const;
+    static void setSamplePS(bcf_hdr_t* hdr, bcf1_t* rec, int si, int32_t ps);
 
     // Feature computation helpers (static, matching prepare_gnn_data.py)
     static float calcSeqEntropy(const std::string& seq);

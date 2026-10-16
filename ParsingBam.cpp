@@ -294,6 +294,59 @@ void appendPeHapInfoToInfoField(std::string &infoField,
 }
 } // namespace
 
+// Move PS to the end of FORMAT in every sample column and set the PS of
+// column sampleCol to value. The other samples keep the PS they had (or
+// none), so phasing one sample leaves the others unchanged.
+static void setSamplePs(std::vector<std::string> &fields, size_t sampleCol,
+                        const std::string &value) {
+  auto split = [](const std::string &s) {
+    std::vector<std::string> v;
+    size_t b = 0;
+    while (true) {
+      size_t e = s.find(':', b);
+      v.push_back(s.substr(b, e == std::string::npos ? std::string::npos : e - b));
+      if (e == std::string::npos)
+        break;
+      b = e + 1;
+    }
+    return v;
+  };
+  auto join = [](const std::vector<std::string> &v) {
+    std::string s;
+    for (size_t i = 0; i < v.size(); i++)
+      s += (i ? ":" : "") + v[i];
+    return s;
+  };
+  std::vector<std::string> keys = split(fields[8]);
+  std::vector<std::string> oldPs(fields.size());
+  for (size_t k = 0; k < keys.size(); k++) {
+    if (keys[k] != "PS")
+      continue;
+    keys.erase(keys.begin() + k);
+    for (size_t c = 9; c < fields.size(); c++) {
+      std::vector<std::string> v = split(fields[c]);
+      if (v.size() > k) {
+        oldPs[c] = v[k];
+        v.erase(v.begin() + k);
+        fields[c] = join(v);
+      }
+    }
+    break;
+  }
+  keys.push_back("PS");
+  fields[8] = join(keys);
+  for (size_t c = 9; c < fields.size(); c++) {
+    const std::string &ps = (c == sampleCol) ? value : oldPs[c];
+    if (ps.empty())
+      continue; // no PS before: the trailing PS value stays omitted
+    std::vector<std::string> v = split(fields[c]);
+    while (v.size() + 1 < keys.size())
+      v.push_back(".");
+    v.push_back(ps);
+    fields[c] = join(v);
+  }
+}
+
 static bool isHetGt(const int *gt) {
   return (gt[0] == 2 && gt[1] == 4) || // 0/1
          (gt[0] == 4 && gt[1] == 2) || // 1/0
@@ -350,10 +403,25 @@ SnpParser::SnpParser(PhasingParameters &in_params) {
     // bcf_hdr_id2name is another way to get the name of a sequence
     chrName.push_back(seqnames[i]);
   }
-  // set all sample string
-  std::string allSmples = "-";
-  // limit the VCF data to the sample name passed in
-  int is_file = bcf_hdr_set_samples(hdr, allSmples.c_str(), 0);
+  // the sample to phase (--sample), by default the first one
+  if (bcf_hdr_nsamples(hdr) == 0) {
+    std::cerr << "error: " << params->snpFile << " has no sample column\n";
+    exit(1);
+  }
+  std::string sampleName = params->sample.empty() ? std::string(hdr->samples[0]) : params->sample;
+  int sampleIdx = bcf_hdr_id2int(hdr, BCF_DT_SAMPLE, sampleName.c_str());
+  if (sampleIdx < 0) {
+    std::cerr << "error: sample " << sampleName << " is not in " << params->snpFile
+              << ". samples:";
+    for (int i = 0; i < bcf_hdr_nsamples(hdr); i++)
+      std::cerr << " " << hdr->samples[i];
+    std::cerr << "\n";
+    exit(1);
+  }
+  // column of this sample in the VCF text, used when writing the result
+  sampleCol = 9 + sampleIdx;
+  // limit the VCF data to this sample
+  int is_file = bcf_hdr_set_samples(hdr, sampleName.c_str(), 0);
   if (is_file != 0) {
     std::cout << "error or a positive integer if the list contains samples not "
                  "present in the VCF header\n";
@@ -542,44 +610,30 @@ void SnpParser::writeDataLine(const std::string &input,
   if (fields.size() == 0)
     return;
 
+  // the phased sample's column (--sample); other sample columns are kept
+  const size_t sc = sampleCol;
+  if (fields.size() <= sc) {
+    resultVcf << input << "\n";
+    return;
+  }
+
   int pos = std::stoi(fields[1]);
   int posIdx = pos - 1;
   std::string key = fields[0] + "_" + std::to_string(posIdx);
 
   PhasingResult::iterator psElementIter = phasingResult.find(key);
 
-  // PS flag already exist, erase PS info
-  if (fields[8].find("PS") != std::string::npos) {
-    std::string format_before_ps_erase = fields[8];
-    int ps_pos = fields[8].find("PS");
-
-    // erase PS flag
-    if (fields[8].find(":", ps_pos + 1) != std::string::npos) {
-      fields[8].erase(ps_pos, 3);
-    } else {
-      fields[8].erase(ps_pos - 1, 3);
-    }
-
-    int ps_start = findFieldValueStart(format_before_ps_erase, fields[9], "PS");
-
-    if (fields[9].find(":", ps_start + 1) != std::string::npos) {
-      int ps_end_pos = fields[9].find(":", ps_start + 1);
-      fields[9].erase(ps_start, ps_end_pos - ps_start + 1);
-    } else {
-      fields[9].erase(ps_start - 1, fields[9].length() - ps_start + 1);
-    }
-  }
   // reset GT flag
   if (fields[8].find("GT") != std::string::npos) {
-    int modify_start = findFieldValueStart(fields[8], fields[9], "GT");
-    if (fields[9][modify_start + 1] == '|') {
+    int modify_start = findFieldValueStart(fields[8], fields[sc], "GT");
+    if (fields[sc][modify_start + 1] == '|') {
       // direct modify GT value
-      if (fields[9][modify_start] > fields[9][modify_start + 2]) {
-        fields[9][modify_start + 1] = fields[9][modify_start];
-        fields[9][modify_start] = fields[9][modify_start + 2];
-        fields[9][modify_start + 2] = fields[9][modify_start + 1];
+      if (fields[sc][modify_start] > fields[sc][modify_start + 2]) {
+        fields[sc][modify_start + 1] = fields[sc][modify_start];
+        fields[sc][modify_start] = fields[sc][modify_start + 2];
+        fields[sc][modify_start + 2] = fields[sc][modify_start + 1];
       }
-      fields[9][modify_start + 1] = '/';
+      fields[sc][modify_start + 1] = '/';
     }
   }
 
@@ -597,19 +651,19 @@ void SnpParser::writeDataLine(const std::string &input,
     }
   }
 
-  // this pos is phase
+  // this pos is phase; only the record that was phased (same REF and ALT)
+  // gets the phase, not other records at the same position (issue #133)
   if (psElementIter != phasingResult.end() &&
-      posIter != (*chrVariant)[fields[0]].end()) {
+      posIter != (*chrVariant)[fields[0]].end() &&
+      posIter->second.Ref == fields[3] && posIter->second.Alt == fields[4]) {
     // add PS flag and value
-    fields[8] = fields[8] + ":PS";
-    fields[9] =
-        fields[9] + ":" + std::to_string((*psElementIter).second.block);
+    setSamplePs(fields, sc, std::to_string((*psElementIter).second.block));
 
-    int modify_start = findFieldValueStart(fields[8], fields[9], "GT");
+    int modify_start = findFieldValueStart(fields[8], fields[sc], "GT");
     // direct modify GT value
-    fields[9][modify_start] = (*psElementIter).second.RAstatus[0];
-    fields[9][modify_start + 1] = '|';
-    fields[9][modify_start + 2] = (*psElementIter).second.RAstatus[2];
+    fields[sc][modify_start] = (*psElementIter).second.RAstatus[0];
+    fields[sc][modify_start + 1] = '|';
+    fields[sc][modify_start + 2] = (*psElementIter).second.RAstatus[2];
 
     // Attach PE / H1 / H2 to INFO for phased positions only.
     // Rule: if INFO was ".", replace it; otherwise append with ';'.
@@ -620,8 +674,7 @@ void SnpParser::writeDataLine(const std::string &input,
     // drop stale PE/H1/H2 left over from a previously phased input
     removePeHapFromInfoField(fields[7]);
     // add PS flag and value
-    fields[8] = fields[8] + ":PS";
-    fields[9] = fields[9] + ":.";
+    setSamplePs(fields, sc, ".");
   }
 
   // Add FILTER tag for filtered indels

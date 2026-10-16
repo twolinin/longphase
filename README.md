@@ -33,10 +33,10 @@ For somatic phasing using tumor-only samples, please use [longphase-to](https://
 - [Contact](#contact)
 ---
 ## Installation
-You are recommended to download a [linux 64bit binary release](https://github.com/twolinin/longphase/releases/download/v2.1/longphase_linux-x64.tar.xz) without compilation. 
+You are recommended to download a [linux 64bit binary release](https://github.com/twolinin/longphase/releases/download/v2.1.1/longphase_linux-x64.tar.xz) without compilation. 
 
 ```
-wget https://github.com/twolinin/longphase/releases/download/v2.1/longphase_linux-x64.tar.xz
+wget https://github.com/twolinin/longphase/releases/download/v2.1.1/longphase_linux-x64.tar.xz
 tar -xJf longphase_linux-x64.tar.xz
 ```
 
@@ -120,6 +120,9 @@ optional arguments:
    --mod-file=NAME                        input modified vcf file.(produce by longphase modcall)
    -t, --threads=Num                      number of thread. default:1
    -o, --out-prefix=NAME                  prefix of phasing result. default: result
+   --sample=NAME                          sample to phase in a multi-sample SNP vcf; the other samples
+                                          are written unchanged. all bam files are taken as reads of
+                                          this sample. default: the first sample
    --indels                               phase small indel. default: False
    --indelQuality=Num                     filter indels with QUAL less than threshold (only effective when --indels is enabled). default: 0
    --dot                                  each contig/chromosome will generate dot file.
@@ -227,6 +230,7 @@ optional arguments:
       -h, --sv-threshold=[0~1]        relative difference threshold for read to support a SV. default: 0.10
       -t, --threads=Num               number of thread. default:1
       -o, --out-prefix=NAME           prefix of phasing result. default:result
+      --sample=NAME                   sample to use in a multi-sample SNP vcf. default: the first sample
       --cram                          the output file will be in the cram format. default:bam
       --region=REGION                 tagging include only reads/variants overlapping those regions. default:""(all regions)
                                       input format:chrom (consider entire chromosome)
@@ -440,17 +444,17 @@ minimap2 -ax map-ont -y reference.fasta methylcall.raw.fastq
 
 ---
 ## Comparison with other SNP-phasing programs
-- SNP-only: LongPhase v2.1 reports 2.9–3.6× fewer switch errors than WhatsHap and 3.3–4.6× fewer than HapCUT2 across 10–60×, with comparable block N50.
-<img width="3603" height="1449" alt="Screenshot from 2026-10-06 09-31-25" src="https://github.com/user-attachments/assets/e15619d6-7dfc-4e66-86d0-4203010de4f8" />
+- SNP-only: LongPhase v2.1.1 reports 2.9–3.9× fewer switch errors than WhatsHap and 3.3–5.0× fewer than HapCUT2 across 10–60×, with comparable block N50.
+<img width="3585" height="1187" alt="Screenshot from 2026-10-16 09-22-09" src="https://github.com/user-attachments/assets/51d637a3-b046-423d-bb57-5d8ffa4172b9" />
 
-- SNP+INDEL: LongPhase v2.1 halves WhatsHap's switch error rate at every coverage (0.027% vs 0.097% at 60×) at a block N50 within 12% of WhatsHap's.
-<img width="3651" height="1457" alt="Screenshot from 2026-10-06 09-30-42" src="https://github.com/user-attachments/assets/e6db7057-ac4a-40f6-8f5e-8767cc5b7736" />
+- SNP+INDEL: LongPhase v2.1.1 reports a 3.0–3.7× lower switch error rate than WhatsHap at every coverage (0.027% vs 0.097% at 60×). WhatsHap builds longer blocks (block N50 4.20 vs 3.74 Mb at 60×).
+<img width="3585" height="1187" alt="Screenshot from 2026-10-16 09-22-31" src="https://github.com/user-attachments/assets/8d72b880-a245-47c9-a9d1-d7ce1773a8b9" />
 
-- SNP+Methylation: LongPhase v2.1 reports a 1.5–1.7× lower switch error rate than MethPhaser at every coverage (0.023% vs 0.035% at 60×) and a lower Hamming distance (1.60% vs 3.95% at 60×). MethPhaser builds longer blocks by joining the blocks of its input (block N50 5.49 vs 3.09 Mb at 60×). MethPhaser was run on the same LongPhase phasing (without GNN correction) rather than its default WhatsHap input, so the comparison isolates the methylation step.
-<img width="3603" height="1449" alt="Screenshot from 2026-10-10 15-43-05" src="https://github.com/user-attachments/assets/1b6c5b45-e374-40b0-8f91-7f5e4727e7b9" />
+- SNP+Methylation: LongPhase v2.1.1 reports a 1.5–1.7× lower switch error rate than MethPhaser at every coverage (0.022% vs 0.035% at 60×) and a lower Hamming distance (1.60% vs 3.95% at 60×). MethPhaser builds longer blocks by joining the blocks of its input (block N50 5.49 vs 3.09 Mb at 60×). MethPhaser was run on the same LongPhase phasing (without GNN correction) rather than its default WhatsHap input, so the comparison isolates the methylation step.
+<img width="3585" height="1187" alt="Screenshot from 2026-10-16 09-22-40" src="https://github.com/user-attachments/assets/0224bb56-3e2b-47bd-a8c1-bc6bc1f1f1b3" />
 
-- Strategy comparison (SNP / SNP+INDEL / SNP+Methylation / SNP+INDEL+Methylation): methylation lengthens blocks essentially for free — N50 rises from 2.86 to 3.09 Mb at 60× with no change in switch error rate — whereas indels buy more contiguity (3.69 Mb) at a small cost in accuracy (0.027% vs 0.023%). Combining all three gives the longest blocks (4.10 Mb) at the indel-level error rate.
-<img width="3651" height="1457" alt="Screenshot from 2026-10-06 09-30-27" src="https://github.com/user-attachments/assets/5eb8f510-f712-468f-a616-96c4c30e9c20" />
+- Strategy comparison (SNP / SNP+INDEL / SNP+Methylation / SNP+INDEL+Methylation): methylation lengthens blocks essentially for free — N50 rises from 2.87 to 3.09 Mb at 60× with no change in switch error rate — whereas indels buy more contiguity (3.74 Mb) at a small cost in accuracy (0.027% vs 0.022%). Combining all three gives the longest blocks (4.14 Mb) at the indel-level error rate.
+<img width="3585" height="1187" alt="Screenshot from 2026-10-16 09-22-49" src="https://github.com/user-attachments/assets/593f918a-9981-4b04-acec-00138ac4b66b" />
 
 ## Speed
 LongPhase can phase a human genome within 1-4 minutes.
@@ -462,6 +466,8 @@ HG002 ONT R10.4.1 30x |  151s | 26.1G
 HG002 ONT R10.4.1 40x |  187s | 27.3G
 HG002 ONT R10.4.1 50x |  227s | 29.5G
 HG002 ONT R10.4.1 60x |  240s | 30.9G
+
+*Measured with input and output files on an M.2 NVMe SSD (Crucial T710, 4 TB) and an AMD Ryzen 9 9950X3D CPU (16 cores, 32 threads).
 
 *If the device is running low on memory, you can control memory usage by reducing the number of threads (-t).
 

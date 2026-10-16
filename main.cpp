@@ -7,7 +7,7 @@
 
 
 #define PROGRAM_BIN "longphase"
-#define VERSION "2.1"
+#define VERSION "2.1.1"
 
 
 
