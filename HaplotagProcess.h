@@ -15,6 +15,8 @@ struct HaplotagParameters
     double svThreshold;
     
     std::string snpFile;
+    // --sample: the sample of a multi-sample SNP vcf to use (empty: the first)
+    std::string sample;
     std::string svFile;
     std::string modFile;
     std::string bamFile;
@@ -108,6 +110,10 @@ class HaplotagProcess
     std::time_t processBegin;
     bool integerPS;
     bool parseSnpFile;
+    // --sample and its column in the SNP vcf (the SV and MOD vcfs use the first)
+    std::string sampleName;
+    size_t sampleCol;
+    void parseColumnHeader(const std::string &line);
     bool parseSVFile;
     bool parseMODFile;
     public:

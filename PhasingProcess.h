@@ -8,6 +8,7 @@
 #include <mutex>
 #include <atomic>
 #include <memory>
+#include <htslib/vcf.h>
 
 
 
@@ -16,6 +17,8 @@ struct PhasingParameters
     int numThreads;
     int distance;
     std::string snpFile;
+    // --sample: the sample of a multi-sample VCF to phase (empty: the first)
+    std::string sample;
     std::string svFile;
     std::vector<std::string> bamFile;
     std::string modFile="";
@@ -96,6 +99,8 @@ public:
     struct Params {
         std::string vcf_path, reference_path, output_vcf;
         std::string sv_vcf, mod_vcf, output_sv_vcf, output_mod_vcf;
+        // --sample; a VCF without this sample (SV, 5mC) uses its first sample
+        std::string sample;
         float break_threshold = 0.35f;
         float pe_threshold    = 0.80f;
         int   window          = 20;
@@ -157,6 +162,8 @@ private:
                            const ChromData& cd);
     void writeOutputVCF();
     void writeOutputVCF(const std::string& in_path, const std::string& out_path);
+    int  sampleIndex(bcf_hdr_t* hdr) const;
+    static void setSamplePS(bcf_hdr_t* hdr, bcf1_t* rec, int si, int32_t ps);
 
     // Feature computation helpers (static, matching prepare_gnn_data.py)
     static float calcSeqEntropy(const std::string& seq);

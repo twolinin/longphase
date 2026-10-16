@@ -120,6 +120,9 @@ optional arguments:
    --mod-file=NAME                        input modified vcf file.(produce by longphase modcall)
    -t, --threads=Num                      number of thread. default:1
    -o, --out-prefix=NAME                  prefix of phasing result. default: result
+   --sample=NAME                          sample to phase in a multi-sample SNP vcf; the other samples
+                                          are written unchanged. all bam files are taken as reads of
+                                          this sample. default: the first sample
    --indels                               phase small indel. default: False
    --indelQuality=Num                     filter indels with QUAL less than threshold (only effective when --indels is enabled). default: 0
    --dot                                  each contig/chromosome will generate dot file.
@@ -227,6 +230,7 @@ optional arguments:
       -h, --sv-threshold=[0~1]        relative difference threshold for read to support a SV. default: 0.10
       -t, --threads=Num               number of thread. default:1
       -o, --out-prefix=NAME           prefix of phasing result. default:result
+      --sample=NAME                   sample to use in a multi-sample SNP vcf. default: the first sample
       --cram                          the output file will be in the cram format. default:bam
       --region=REGION                 tagging include only reads/variants overlapping those regions. default:""(all regions)
                                       input format:chrom (consider entire chromosome)

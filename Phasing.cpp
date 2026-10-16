@@ -20,6 +20,9 @@ static const char *CORRECT_USAGE_MESSAGE =
 "   --mod-file=NAME                        input modified vcf file.(produce by longphase modcall)\n"
 "   -t, --threads=Num                      number of thread. default:1\n"
 "   -o, --out-prefix=NAME                  prefix of phasing result. default: result\n"
+"   --sample=NAME                          sample to phase in a multi-sample SNP vcf; the other samples\n"
+"                                          are written unchanged. all bam files are taken as reads of\n"
+"                                          this sample. default: the first sample\n"
 "   --indels                               phase small indel. default: False\n"
 "   --indelQuality=Num                     filter indels with QUAL less than threshold (only effective when --indels is enabled). default: 0\n"
 "   --dot                                  each contig/chromosome will generate dot file. \n\n"
@@ -59,7 +62,8 @@ static const char *CORRECT_USAGE_MESSAGE =
 static const char* shortopts = "s:b:o:t:r:d:1:a:q:x:p:e:n:m:L:w:h:";
 
 enum { OPT_HELP = 1 , DOT_FILE, SV_FILE, MOD_FILE, IS_ONT, IS_PB, PHASE_INDEL, INDEL_QUALITY, VERSION,
-       DISABLE_GNN, GNN_BREAK_THRESHOLD, GNN_PE_THRESHOLD, GNN_WINDOW, GNN_RESPECT_BRIDGE, GNN_NO_SPLIT_BLOCKS};
+       DISABLE_GNN, GNN_BREAK_THRESHOLD, GNN_PE_THRESHOLD, GNN_WINDOW, GNN_RESPECT_BRIDGE, GNN_NO_SPLIT_BLOCKS,
+       SAMPLE};
 
 static const struct option longopts[] = { 
     { "help",                 no_argument,        NULL, OPT_HELP },
@@ -73,6 +77,7 @@ static const struct option longopts[] = {
     { "mod-file",             required_argument,  NULL, MOD_FILE },
     { "reference",            required_argument,  NULL, 'r' },
     { "snp-file",             required_argument,  NULL, 's' },
+    { "sample",               required_argument,  NULL, SAMPLE },
     { "bam-file",             required_argument,  NULL, 'b' },
     { "out-prefix",           required_argument,  NULL, 'o' },
     { "threads",              required_argument,  NULL, 't' },
@@ -102,6 +107,7 @@ namespace opt
     static int numThreads = 1;
     static int distance = 300000;
     static std::string snpFile="";
+    static std::string sample="";
     static std::string svFile="";
     static std::string modFile="";
     static std::vector<std::string> bamFile;
@@ -164,6 +170,7 @@ void PhasingOptions(int argc, char** argv)
             opt::bamFile.push_back(bamFile); break;
         }
         case SV_FILE:  arg >> opt::svFile; break; 
+        case SAMPLE:   arg >> opt::sample; break;
         case MOD_FILE: arg >> opt::modFile; break; 
         case PHASE_INDEL: opt::phaseIndel=true; break; 
         case INDEL_QUALITY: arg >> opt::indelQuality; break;
@@ -380,6 +387,7 @@ int PhasingMain(int argc, char** argv, std::string in_version)
     ecParams.numThreads=opt::numThreads;
     ecParams.distance=opt::distance;
     ecParams.snpFile=opt::snpFile;
+    ecParams.sample=opt::sample;
     ecParams.svFile=opt::svFile;
     ecParams.modFile=opt::modFile;
     ecParams.bamFile=opt::bamFile;

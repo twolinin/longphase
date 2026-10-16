@@ -24,6 +24,7 @@ static const char *CORRECT_USAGE_MESSAGE =
 "      -h, --sv-threshold=[0~1]        relative difference threshold for read to support a SV. default: 0.10\n"
 "      -t, --threads=Num               number of thread. default:1\n"
 "      -o, --out-prefix=NAME           prefix of phasing result. default:result\n"
+"      --sample=NAME                   sample to use in a multi-sample SNP vcf. default: the first sample\n"
 "      --cram                          the output file will be in the cram format. default:bam\n"
 "      --region=REGION                 tagging include only reads/variants overlapping those regions. default:\"\"(all regions)\n"
 "                                      input format:chrom (consider entire chromosome)\n"
@@ -34,11 +35,12 @@ static const char *CORRECT_USAGE_MESSAGE =
 
 static const char* shortopts = "s:b:o:t:q:p:w:h:r:";
 
-enum { OPT_HELP = 1, TAG_SUP, SV_FILE, REGION, LOG, MOD_FILE, CRAM};
+enum { OPT_HELP = 1, TAG_SUP, SV_FILE, REGION, LOG, MOD_FILE, CRAM, SAMPLE};
 
 static const struct option longopts[] = { 
     { "help",                 no_argument,        NULL, OPT_HELP },
     { "snp-file",             required_argument,  NULL, 's' },
+    { "sample",               required_argument,  NULL, SAMPLE },
     { "bam-file",             required_argument,  NULL, 'b' },
     { "reference",            required_argument,  NULL, 'r' },
     { "tagSupplementary",     no_argument,        NULL, TAG_SUP },
@@ -64,6 +66,7 @@ namespace opt
     static int svWindow = 20;
     static double svThreshold = 0.1;
     static std::string snpFile="";
+    static std::string sample="";
     static std::string svFile="";
     static std::string modFile="";
     static std::string bamFile="";
@@ -96,6 +99,7 @@ void HaplotagOptions(int argc, char** argv)
             case 'w': arg >> opt::svWindow; break;
             case 'h': arg >> opt::svThreshold; break;
             case SV_FILE:  arg >> opt::svFile; break;
+            case SAMPLE:   arg >> opt::sample; break;
             case MOD_FILE: arg >> opt::modFile; break;     
             case REGION:   arg >> opt::region; break;        
             case TAG_SUP:  opt::tagSupplementary = true; break;
@@ -226,6 +230,7 @@ int HaplotagMain(int argc, char** argv, std::string in_version)
     ecParams.numThreads=opt::numThreads;
     ecParams.qualityThreshold=opt::qualityThreshold;
     ecParams.snpFile=opt::snpFile;
+    ecParams.sample=opt::sample;
     ecParams.svFile=opt::svFile;
     ecParams.modFile=opt::modFile;
     ecParams.bamFile=opt::bamFile;

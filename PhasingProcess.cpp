@@ -31,6 +31,8 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
     std::cerr<< "\n";
     std::cerr<< "--- File Parameter --- \n";
     std::cerr<< "SNP File           : " << params.snpFile      << "\n";
+    if (!params.sample.empty())
+        std::cerr<< "Sample             : " << params.sample       << "\n";
     std::cerr<< "SV  File           : " << params.svFile       << "\n";
     std::cerr<< "MOD File           : " << params.modFile      << "\n";
     std::cerr<< "REF File           : " << params.fastaFile    << "\n";
@@ -243,6 +245,7 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
         GNNModule::Params gnnParams;
         gnnParams.vcf_path        = phasedPrefix + ".vcf";
         gnnParams.reference_path  = params.fastaFile;
+        gnnParams.sample          = params.sample;
         gnnParams.output_vcf      = params.resultPrefix + ".vcf";
         if(params.svFile!=""){
             gnnParams.sv_vcf         = phasedPrefix + "_SV.vcf";
@@ -412,6 +415,37 @@ void GNNModule::loadModel() {
 }
 
 // ═══════════════════════════════════════════════════════════
+// The sample of the SNP VCF to read and write: --sample, by default the
+// first one (phase has checked that the sample exists).
+int GNNModule::sampleIndex(bcf_hdr_t* hdr) const {
+    if (!params_.sample.empty()) {
+        int i = bcf_hdr_id2int(hdr, BCF_DT_SAMPLE, params_.sample.c_str());
+        if (i >= 0) return i;
+    }
+    return 0;
+}
+
+// Set the PS of sample si; missing removes it. With one sample the PS field
+// is removed from the record, as before; with several, only this sample's
+// value changes.
+void GNNModule::setSamplePS(bcf_hdr_t* hdr, bcf1_t* rec, int si, int32_t ps) {
+    const int nsmpl = bcf_hdr_nsamples(hdr);
+    if (nsmpl == 1) {
+        if (ps == bcf_int32_missing) bcf_update_format_int32(hdr, rec, "PS", nullptr, 0);
+        else bcf_update_format_int32(hdr, rec, "PS", &ps, 1);
+        return;
+    }
+    int32_t* v = nullptr; int nv = 0;
+    if (bcf_get_format_int32(hdr, rec, "PS", &v, &nv) != nsmpl) {
+        free(v);
+        v = (int32_t*)malloc(nsmpl * sizeof(int32_t));
+        for (int i = 0; i < nsmpl; ++i) v[i] = bcf_int32_missing;
+    }
+    v[si] = ps;
+    bcf_update_format_int32(hdr, rec, "PS", v, nsmpl);
+    free(v);
+}
+
 void GNNModule::parseVCF() {
     htsFile* fp = hts_open(params_.vcf_path.c_str(), "r");
     if (!fp) {
@@ -425,13 +459,16 @@ void GNNModule::parseVCF() {
     }
     bcf1_t* rec = bcf_init();
     int n = 0;
+    const int si = sampleIndex(hdr);
     while (bcf_read(fp, hdr, rec) == 0) {
         bcf_unpack(rec, BCF_UN_ALL);
         int32_t* gt = nullptr; int ng = 0;
         if (bcf_get_genotypes(hdr, rec, &gt, &ng) < 0) continue;
-        if (ng < 2) { free(gt); continue; }
-        if (!bcf_gt_is_phased(gt[1])) { free(gt); continue; }
-        int a0 = bcf_gt_allele(gt[0]), a1 = bcf_gt_allele(gt[1]);
+        const int ploidy = ng / bcf_hdr_nsamples(hdr);
+        if (ploidy < 2) { free(gt); continue; }
+        int32_t* sg = gt + si * ploidy;
+        if (!bcf_gt_is_phased(sg[1])) { free(gt); continue; }
+        int a0 = bcf_gt_allele(sg[0]), a1 = bcf_gt_allele(sg[1]);
         free(gt);
         if (a0 == a1) continue;
 
@@ -448,7 +485,8 @@ void GNNModule::parseVCF() {
         if (bcf_get_info_float(hdr, rec, "H1", &fv, &nv) > 0) { vi.h1 = fv[0]; free(fv); fv=nullptr; nv=0; }
         if (bcf_get_info_float(hdr, rec, "H2", &fv, &nv) > 0) { vi.h2 = fv[0]; free(fv); fv=nullptr; nv=0; }
         int32_t* ps = nullptr; int np = 0;
-        if (bcf_get_format_int32(hdr, rec, "PS", &ps, &np) > 0) { vi.ps = ps[0]; free(ps); }
+        if (bcf_get_format_int32(hdr, rec, "PS", &ps, &np) > si) vi.ps = ps[si];
+        free(ps);
         vi.hp_len = vi.gc_content = vi.str_context = vi.seq_entropy = 0;
         vi.vtype = (vi.indel_len == 0) ? GVT_SNV : GVT_INDEL;
         variants_[vi.chrom].push_back(vi);
@@ -1073,13 +1111,19 @@ void GNNModule::writeOutputVCF(const std::string& in_path, const std::string& ou
     }
     bcf1_t* rec = bcf_init();
     int nu = 0, nsplit = 0, norphan = 0;
+    // --sample applies to the SNP VCF; the SV and 5mC VCFs written by phase
+    // carry the phase in their first sample column
+    const int si = (in_path == params_.vcf_path) ? sampleIndex(hdr) : 0;
+    const int nsmpl = bcf_hdr_nsamples(hdr);
     while (bcf_read(ifp, hdr, rec) == 0) {
         bcf_unpack(rec, BCF_UN_ALL);
         // Only the phased record at a position is the one the GNN saw; other
         // records at the same position are written unchanged (issue #133).
         {
             int32_t* gt=nullptr; int ng=0;
-            bool phased = bcf_get_genotypes(hdr,rec,&gt,&ng)>=2 && bcf_gt_is_phased(gt[1]);
+            bool phased = false;
+            if (bcf_get_genotypes(hdr,rec,&gt,&ng) > 0 && ng / nsmpl >= 2)
+                phased = bcf_gt_is_phased(gt[si * (ng / nsmpl) + 1]);
             free(gt);
             if (!phased) {
                 if (bcf_write(ofp, hdr, rec) < 0) {
@@ -1101,26 +1145,26 @@ void GNNModule::writeOutputVCF(const std::string& in_path, const std::string& ou
         }
         if (unph) {
             int32_t* gt=nullptr; int ng=0;
-            if (bcf_get_genotypes(hdr,rec,&gt,&ng)>=2) {
+            if (bcf_get_genotypes(hdr,rec,&gt,&ng) > 0 && ng / nsmpl >= 2) {
                 // An unphased genotype carries no order, and the VCF spec
                 // writes it ascending, so sort the alleles rather than
                 // leaving "1/0" behind.
-                int a0 = bcf_gt_allele(gt[0]), a1 = bcf_gt_allele(gt[1]);
+                int32_t* sg = gt + si * (ng / nsmpl);
+                int a0 = bcf_gt_allele(sg[0]), a1 = bcf_gt_allele(sg[1]);
                 if (a0 > a1) std::swap(a0, a1);
-                gt[0]=bcf_gt_unphased(a0);
-                gt[1]=bcf_gt_unphased(a1);
+                sg[0]=bcf_gt_unphased(a0);
+                sg[1]=bcf_gt_unphased(a1);
                 bcf_update_genotypes(hdr,rec,gt,ng);
             }
             free(gt);
-            bcf_update_format_int32(hdr,rec,"PS",nullptr,0);
+            setSamplePS(hdr, rec, si, bcf_int32_missing);
             nu++;
         } else if (params_.split_blocks && ps_reassign_.count(ch)) {
             // Variant stays phased but its block was split → new PS
             auto& rmap = ps_reassign_[ch];
             auto it = rmap.find(rec->pos);
             if (it != rmap.end()) {
-                int32_t new_ps = it->second;
-                bcf_update_format_int32(hdr, rec, "PS", &new_ps, 1);
+                setSamplePS(hdr, rec, si, it->second);
                 nsplit++;
             }
         }
