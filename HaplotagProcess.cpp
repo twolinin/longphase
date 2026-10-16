@@ -165,9 +165,29 @@ void HaplotagProcess::parserProcess(std::string &input){
         return;
     }
     if (input.substr(0, 1) == "#") {
+        parseColumnHeader(input);
         return;
     }
     parseRecordLine(input);
+}
+
+// #CHROM line of the SNP vcf: find the column of --sample.
+void HaplotagProcess::parseColumnHeader(const std::string &line){
+    if (!parseSnpFile || line.substr(0, 6) != "#CHROM" || sampleName.empty())
+        return;
+    std::istringstream iss(line);
+    std::vector<std::string> fields((std::istream_iterator<std::string>(iss)), std::istream_iterator<std::string>());
+    for (size_t c = 9; c < fields.size(); c++) {
+        if (fields[c] == sampleName) {
+            sampleCol = c;
+            return;
+        }
+    }
+    std::cerr << "error: sample " << sampleName << " is not in the SNP vcf. samples:";
+    for (size_t c = 9; c < fields.size(); c++)
+        std::cerr << " " << fields[c];
+    std::cerr << "\n";
+    exit(EXIT_FAILURE);
 }
 
 void HaplotagProcess::parseHeaderLine(const std::string &line){
@@ -204,20 +224,22 @@ void HaplotagProcess::parseRecordLine(const std::string &line){
     std::istringstream iss(line);
     std::vector<std::string> fields((std::istream_iterator<std::string>(iss)), std::istream_iterator<std::string>());
 
-    if (fields.size() == 0)
+    // the sample column: --sample in the SNP vcf, the first sample otherwise
+    const size_t sc = parseSnpFile ? sampleCol : 9;
+    if (fields.size() <= sc)
         return;
 
     // trans to 0-base
     int pos = std::stoi(fields[1]) - 1;
 
     // find GT value start (using helper)
-    int modifu_start = findFieldValueStart(fields[8], fields[9], "GT");
+    int modifu_start = findFieldValueStart(fields[8], fields[sc], "GT");
 
     // hetero GT
-    if ((fields[9][modifu_start] != fields[9][modifu_start+2]) && fields[9][modifu_start+1] == '|') {
-        int ps_start = findFieldValueStart(fields[8], fields[9], "PS");
-        std::string psValue = extractFieldValue(fields[9], ps_start);
-        int haploDir = resolveHaplotypeDirection(fields[9][modifu_start], fields[9][modifu_start+2]);
+    if ((fields[sc][modifu_start] != fields[sc][modifu_start+2]) && fields[sc][modifu_start+1] == '|') {
+        int ps_start = findFieldValueStart(fields[8], fields[sc], "PS");
+        std::string psValue = extractFieldValue(fields[sc], ps_start);
+        int haploDir = resolveHaplotypeDirection(fields[sc][modifu_start], fields[sc][modifu_start+2]);
 
         if (parseSnpFile)  processSnpRecord(fields, pos, haploDir, psValue);
         if (parseSVFile)   processSvRecord(fields, haploDir);
@@ -936,9 +958,11 @@ int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, 
 }
 
 HaplotagProcess::HaplotagProcess(HaplotagParameters params):
-totalAlignment(0),totalSupplementary(0),totalSecondary(0),totalUnmapped(0),totalTagCount(0),totalUnTagCount(0),processBegin(time(NULL)),integerPS(false),parseSnpFile(false),parseSVFile(false),parseMODFile(false)
+totalAlignment(0),totalSupplementary(0),totalSecondary(0),totalUnmapped(0),totalTagCount(0),totalUnTagCount(0),processBegin(time(NULL)),integerPS(false),parseSnpFile(false),sampleName(params.sample),sampleCol(9),parseSVFile(false),parseMODFile(false)
 {
     std::cerr<< "phased SNP file    : " << params.snpFile             << "\n";
+    if (!params.sample.empty())
+        std::cerr<< "sample             : " << params.sample              << "\n";
     std::cerr<< "phased SV file     : " << params.svFile              << "\n";
     std::cerr<< "phased MOD file    : " << params.modFile             << "\n";
     std::cerr<< "input bam file     : " << params.bamFile             << "\n";
