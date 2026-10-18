@@ -97,7 +97,7 @@ float SubEdge::findCount(const CountTable &table, int pos){
     return 0;
 }
 
-void SubEdge::addSubEdge(int currentQuality, Variant connectNode, const std::string &readName, int baseQuality, double edgeWeight){
+void SubEdge::addSubEdge(int currentQuality, const Variant &connectNode, const std::string &readName, int baseQuality, double edgeWeight){
     // target noded is REF allele
     if(connectNode.allele == 0 ){
         // debug, this parameter will record the names of all reads between two points
@@ -791,7 +791,7 @@ void VairiantGraph::filterOverlappingAlignments(std::vector<ReadVariant> &in_rea
     for (auto delIter = delReadIdx.begin(), nextdelIter = std::next(delReadIdx.begin(), 1); nextdelIter != delReadIdx.end(); delIter++ , nextdelIter++) {
         auto nowDelIter = *delIter+1;
         while (nowDelIter<*nextdelIter){
-            in_readVariant[saveIter++]=in_readVariant[nowDelIter++];
+            in_readVariant[saveIter++]=std::move(in_readVariant[nowDelIter++]);
         }
     }
     in_readVariant.erase( std::next(in_readVariant.begin(), saveIter), in_readVariant.end()); 
@@ -962,22 +962,11 @@ void VairiantGraph::assignReadHaplotypesAndCollectAlleleCounts(HpAlleleCountMap&
 
 void VairiantGraph::reassignVariantHaplotypes(const HpAlleleCountMap& hpAlleleCountMap){
     auto getHpAlleleCount = [&](int haplotype, int position, int allele){
-        auto hpIter = hpAlleleCountMap.find(haplotype);
-        if(hpIter == hpAlleleCountMap.end()){
+        auto positionIter = hpAlleleCountMap[haplotype].find(position);
+        if(positionIter == hpAlleleCountMap[haplotype].end()){
             return 0.0;
         }
-
-        auto positionIter = hpIter->second.find(position);
-        if(positionIter == hpIter->second.end()){
-            return 0.0;
-        }
-
-        auto alleleIter = positionIter->second.find(allele);
-        if(alleleIter == positionIter->second.end()){
-            return 0.0;
-        }
-
-        return alleleIter->second;
+        return positionIter->second[allele];
     };
 
     double snpConfidenceThreshold = params->snpConfidence;

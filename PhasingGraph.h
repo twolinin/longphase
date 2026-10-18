@@ -5,11 +5,13 @@
 #include "ParsingBam.h"
 #include "PhasingProcess.h"
 #include <set>
+#include <array>
 
 
 typedef std::pair<int, int> PosAllele;
 typedef std::map<std::string, int> ReadBaseMap;
-using HpAlleleCountMap = std::map<int, std::map<int, std::map<double, double>>>;
+// [haplotype 0/1][position][allele 0/1] -> read count; haplotype and allele index fixed arrays
+using HpAlleleCountMap = std::array<std::map<int, std::array<double, 2>>, 2>;
 using PhasedBlocks = std::map<int, std::vector<int>>;
 
 class Clip{
@@ -84,7 +86,7 @@ class SubEdge{
         
         void destroy();
         
-        void addSubEdge(int currentQuality, Variant connectNode, const std::string &readName, int baseQuality, double edgeWeight);
+        void addSubEdge(int currentQuality, const Variant &connectNode, const std::string &readName, int baseQuality, double edgeWeight);
         std::pair<float,float> BestPair(int targetPos);
         float getRefReadCount(int targetPos);
         float getAltReadCount(int targetPos);        
