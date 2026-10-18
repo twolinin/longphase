@@ -63,17 +63,38 @@ void recordVoteForNextPosition(
 }
 //SubEdge
 
-SubEdge::SubEdge():readCount(0){ 
-    refReadCount = new std::map<int, float>;
-    altReadCount = new std::map<int, float>;
+SubEdge::SubEdge():readCount(0), refHint(0), altHint(0){ 
 }
 
 SubEdge::~SubEdge(){ 
 }
 
 void SubEdge::destroy(){
-    delete refReadCount;
-    delete altReadCount;
+    CountTable().swap(refReadCount);
+    CountTable().swap(altReadCount);
+}
+
+// Count of pos in table, inserted as 0 if absent (as std::map::operator[]). The positions of one
+// read arrive in increasing order, so the search starts at the last position touched.
+float &SubEdge::findOrInsert(CountTable &table, size_t &hint, int pos){
+    auto less = [](const std::pair<int, float> &entry, int key){ return entry.first < key; };
+    CountTable::iterator it;
+    if( hint < table.size() && table[hint].first <= pos )
+        it = std::lower_bound(table.begin() + hint, table.end(), pos, less);
+    else
+        it = std::lower_bound(table.begin(), table.begin() + std::min(hint, table.size()), pos, less);
+    if( it == table.end() || it->first != pos )
+        it = table.insert(it, std::make_pair(pos, 0.0f));
+    hint = it - table.begin();
+    return it->second;
+}
+
+float SubEdge::findCount(const CountTable &table, int pos){
+    auto less = [](const std::pair<int, float> &entry, int key){ return entry.first < key; };
+    CountTable::const_iterator it = std::lower_bound(table.begin(), table.end(), pos, less);
+    if( it != table.end() && it->first == pos )
+        return it->second;
+    return 0;
 }
 
 void SubEdge::addSubEdge(int currentQuality, Variant connectNode, const std::string &readName, int baseQuality, double edgeWeight){
@@ -91,10 +112,11 @@ void SubEdge::addSubEdge(int currentQuality, Variant connectNode, const std::str
         }*/
 
 	//if the base quality on both snps is high enough, the edge has normal weight
+        float &count = findOrInsert(refReadCount, refHint, connectNode.position);
         if ( currentQuality >= baseQuality && connectNode.quality >= baseQuality)
-            (*refReadCount)[connectNode.position]++;
+            count++;
         else
-            (*refReadCount)[connectNode.position] = (*refReadCount)[connectNode.position] + edgeWeight ;
+            count = count + edgeWeight ;
         
         
 	//(*refReadCount)[connectNode.position]++;
@@ -113,10 +135,11 @@ void SubEdge::addSubEdge(int currentQuality, Variant connectNode, const std::str
         }*/
        
 	//if the base quality on both snps is high enough, the edge has normal weight 
+        float &count = findOrInsert(altReadCount, altHint, connectNode.position);
         if ( currentQuality >= baseQuality && connectNode.quality >= baseQuality)
-            (*altReadCount)[connectNode.position]++;
+            count++;
         else
-            (*altReadCount)[connectNode.position] = (*altReadCount)[connectNode.position] + edgeWeight ;
+            count = count + edgeWeight ;
         
 	//(*altReadCount)[connectNode.position]++;
     }
@@ -128,27 +151,19 @@ std::pair<float,float> SubEdge::BestPair(int targetPos){
 }
 
 float SubEdge::getRefReadCount(int targetPos){
-    std::map<int, float>::iterator posIter = refReadCount->find(targetPos);
-    if( posIter != refReadCount->end() ){
-        return posIter->second;
-    }
-    return 0;
+    return findCount(refReadCount, targetPos);
 }
 
 float SubEdge::getAltReadCount(int targetPos){
-    std::map<int, float>::iterator posIter = altReadCount->find(targetPos);
-    if( posIter != altReadCount->end() ){
-        return posIter->second;
-    }
-    return 0;
+    return findCount(altReadCount, targetPos);
 }
 
 std::vector<std::string> SubEdge::showEdge(std::string message){
     std::vector<std::string> result;
-    for(std::map<int, float >::iterator edgeIter = refReadCount->begin() ; edgeIter != refReadCount->end() ; edgeIter++ ){
+    for(CountTable::iterator edgeIter = refReadCount.begin() ; edgeIter != refReadCount.end() ; edgeIter++ ){
         result.push_back(message +" -> ref_" + std::to_string((*edgeIter).first) + "[label=" + std::to_string((*edgeIter).second) + "];");
     }
-    for(std::map<int, float >::iterator edgeIter = altReadCount->begin() ; edgeIter != altReadCount->end() ; edgeIter++ ){
+    for(CountTable::iterator edgeIter = altReadCount.begin() ; edgeIter != altReadCount.end() ; edgeIter++ ){
         result.push_back(message +" -> alt_" + std::to_string((*edgeIter).first) + "[label=" + std::to_string((*edgeIter).second) + "];");
     }
     return result;
@@ -156,10 +171,10 @@ std::vector<std::string> SubEdge::showEdge(std::string message){
 
 std::vector<std::pair<int,int>> SubEdge::getConnectPos(){
     std::vector<std::pair<int,int>> result;
-    for(std::map<int, float >::iterator edgeIter = refReadCount->begin() ; edgeIter != refReadCount->end() ; edgeIter++ ){
+    for(CountTable::iterator edgeIter = refReadCount.begin() ; edgeIter != refReadCount.end() ; edgeIter++ ){
         result.push_back( std::make_pair( (*edgeIter).first, 0 ) );
     }
-    for(std::map<int, float >::iterator edgeIter = altReadCount->begin() ; edgeIter != altReadCount->end() ; edgeIter++ ){
+    for(CountTable::iterator edgeIter = altReadCount.begin() ; edgeIter != altReadCount.end() ; edgeIter++ ){
         result.push_back( std::make_pair( (*edgeIter).first, 1 ) );
     }
     return result;

@@ -64,9 +64,18 @@ class SubEdge{
     
     private:
         int readCount;
-        // < next position, read count >
-        std::map<int, float> *refReadCount;
-        std::map<int, float> *altReadCount;
+        // < next position, read count >, sorted by position. A sorted array instead of std::map:
+        // each table holds a few positions that mostly arrive in increasing order, so lookups
+        // stay in one or two cache lines instead of following tree pointers.
+        typedef std::vector<std::pair<int, float>> CountTable;
+        CountTable refReadCount;
+        CountTable altReadCount;
+        // index of the last position touched in each table; the next lookup starts there
+        size_t refHint;
+        size_t altHint;
+
+        static float &findOrInsert(CountTable &table, size_t &hint, int pos);
+        static float findCount(const CountTable &table, int pos);
 
     public:
         
