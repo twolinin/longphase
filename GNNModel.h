@@ -37,8 +37,10 @@ constexpr float kAdjThr   = 0.5f;       // adjacency values below this are absen
 // One dense tensor, stored row-major.
 struct Tensor {
     std::vector<float> data;
+    std::vector<float> trans;   // the same values transposed, [cols, rows]
     int rows = 0, cols = 0;
     inline const float* row(int r) const { return data.data() + (size_t)r * cols; }
+    inline const float* col(int c) const { return trans.data() + (size_t)c * rows; }
 };
 
 struct LayerWeights {
@@ -87,6 +89,9 @@ inline float gelu(float x) {
 inline float leaky_relu(float x) { return x >= 0.0f ? x : kLeaky * x; }
 
 // out[n, out_dim] = in[n, in_dim] * W^T + b, with W stored as [out_dim, in_dim]
+// Each output is b[o] + in[0]*W[o][0] + in[1]*W[o][1] + ..., added in that order. The loop
+// runs over k outside and o inside (on the transposed weights) so the compiler can
+// vectorize across outputs; the order of the additions for each output is unchanged.
 inline void linear(const float* in, int n, int in_dim,
                    const Tensor& w, const std::vector<float>& b,
                    float* out) {
@@ -94,11 +99,11 @@ inline void linear(const float* in, int n, int in_dim,
     for (int i = 0; i < n; ++i) {
         const float* xi = in + (size_t)i * in_dim;
         float* oi = out + (size_t)i * out_dim;
-        for (int o = 0; o < out_dim; ++o) {
-            const float* wo = w.row(o);
-            float s = b[o];
-            for (int k = 0; k < in_dim; ++k) s += xi[k] * wo[k];
-            oi[o] = s;
+        for (int o = 0; o < out_dim; ++o) oi[o] = b[o];
+        for (int k = 0; k < in_dim; ++k) {
+            const float xk = xi[k];
+            const float* wk = w.col(k);
+            for (int o = 0; o < out_dim; ++o) oi[o] += xk * wk[o];
         }
     }
 }
@@ -155,6 +160,10 @@ struct Cursor {
         if (at + n > buf.size()) throw std::runtime_error("GNN weights exhausted");
         t.rows = rows; t.cols = cols;
         t.data.assign(buf.begin() + at, buf.begin() + at + n);
+        t.trans.resize(n);
+        for (int r = 0; r < rows; ++r)
+            for (int c = 0; c < cols; ++c)
+                t.trans[(size_t)c * rows + r] = t.data[(size_t)r * cols + c];
         at += n;
     }
     void take(std::vector<float>& v, int n) {
@@ -257,6 +266,7 @@ inline std::vector<float> Model::forward(const std::vector<float>& node_feat,
     std::vector<float> scores(nn * kHeads);
     std::vector<float> local((size_t)n * kHidden), glob((size_t)n * kHidden);
     std::vector<float> q((size_t)n * kHidden), k((size_t)n * kHidden), v((size_t)n * kHidden);
+    std::vector<float> kt((size_t)n * kHidden), srow(n);
     std::vector<float> agg((size_t)n * kHidden);
     std::vector<float> ffn_h((size_t)n * kHidden * 2);
 
@@ -275,10 +285,12 @@ inline std::vector<float> Model::forward(const std::vector<float>& node_feat,
             const size_t e = edges[t];
             const float* ef = edge_feat.data() + e * kEdgeFeat;
             float* eh = edge_h.data() + (size_t)t * kHidden;
-            for (int o = 0; o < kHidden; ++o) {
-                float s = 0.0f;
-                for (int c = 0; c < kEdgeFeat; ++c) s += ef[c] * L.edge_enc.row(c)[o];
-                eh[o] = s;
+            // eh[o] = 0 + ef[0]*W[0][o] + ef[1]*W[1][o] + ..., vectorized across o
+            for (int o = 0; o < kHidden; ++o) eh[o] = 0.0f;
+            for (int c = 0; c < kEdgeFeat; ++c) {
+                const float efc = ef[c];
+                const float* wc = L.edge_enc.row(c);
+                for (int o = 0; o < kHidden; ++o) eh[o] += efc * wc[o];
             }
         }
 
@@ -344,16 +356,24 @@ inline std::vector<float> Model::forward(const std::vector<float>& node_feat,
         linear(x.data(), n, kHidden, L.v_w, L.v_b, v.data());
 
         const float scale = 1.0f / std::sqrt((float)kHeadDim);
+        // score(i,j,h) = (0 + q[i][0]*k[j][0] + q[i][1]*k[j][1] + ...) * scale over the head's
+        // dimensions, in that order; computed for all j at once on k transposed to
+        // [hidden, n] so the compiler can vectorize across j
+        for (int j = 0; j < n; ++j)
+            for (int d = 0; d < kHidden; ++d)
+                kt[(size_t)d * n + j] = k[(size_t)j * kHidden + d];
         for (int i = 0; i < n; ++i)
-            for (int j = 0; j < n; ++j)
-                for (int h = 0; h < kHeads; ++h) {
-                    const int off = h * kHeadDim;
-                    float s = 0.0f;
-                    for (int d = 0; d < kHeadDim; ++d)
-                        s += q[(size_t)i * kHidden + off + d] *
-                             k[(size_t)j * kHidden + off + d];
-                    scores[((size_t)i * n + j) * kHeads + h] = s * scale;
+            for (int h = 0; h < kHeads; ++h) {
+                const int off = h * kHeadDim;
+                for (int j = 0; j < n; ++j) srow[j] = 0.0f;
+                for (int d = 0; d < kHeadDim; ++d) {
+                    const float qd = q[(size_t)i * kHidden + off + d];
+                    const float* ktd = kt.data() + (size_t)(off + d) * n;
+                    for (int j = 0; j < n; ++j) srow[j] += qd * ktd[j];
                 }
+                for (int j = 0; j < n; ++j)
+                    scores[((size_t)i * n + j) * kHeads + h] = srow[j] * scale;
+            }
         softmax_dim1(scores, n);
 
         std::fill(agg.begin(), agg.end(), 0.0f);
