@@ -68,6 +68,11 @@ protected:
   // so the three lines are written exactly once per output VCF, even
   // when the input already declares them.
   bool pe_def;
+  // writeDataLine buffers, reused from line to line
+  std::vector<std::string> lineFields;
+  std::string lineOut;
+  // join fields with tabs and write them as one line
+  void writeFields(std::ofstream &resultVcf);
   // Emit the three ##INFO header lines for PE / H1 / H2 exactly once.
   // Idempotent: repeated calls are no-ops after the first successful call.
   void writePeInfoHeaders(std::ofstream &resultVcf);
@@ -101,6 +106,17 @@ private:
   std::ofstream removedIndelsLog;
   // column of the phased sample (--sample) in a VCF data line
   size_t sampleCol = 9;
+
+  // writeDataLine lookups for the chromosome of the last line
+  std::string writeChr;
+  bool writeChrSet = false;
+  std::map<int, SnpVariant> *writeChrVariants = nullptr;
+  std::map<int, SnpVariant>::iterator writeVariantCursor;
+  const std::set<int> *writeChrFiltered = nullptr;
+  // phased positions of each chromosome, sorted, from the PhasingResult
+  std::map<std::string, std::vector<std::pair<int, const PhasingElement *>>> writePhased;
+  const std::vector<std::pair<int, const PhasingElement *>> *writeChrPhased = nullptr;
+  void selectWriteChr(const std::string &chr, PhasingResult &phasingResult);
 
   // override input parser
   void parserProcess(std::string &input);

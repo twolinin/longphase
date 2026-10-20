@@ -1,6 +1,9 @@
 #include "ParsingBam.h"
 
 #include <cstdio>
+#include <cctype>
+#include <cerrno>
+#include <climits>
 #include <cmath>
 #include <iomanip>   // std::fixed / std::setprecision for INFO/PE|H1|H2
 #include <sstream>
@@ -185,7 +188,7 @@ void BaseVairantParser::dispatchWriteResult(const std::string &inputFile,
 void BaseVairantParser::writeLine(std::string &input, bool &ps_def,
                                   std::ofstream &resultVcf,
                                   PhasingResult &phasingResult) {
-  if (input.substr(0, 2) == "##") {
+  if (input.compare(0, 2, "##") == 0) {
     // Drop PE/H1/H2 declarations carried over from an input that was
     // already phased by LongPhase; writePeInfoHeaders() emits the current
     // ones, so re-phasing never produces duplicate ##INFO lines.
@@ -195,7 +198,7 @@ void BaseVairantParser::writeLine(std::string &input, bool &ps_def,
       return;
     writeMetaHeader(input, ps_def, resultVcf);
   }
-  else if (input.substr(0, 6) == "#CHROM" || input.substr(0, 6) == "#chrom")
+  else if (input.compare(0, 6, "#CHROM") == 0 || input.compare(0, 6, "#chrom") == 0)
     writeColumnHeader(input, ps_def, resultVcf);
   else
     writeDataLine(input, resultVcf, phasingResult);
@@ -240,11 +243,48 @@ void BaseVairantParser::writePeInfoHeaders(std::ofstream &resultVcf) {
 }
 
 namespace {
+// Split at whitespace like reading strings with operator>> in the C locale
+void splitWhitespace(const std::string &line, std::vector<std::string> &fields) {
+  size_t n = 0;
+  size_t i = 0, len = line.size();
+  while (true) {
+    while (i < len && std::isspace((unsigned char)line[i]))
+      i++;
+    if (i >= len)
+      break;
+    size_t b = i;
+    while (i < len && !std::isspace((unsigned char)line[i]))
+      i++;
+    if (n == fields.size())
+      fields.emplace_back();
+    fields[n++].assign(line, b, i - b);
+  }
+  fields.resize(n);
+}
+} // namespace
+
+void BaseVairantParser::writeFields(std::ofstream &resultVcf) {
+  lineOut.clear();
+  for (size_t i = 0; i < lineFields.size(); i++) {
+    if (i != 0)
+      lineOut += '\t';
+    lineOut += lineFields[i];
+  }
+  lineOut += '\n';
+  resultVcf.write(lineOut.data(), lineOut.size());
+}
+
+namespace {
 // Remove existing PE=, H1= and H2= entries from an INFO field, e.g. when
 // re-phasing a VCF that LongPhase already annotated. Keys are matched
 // exactly, so fields such as H1x= are kept. An emptied field becomes ".".
 void removePeHapFromInfoField(std::string &infoField) {
   if (infoField == ".")
+    return;
+  // nothing to remove unless one of the keys occurs
+  if (infoField.find("PE") == std::string::npos &&
+      infoField.find("H1") == std::string::npos &&
+      infoField.find("H2") == std::string::npos)
     return;
   std::string kept;
   bool removed = false;
@@ -277,19 +317,19 @@ void removePeHapFromInfoField(std::string &infoField) {
 void appendPeHapInfoToInfoField(std::string &infoField,
                                 const PhasingElement &pe) {
   removePeHapFromInfoField(infoField);
-  std::ostringstream buf;
-  buf << std::fixed << std::setprecision(3);
-  buf << "PE=" << pe.entropy
-      << ";H1=" << pe.h1
-      << ";H2=" << pe.h2;
+  // same text as an ostream with std::fixed and setprecision(3)
+  char buf[128];
+  snprintf(buf, sizeof(buf), "PE=%.3f;H1=%.3f;H2=%.3f", (double)pe.entropy,
+           (double)pe.h1, (double)pe.h2);
   // modcall ends INFO with ';', so drop trailing separators to avoid
   // writing an empty entry (";;PE=...")
   while (!infoField.empty() && infoField.back() == ';')
     infoField.pop_back();
   if (infoField.empty() || infoField == ".") {
-    infoField = buf.str();
+    infoField = buf;
   } else {
-    infoField += ";" + buf.str();
+    infoField += ';';
+    infoField += buf;
   }
 }
 } // namespace
@@ -299,6 +339,36 @@ void appendPeHapInfoToInfoField(std::string &infoField,
 // none), so phasing one sample leaves the others unchanged.
 static void setSamplePs(std::vector<std::string> &fields, size_t sampleCol,
                         const std::string &value) {
+  // Usual case: FORMAT has no PS key. Then only column sampleCol changes:
+  // it is padded with "." to the FORMAT length and gets value appended.
+  bool hasPs = false;
+  size_t formatKeys = 1;
+  {
+    const std::string &f = fields[8];
+    size_t b = 0;
+    while (true) {
+      size_t e = f.find(':', b);
+      size_t len = (e == std::string::npos ? f.size() : e) - b;
+      if (len == 2 && f[b] == 'P' && f[b + 1] == 'S')
+        hasPs = true;
+      if (e == std::string::npos)
+        break;
+      formatKeys++;
+      b = e + 1;
+    }
+  }
+  if (!hasPs && !value.empty()) {
+    fields[8] += ":PS";
+    if (sampleCol < fields.size()) {
+      std::string &v = fields[sampleCol];
+      size_t n = std::count(v.begin(), v.end(), ':') + 1;
+      for (; n < formatKeys; n++)
+        v += ":.";
+      v += ':';
+      v += value;
+    }
+    return;
+  }
   auto split = [](const std::string &s) {
     std::vector<std::string> v;
     size_t b = 0;
@@ -572,8 +642,12 @@ int SnpParser::getLastSNP(std::string chrName) {
 
 void SnpParser::writeResult(PhasingResult &phasingResult,
                             const std::string &outPrefix) {
+  writeChrSet = false;
+  writePhased.clear();
   dispatchWriteResult(params->snpFile, outPrefix + ".vcf",
                       phasingResult);
+  writePhased.clear();
+  writeChrSet = false;
 }
 
 void SnpParser::parserProcess(std::string &input) {}
@@ -600,12 +674,54 @@ void SnpParser::writeMetaHeader(const std::string &input, bool &ps_def,
 }
 
 
+
+// Point the per-chromosome lookups at chr: its SNPs, its filtered indels and
+// its phased positions. The phased positions are the PhasingResult keys
+// chr + "_" + std::to_string(pos), collected and sorted once per chromosome.
+void SnpParser::selectWriteChr(const std::string &chr,
+                               PhasingResult &phasingResult) {
+  writeChr = chr;
+  writeChrSet = true;
+  writeChrVariants = &(*chrVariant)[chr];
+  writeVariantCursor = writeChrVariants->begin();
+  writeChrFiltered = nullptr;
+  auto filteredIter = filteredIndelPositions.find(chr);
+  if (filteredIter != filteredIndelPositions.end())
+    writeChrFiltered = &filteredIter->second;
+
+  auto cached = writePhased.find(chr);
+  if (cached == writePhased.end()) {
+    std::vector<std::pair<int, const PhasingElement *>> phased;
+    const std::string prefix = chr + "_";
+    for (auto it = phasingResult.lower_bound(prefix);
+         it != phasingResult.end() &&
+         it->first.compare(0, prefix.size(), prefix) == 0;
+         ++it) {
+      // keep only keys whose rest is a position as std::to_string writes it
+      const char *rest = it->first.c_str() + prefix.size();
+      char *stop = nullptr;
+      errno = 0;
+      long pos = strtol(rest, &stop, 10);
+      if (errno != 0 || *stop != '\0' || pos < INT_MIN || pos > INT_MAX ||
+          std::to_string((int)pos) != rest)
+        continue;
+      phased.emplace_back((int)pos, &it->second);
+    }
+    std::sort(phased.begin(), phased.end(),
+              [](const std::pair<int, const PhasingElement *> &a,
+                 const std::pair<int, const PhasingElement *> &b) {
+                return a.first < b.first;
+              });
+    cached = writePhased.emplace(chr, std::move(phased)).first;
+  }
+  writeChrPhased = &cached->second;
+}
+
 void SnpParser::writeDataLine(const std::string &input,
                               std::ofstream &resultVcf,
                               PhasingResult &phasingResult) {
-  std::istringstream iss(input);
-  std::vector<std::string> fields((std::istream_iterator<std::string>(iss)),
-                                  std::istream_iterator<std::string>());
+  std::vector<std::string> &fields = lineFields;
+  splitWhitespace(input, fields);
 
   if (fields.size() == 0)
     return;
@@ -619,9 +735,21 @@ void SnpParser::writeDataLine(const std::string &input,
 
   int pos = std::stoi(fields[1]);
   int posIdx = pos - 1;
-  std::string key = fields[0] + "_" + std::to_string(posIdx);
 
-  PhasingResult::iterator psElementIter = phasingResult.find(key);
+  if (!writeChrSet || fields[0] != writeChr)
+    selectWriteChr(fields[0], phasingResult);
+
+  // the phased element at this position, if any
+  const PhasingElement *phased = nullptr;
+  {
+    auto it = std::lower_bound(
+        writeChrPhased->begin(), writeChrPhased->end(), posIdx,
+        [](const std::pair<int, const PhasingElement *> &a, int p) {
+          return a.first < p;
+        });
+    if (it != writeChrPhased->end() && it->first == posIdx)
+      phased = it->second;
+  }
 
   // reset GT flag
   if (fields[8].find("GT") != std::string::npos) {
@@ -637,37 +765,47 @@ void SnpParser::writeDataLine(const std::string &input,
     }
   }
 
-  // Check if the variant is extracted from this VCF
-  auto posIter = (*chrVariant)[fields[0]].find(posIdx);
+  // Check if the variant is extracted from this VCF. Lines come sorted, so
+  // a cursor moving forward finds it; otherwise search from the start.
+  std::map<int, SnpVariant>::iterator &cur = writeVariantCursor;
+  if (cur != writeChrVariants->begin() && std::prev(cur)->first >= posIdx) {
+    cur = writeChrVariants->lower_bound(posIdx);
+  } else {
+    int steps = 0;
+    while (cur != writeChrVariants->end() && cur->first < posIdx && steps < 16) {
+      ++cur;
+      steps++;
+    }
+    if (cur != writeChrVariants->end() && cur->first < posIdx)
+      cur = writeChrVariants->lower_bound(posIdx);
+  }
+  bool inVcf = cur != writeChrVariants->end() && cur->first == posIdx;
 
   // Check if this indel was filtered out due to quality
   bool isFilteredIndel = false;
   if (params->phaseIndel && params->indelQuality > 0) {
-    auto filteredIter = filteredIndelPositions.find(fields[0]);
-    if (filteredIter != filteredIndelPositions.end()) {
-      if (filteredIter->second.find(posIdx) != filteredIter->second.end()) {
-        isFilteredIndel = true;
-      }
+    if (writeChrFiltered != nullptr &&
+        writeChrFiltered->find(posIdx) != writeChrFiltered->end()) {
+      isFilteredIndel = true;
     }
   }
 
   // this pos is phase; only the record that was phased (same REF and ALT)
   // gets the phase, not other records at the same position (issue #133)
-  if (psElementIter != phasingResult.end() &&
-      posIter != (*chrVariant)[fields[0]].end() &&
-      posIter->second.Ref == fields[3] && posIter->second.Alt == fields[4]) {
+  if (phased != nullptr && inVcf && cur->second.Ref == fields[3] &&
+      cur->second.Alt == fields[4]) {
     // add PS flag and value
-    setSamplePs(fields, sc, std::to_string((*psElementIter).second.block));
+    setSamplePs(fields, sc, std::to_string(phased->block));
 
     int modify_start = findFieldValueStart(fields[8], fields[sc], "GT");
     // direct modify GT value
-    fields[sc][modify_start] = (*psElementIter).second.RAstatus[0];
+    fields[sc][modify_start] = phased->RAstatus[0];
     fields[sc][modify_start + 1] = '|';
-    fields[sc][modify_start + 2] = (*psElementIter).second.RAstatus[2];
+    fields[sc][modify_start + 2] = phased->RAstatus[2];
 
     // Attach PE / H1 / H2 to INFO for phased positions only.
     // Rule: if INFO was ".", replace it; otherwise append with ';'.
-    appendPeHapInfoToInfoField(fields[7], (*psElementIter).second);
+    appendPeHapInfoToInfoField(fields[7], *phased);
   }
   // this pos has not been phased
   else {
@@ -683,13 +821,7 @@ void SnpParser::writeDataLine(const std::string &input,
     fields[6] = "INDEL_QUAL_FILTERED";
   }
 
-  for (std::vector<std::string>::iterator fieldIter = fields.begin();
-       fieldIter != fields.end(); ++fieldIter) {
-    if (fieldIter != fields.begin())
-      resultVcf << "\t";
-    resultVcf << (*fieldIter);
-  }
-  resultVcf << "\n";
+  writeFields(resultVcf);
 }
 
 bool SnpParser::findSNP(std::string chr, int position) {
@@ -837,9 +969,8 @@ void SVParser::parserProcess(std::string &input) {
   if (input.substr(0, 1) == "#")
     return;
 
-  std::istringstream iss(input);
-  std::vector<std::string> fields((std::istream_iterator<std::string>(iss)),
-                                  std::istream_iterator<std::string>());
+  std::vector<std::string> &fields = lineFields;
+  splitWhitespace(input, fields);
 
   if (fields.size() == 0)
     return;
@@ -919,9 +1050,8 @@ void SVParser::writeMetaHeader(const std::string &input, bool &ps_def,
 void SVParser::writeDataLine(const std::string &input,
                                std::ofstream &resultVcf,
                                PhasingResult &phasingResult) {
-  std::istringstream iss(input);
-  std::vector<std::string> fields((std::istream_iterator<std::string>(iss)),
-                                  std::istream_iterator<std::string>());
+  std::vector<std::string> &fields = lineFields;
+  splitWhitespace(input, fields);
 
   if (fields.size() == 0)
     return;
@@ -998,13 +1128,7 @@ void SVParser::writeDataLine(const std::string &input,
     fields[8] = fields[8] + ":PS";
     fields[9] = fields[9] + ":.";
   }
-  for (std::vector<std::string>::iterator fieldIter = fields.begin();
-       fieldIter != fields.end(); ++fieldIter) {
-    if (fieldIter != fields.begin())
-      resultVcf << "\t";
-    resultVcf << (*fieldIter);
-  }
-  resultVcf << "\n";
+  writeFields(resultVcf);
 }
 
 bool SVParser::findSV(std::string chr, int position) {
@@ -1590,9 +1714,8 @@ void METHParser::parserProcess(std::string &input) {
   if (input[0] == '#')
     return;
 
-  std::istringstream iss(input);
-  std::vector<std::string> fields((std::istream_iterator<std::string>(iss)),
-                                  std::istream_iterator<std::string>());
+  std::vector<std::string> &fields = lineFields;
+  splitWhitespace(input, fields);
 
   if (fields.size() == 0) {
     return;
@@ -1643,9 +1766,8 @@ void METHParser::parserProcess(std::string &input) {
 void METHParser::writeDataLine(const std::string &input,
                                    std::ofstream &resultVcf,
                                    PhasingResult &phasingResult) {
-  std::istringstream iss(input);
-  std::vector<std::string> fields((std::istream_iterator<std::string>(iss)),
-                                  std::istream_iterator<std::string>());
+  std::vector<std::string> &fields = lineFields;
+  splitWhitespace(input, fields);
 
   if (fields.size() == 0)
     return;
@@ -1726,13 +1848,7 @@ void METHParser::writeDataLine(const std::string &input,
     fields[8] = fields[8] + ":PS";
     fields[9] = fields[9] + ":.";
   }
-  for (std::vector<std::string>::iterator fieldIter = fields.begin();
-       fieldIter != fields.end(); ++fieldIter) {
-    if (fieldIter != fields.begin())
-      resultVcf << "\t";
-    resultVcf << (*fieldIter);
-  }
-  resultVcf << "\n";
+  writeFields(resultVcf);
 }
 
 std::map<int, std::map<std::string, ModVariant>>
