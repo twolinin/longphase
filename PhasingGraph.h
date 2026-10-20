@@ -118,7 +118,6 @@ struct VariantEdge{
     SubEdge* ref;
     VariantEdge(int currPos);
     // node pair 
-    std::pair<PosAllele,PosAllele> findBestEdgePair(int targetPos, bool isONT, double diffRatioThreshold, bool debug, int currType, int targetType, VoteResult &vote);
     // number of read of two node. AA and AB combination
     std::pair<float,float> findNumberOfRead(int targetPos);
 };
@@ -157,12 +156,19 @@ class VairiantGraph{
         // Variant positions in genomic order; every per-variant array below is indexed
         // like this vector.
         std::vector<int> variantPositions;
-        // edge from each variant to the following ones (nullptr if no read connects it)
-        std::vector<VariantEdge*> edgeList;
+        // read support from each variant to the next connectAdjacent variants (the scan never
+        // looks further): edgeCounts[index * connectAdjacent + distance - 1] holds
+        // < ref->ref, ref->alt, alt->ref, alt->alt > weights
+        std::vector<std::array<float, 4> > edgeCounts;
+        // the variant starts an edge (some read has a variant after it)
+        std::vector<char> hasEdge;
         // type < 0=SNP 1=SV 2=MOD 3=INDEL 4=danger INDEL >
         std::vector<int8_t> variantType;
 
         std::pair<float,float> Onelongcase( const std::vector<VoteResult> &vote ) ;
+
+        // node pair between currPos and targetPos from the four allele-to-allele read weights
+        std::pair<PosAllele,PosAllele> findBestEdgePair(int currPos, int targetPos, float rr, float ra, float ar, float aa, double edgeThreshold, bool debug, int currType, int targetType, VoteResult &vote);
 
         // phasing result, per variant index * 2 + (0 ref, 1 alt):
         // block start + 1 (0 = not in a block)

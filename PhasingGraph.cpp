@@ -191,15 +191,8 @@ VariantEdge::VariantEdge(int inCurrPos){
     ref = new SubEdge();
 }
 
-//VariantEdge
-std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool isONT, double edgeThreshold, bool debug, int currType, int targetType, VoteResult &vote){
-    std::pair<float,float> refBestPair  = ref->BestPair(targetPos);
-    std::pair<float,float> altBestPair  = alt->BestPair(targetPos);
-    // get the weight of each pair
-    float rr = refBestPair.first;
-    float ra = refBestPair.second;
-    float ar = altBestPair.first;
-    float aa = altBestPair.second;
+// rr, ra, ar, aa: read weight from this variant's REF/ALT allele to the target's REF/ALT allele
+std::pair<PosAllele,PosAllele> VairiantGraph::findBestEdgePair(int currPos, int targetPos, float rr, float ra, float ar, float aa, double edgeThreshold, bool debug, int currType, int targetType, VoteResult &vote){
     // initialize the edge connection
     // -1 : not connect
     int refAllele = -1;
@@ -378,14 +371,14 @@ void VairiantGraph::scanVariantsAndBuildBlocks(std::vector<int>& hpResult, Phase
             phasedBlocks[blockStart].push_back(curr);
         }
 
-        VariantEdge *edge = edgeList[curr];
-        if(edge == nullptr){
+        if(!hasEdge[curr]){
             continue;
         }
 
         for(int i = 0; i < params->connectAdjacent; i++ ){
             VoteResult vote(currPos, 1);
-            std::pair<PosAllele,PosAllele> bestEdgePair = edge->findBestEdgePair(variantPositions[next], params->isONT, params->edgeThreshold, false, variantType[curr], variantType[next], vote);
+            const std::array<float, 4> &counts = edgeCounts[(size_t)curr * params->connectAdjacent + i];
+            std::pair<PosAllele,PosAllele> bestEdgePair = findBestEdgePair(currPos, variantPositions[next], counts[0], counts[1], counts[2], counts[3], params->edgeThreshold, false, variantType[curr], variantType[next], vote);
 
             if(variantType[curr] == 4){
                 vote.weight = 0.1;
@@ -520,17 +513,8 @@ void VairiantGraph::destroy(){
     dotResult.shrink_to_fit();
     std::vector<DotEdge>().swap(gnnEdges);
 
-    for( VariantEdge *edge : edgeList ){
-        if( edge == nullptr )
-            continue;
-        edge->ref->destroy();
-        edge->alt->destroy();
-        delete edge->ref;
-        delete edge->alt;
-        delete edge;
-    }
-
-    std::vector<VariantEdge*>().swap(edgeList);
+    std::vector<std::array<float, 4> >().swap(edgeCounts);
+    std::vector<char>().swap(hasEdge);
     std::vector<int>().swap(variantPositions);
     std::vector<int8_t>().swap(variantType);
     std::vector<int>().swap(bkResult);
@@ -838,7 +822,8 @@ void VairiantGraph::buildVariantGraph(std::vector<ReadVariant> &in_readVariant){
     variantPositions.shrink_to_fit();
 
     const size_t n = variantPositions.size();
-    edgeList.assign(n, nullptr);
+    edgeCounts.assign(n * params->connectAdjacent, std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f});
+    hasEdge.assign(n, 0);
     variantType.assign(n, 0);
     bkResult.assign(n * 2, 0);
     subNodeHP.assign(n * 2, 0);
@@ -887,20 +872,25 @@ void VairiantGraph::buildVariantGraph(std::vector<ReadVariant> &in_readVariant){
 
         while(variant1Iter != readIter->variantVec.end() && variant2Iter != readIter->variantVec.end() ){
             while( variantPositions[index1] < variant1Iter->position ) index1++;
-            // create new edge if not exist
-            VariantEdge *&edge = edgeList[index1];
-            if( edge == nullptr )
-                edge = new VariantEdge(variant1Iter->position);
+            hasEdge[index1] = 1;
+            int index2 = index1;
 
             // add edge process
             for(int nextNode = 0 ; nextNode < params->connectAdjacent; nextNode++){
-                // this allele support ref
-                if( variant1Iter->allele == 0 )
-                    edge->ref->addSubEdge((*variant1Iter).quality, (*variant2Iter),readName,params->baseQuality,params->edgeWeight);
-                // this allele support alt
-                if( (*variant1Iter).allele == 1 )
-                    edge->alt->addSubEdge((*variant1Iter).quality, (*variant2Iter),readName,params->baseQuality,params->edgeWeight);
-                
+                while( variantPositions[index2] < variant2Iter->position ) index2++;
+                int distance = index2 - index1;
+                // only the next connectAdjacent variants are ever compared with this one
+                if( distance >= 1 && distance <= params->connectAdjacent
+                    && (variant1Iter->allele == 0 || variant1Iter->allele == 1)
+                    && (variant2Iter->allele == 0 || variant2Iter->allele == 1) ){
+                    float &count = edgeCounts[(size_t)index1 * params->connectAdjacent + distance - 1][variant1Iter->allele * 2 + variant2Iter->allele];
+                    //if the base quality on both snps is high enough, the edge has normal weight
+                    if ( variant1Iter->quality >= params->baseQuality && variant2Iter->quality >= params->baseQuality)
+                        count++;
+                    else
+                        count = count + params->edgeWeight ;
+                }
+
                 // next snp
                 variant2Iter++;
                 if( variant2Iter == readIter->variantVec.end() ){
@@ -915,9 +905,7 @@ void VairiantGraph::buildVariantGraph(std::vector<ReadVariant> &in_readVariant){
         //count the ref and alt base amount of the last variant on the read
         if ( variant1Iter != readIter->variantVec.end() && variant2Iter == readIter->variantVec.end() ) {
             while( variantPositions[index1] < variant1Iter->position ) index1++;
-            if( edgeList[index1] == nullptr ) {
-                edgeList[index1] = new VariantEdge((*variant1Iter).position);
-            }
+            hasEdge[index1] = 1;
         }
     }
 }
