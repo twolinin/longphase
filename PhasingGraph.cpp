@@ -31,28 +31,28 @@ void appendGnnEdges(std::vector<DotEdge>& outEdges, int currPos, const std::pair
 
 void recordVoteForNextPosition(
     int currHP,
-    int targetPos,
+    int targetPos,   // variant index
     int targetHaplotypeRelation,
     VoteResult& vote,
-    std::map<int, std::map<int, float> >& hpCountMap2,
-    std::map<int, std::vector<VoteResult> >& hpCountMap3){
+    std::vector<std::array<float, 2> >& hpCountMap2,
+    std::vector<std::vector<VoteResult> >& hpCountMap3){
     if(currHP == 1){
         if(targetHaplotypeRelation == 1){
-            hpCountMap2[targetPos][1] += vote.weight;
+            hpCountMap2[targetPos][0] += vote.weight;
             vote.hap = 1;
         }
         else if(targetHaplotypeRelation == 2){
-            hpCountMap2[targetPos][2] += vote.weight;
+            hpCountMap2[targetPos][1] += vote.weight;
             vote.hap = 2;
         }
     }
     else if(currHP == 2){
         if(targetHaplotypeRelation == 1){
-            hpCountMap2[targetPos][2] += vote.weight;
+            hpCountMap2[targetPos][1] += vote.weight;
             vote.hap = 2;
         }
         else if(targetHaplotypeRelation == 2){
-            hpCountMap2[targetPos][1] += vote.weight;
+            hpCountMap2[targetPos][0] += vote.weight;
             vote.hap = 1;
         }
     }
@@ -192,7 +192,7 @@ VariantEdge::VariantEdge(int inCurrPos){
 }
 
 //VariantEdge
-std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool isONT, double edgeThreshold, bool debug, std::map<int,int> &variantType, VoteResult &vote){
+std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool isONT, double edgeThreshold, bool debug, int currType, int targetType, VoteResult &vote){
     std::pair<float,float> refBestPair  = ref->BestPair(targetPos);
     std::pair<float,float> altBestPair  = alt->BestPair(targetPos);
     // get the weight of each pair
@@ -223,7 +223,7 @@ std::pair<PosAllele,PosAllele> VariantEdge::findBestEdgePair(int targetPos, bool
     }
 
     //VarintType < 0=SNP 1=SV 2=MOD 3=INDEL 4=tandem repeat INDEL >
-    if((variantType[currPos] == 0 && variantType[targetPos] == 2)||(variantType[currPos] == 2 && variantType[targetPos] == 0)){
+    if((currType == 0 && targetType == 2)||(currType == 2 && targetType == 0)){
         edgeThreshold = 0.3;
         if((rr+ra+ar+aa) < 1){
             edgeThreshold = -1;
@@ -291,7 +291,7 @@ std::pair<float,float> VairiantGraph::Onelongcase( const std::vector<VoteResult>
             counter++ ;
         }
 	// we will only count the votes that is not INDEL and have lower ESR beacause the INDEL is the variant has higher error rate and the lower ESR means higher reads consistency,
-        else if ( vote[i].ESR < 0.2 && vote[i].weight >= 1 && (*variantType)[vote[i].Pos] != 3 ) {
+        else if ( vote[i].ESR < 0.2 && vote[i].weight >= 1 && variantType[variantIndex(vote[i].Pos)] != 3 ) {
             if ( vote[i].hap == 1 ) {
                 h1+=vote[i].weight ;
             }
@@ -312,33 +312,32 @@ std::pair<float,float> VairiantGraph::Onelongcase( const std::vector<VoteResult>
 }
 
 //VairiantGraph
-void VairiantGraph::scanVariantsAndBuildBlocks(std::map<int, int>& hpResult, PhasedBlocks& phasedBlocks, std::string& outDotResult){
-    std::map<int, std::vector<VoteResult> > hpCountMap3;
-    std::map<int, std::map<int,float> > hpCountMap2;
+void VairiantGraph::scanVariantsAndBuildBlocks(std::vector<int>& hpResult, PhasedBlocks& phasedBlocks, std::string& outDotResult){
+    const int n = variantPositions.size();
+    // votes received by each variant: < HP1, HP2 > weight and the votes themselves
+    std::vector<std::array<float, 2> > hpCountMap2(n, std::array<float, 2>{0.0f, 0.0f});
+    std::vector<std::vector<VoteResult> > hpCountMap3(n);
+    hpResult.assign(n, 0);
     int blockStart = -1;
     int lastConnectPos = -1;
 
-    for(auto variantIter = variantPositions.begin(); variantIter != variantPositions.end(); variantIter++ ){
-        auto nextNodeIter = std::next(variantIter, 1);
-        if(nextNodeIter == variantPositions.end()){
-            break;
-        }
-
-        int currPos = *variantIter;
-        int nextPos = *nextNodeIter;
+    for(int curr = 0; curr + 1 < n; curr++ ){
+        int next = curr + 1;
+        int currPos = variantPositions[curr];
+        int nextPos = variantPositions[next];
 
         // votes for earlier positions are never read again
-        hpCountMap3.erase(hpCountMap3.begin(), hpCountMap3.lower_bound(currPos));
-        hpCountMap2.erase(hpCountMap2.begin(), hpCountMap2.lower_bound(currPos));
+        if(curr > 0)
+            std::vector<VoteResult>().swap(hpCountMap3[curr - 1]);
 
         if(std::abs(nextPos - currPos) > params->distance){
             continue;
         }
 
-        float h1 = hpCountMap2[currPos][1];
-        float h2 = hpCountMap2[currPos][2];
+        float h1 = hpCountMap2[curr][0];
+        float h2 = hpCountMap2[curr][1];
 
-        std::pair<float, float> special = Onelongcase(hpCountMap3[currPos]);
+        std::pair<float, float> special = Onelongcase(hpCountMap3[curr]);
         if(special.first != -1){
             h1 = special.first;
             h2 = special.second;
@@ -358,9 +357,10 @@ void VairiantGraph::scanVariantsAndBuildBlocks(std::map<int, int>& hpResult, Pha
                 if(p1 > 0.0f) entropy -= p1 * std::log2(p1);
                 if(p2 > 0.0f) entropy -= p2 * std::log2(p2);
             }
-            (*h1weight)[currPos] = h1;
-            (*h2weight)[currPos] = h2;
-            (*variantEntropy)[currPos] = entropy;
+            h1weight[curr] = h1;
+            h2weight[curr] = h2;
+            variantEntropy[curr] = entropy;
+            hasEntropy[curr] = 1;
         }
 
         if(h1 == h2){
@@ -369,32 +369,32 @@ void VairiantGraph::scanVariantsAndBuildBlocks(std::map<int, int>& hpResult, Pha
             }
 
             blockStart = currPos;
-            phasedBlocks[blockStart].push_back(currPos);
-            hpResult[currPos] = 1;
+            phasedBlocks[blockStart].push_back(curr);
+            hpResult[curr] = 1;
         }
         else{
             int currHP = (h1 > h2 ? 1 : 2);
-            hpResult[currPos] = currHP;
-            phasedBlocks[blockStart].push_back(currPos);
+            hpResult[curr] = currHP;
+            phasedBlocks[blockStart].push_back(curr);
         }
 
-        std::map<int,VariantEdge*>::iterator edgeIter = edgeList->find(currPos);
-        if(edgeIter == edgeList->end()){
+        VariantEdge *edge = edgeList[curr];
+        if(edge == nullptr){
             continue;
         }
 
         for(int i = 0; i < params->connectAdjacent; i++ ){
             VoteResult vote(currPos, 1);
-            std::pair<PosAllele,PosAllele> bestEdgePair = edgeIter->second->findBestEdgePair(*nextNodeIter, params->isONT, params->edgeThreshold, false, *variantType, vote);
+            std::pair<PosAllele,PosAllele> bestEdgePair = edge->findBestEdgePair(variantPositions[next], params->isONT, params->edgeThreshold, false, variantType[curr], variantType[next], vote);
 
-            if((*variantType)[currPos] == 4){
+            if(variantType[curr] == 4){
                 vote.weight = 0.1;
             }
 
             if(bestEdgePair.first.second != -1){
                 recordVoteForNextPosition(
-                    hpResult[currPos],
-                    *nextNodeIter,
+                    hpResult[curr],
+                    next,
                     bestEdgePair.first.second,
                     vote,
                     hpCountMap2,
@@ -402,20 +402,20 @@ void VairiantGraph::scanVariantsAndBuildBlocks(std::map<int, int>& hpResult, Pha
 
                 if(params->generateDot){
                     appendDotEdges(outDotResult, currPos, bestEdgePair,
-                                   hpCountMap2[currPos][1],
-                                   hpCountMap2[currPos][2]);
+                                   hpCountMap2[curr][0],
+                                   hpCountMap2[curr][1]);
                 }
                 if(params->enableGNN){
                     appendGnnEdges(gnnEdges, currPos, bestEdgePair,
-                                   hpCountMap2[currPos][1],
-                                   hpCountMap2[currPos][2]);
+                                   hpCountMap2[curr][0],
+                                   hpCountMap2[curr][1]);
                 }
 
-                lastConnectPos = *nextNodeIter;
+                lastConnectPos = variantPositions[next];
             }
 
-            nextNodeIter++;
-            if(nextNodeIter == variantPositions.end()){
+            next++;
+            if(next == n){
                 break;
             }
         }
@@ -425,11 +425,11 @@ void VairiantGraph::scanVariantsAndBuildBlocks(std::map<int, int>& hpResult, Pha
     // a next-position to iterate). If the last position received votes
     // from earlier neighbours, record its entropy too so it also gets
     // H1 / H2 / PE in the output VCF.
-    if(!variantPositions.empty()){
-        int lastPos = *variantPositions.rbegin();
-        if(variantEntropy->find(lastPos) == variantEntropy->end()){
-            float lh1 = hpCountMap2[lastPos][1];
-            float lh2 = hpCountMap2[lastPos][2];
+    if(n > 0){
+        int last = n - 1;
+        if(!hasEntropy[last]){
+            float lh1 = hpCountMap2[last][0];
+            float lh2 = hpCountMap2[last][1];
             float ltotal = lh1 + lh2;
             float lentropy = 0.0f;
             if(ltotal > 0.0f){
@@ -438,18 +438,17 @@ void VairiantGraph::scanVariantsAndBuildBlocks(std::map<int, int>& hpResult, Pha
                 if(lp1 > 0.0f) lentropy -= lp1 * std::log2(lp1);
                 if(lp2 > 0.0f) lentropy -= lp2 * std::log2(lp2);
             }
-            (*h1weight)[lastPos] = lh1;
-            (*h2weight)[lastPos] = lh2;
-            (*variantEntropy)[lastPos] = lentropy;
+            h1weight[last] = lh1;
+            h2weight[last] = lh2;
+            variantEntropy[last] = lentropy;
+            hasEntropy[last] = 1;
         }
     }
 }
 
 void VairiantGraph::materializeBlockResults(
-    const std::map<int, int>& hpResult,
-    const PhasedBlocks& phasedBlocks,
-    std::map<PosAllele, int>& outBkResult,
-    std::map<PosAllele, int>& outSubNodeHP){
+    const std::vector<int>& hpResult,
+    const PhasedBlocks& phasedBlocks){
     for(auto blockIter = phasedBlocks.begin(); blockIter != phasedBlocks.end(); blockIter++ ){
         if((*blockIter).second.size() <= 1){
             continue;
@@ -461,54 +460,55 @@ void VairiantGraph::materializeBlockResults(
                 continue;
             }
 
-            PosAllele refStart = std::make_pair((*currIter), 1);
-            PosAllele altStart = std::make_pair((*currIter), 2);
-            PosAllele refEnd = std::make_pair((*nextIter), 1);
-            PosAllele altEnd = std::make_pair((*nextIter), 2);
+            // allele slots: variant index * 2 + (0 ref, 1 alt)
+            int refStart = (*currIter) * 2;
+            int altStart = refStart + 1;
+            int refEnd = (*nextIter) * 2;
+            int altEnd = refEnd + 1;
 
-            outBkResult[refStart] = (*blockIter).first + 1;
-            outBkResult[refEnd]   = (*blockIter).first + 1;
-            outBkResult[altStart] = (*blockIter).first + 1;
-            outBkResult[altEnd]   = (*blockIter).first + 1;
+            bkResult[refStart] = (*blockIter).first + 1;
+            bkResult[refEnd]   = (*blockIter).first + 1;
+            bkResult[altStart] = (*blockIter).first + 1;
+            bkResult[altEnd]   = (*blockIter).first + 1;
 
             if(currIter == (*blockIter).second.begin()){
-                outSubNodeHP[refStart] = 0;
-                outSubNodeHP[altStart] = 1;
+                subNodeHP[refStart] = 0;
+                subNodeHP[altStart] = 1;
             }
 
-            if(hpResult.at(*currIter) == 0 || hpResult.at(*nextIter) == 0){
+            if(hpResult[*currIter] == 0 || hpResult[*nextIter] == 0){
 
             }
-            else if(hpResult.at(*currIter) == hpResult.at(*nextIter)){
-                outSubNodeHP[refEnd] = outSubNodeHP[refStart];
-                outSubNodeHP[altEnd] = outSubNodeHP[altStart];
+            else if(hpResult[*currIter] == hpResult[*nextIter]){
+                subNodeHP[refEnd] = subNodeHP[refStart];
+                subNodeHP[altEnd] = subNodeHP[altStart];
             }
             else{
-                outSubNodeHP[refEnd] = outSubNodeHP[altStart];
-                outSubNodeHP[altEnd] = outSubNodeHP[refStart];
+                subNodeHP[refEnd] = subNodeHP[altStart];
+                subNodeHP[altEnd] = subNodeHP[refStart];
             }
         }
     }
 }
 
 void VairiantGraph::edgeConnectResult(){
-    std::map<int, int> hpResult;
+    std::vector<int> hpResult;
     PhasedBlocks phasedBlocks;
 
     scanVariantsAndBuildBlocks(hpResult, phasedBlocks, dotResult);
-    materializeBlockResults(hpResult, phasedBlocks, *bkResult, *subNodeHP);
+    materializeBlockResults(hpResult, phasedBlocks);
+}
+
+int VairiantGraph::variantIndex(int position) const{
+    auto it = std::lower_bound(variantPositions.begin(), variantPositions.end(), position);
+    if( it == variantPositions.end() || *it != position )
+        return -1;
+    return it - variantPositions.begin();
 }
 
 VairiantGraph::VairiantGraph(std::string &in_ref, PhasingParameters &in_params, std::string &in_chrName){
     params=&in_params;
     ref=&in_ref;
-    edgeList = new std::map<int,VariantEdge*>;
-    bkResult = new std::map<PosAllele,int>;
-    subNodeHP = new std::map<PosAllele,int>;
-    variantType = new std::map<int,int>;
-    variantEntropy = new std::map<int,float>;
-    h1weight = new std::map<int,float>;
-    h2weight = new std::map<int,float>;
     chrName = &in_chrName;
 }
 
@@ -520,21 +520,25 @@ void VairiantGraph::destroy(){
     dotResult.shrink_to_fit();
     std::vector<DotEdge>().swap(gnnEdges);
 
-    for( auto edgeIter = edgeList->begin() ; edgeIter != edgeList->end() ; edgeIter++ ){
-        edgeIter->second->ref->destroy();
-        edgeIter->second->alt->destroy();
-        delete edgeIter->second->ref;
-        delete edgeIter->second->alt;
-        delete edgeIter->second;
+    for( VariantEdge *edge : edgeList ){
+        if( edge == nullptr )
+            continue;
+        edge->ref->destroy();
+        edge->alt->destroy();
+        delete edge->ref;
+        delete edge->alt;
+        delete edge;
     }
-    
-    delete edgeList;
-    delete bkResult;
-    delete subNodeHP;
-    delete variantType;
-    delete variantEntropy;
-    delete h1weight;
-    delete h2weight;
+
+    std::vector<VariantEdge*>().swap(edgeList);
+    std::vector<int>().swap(variantPositions);
+    std::vector<int8_t>().swap(variantType);
+    std::vector<int>().swap(bkResult);
+    std::vector<int8_t>().swap(subNodeHP);
+    std::vector<float>().swap(h1weight);
+    std::vector<float>().swap(h2weight);
+    std::vector<float>().swap(variantEntropy);
+    std::vector<char>().swap(hasEntropy);
 }
 
 //check if the position is in the range of the cnv
@@ -822,11 +826,31 @@ static int normalizeVariantQuality(Variant &variant){
 }
 
 void VairiantGraph::buildVariantGraph(std::vector<ReadVariant> &in_readVariant){
-    // record variant types and positions
-    for(std::vector<ReadVariant>::iterator readIter = in_readVariant.begin() ; readIter != in_readVariant.end() ; readIter++ ){
-        for( auto variant : (*readIter).variantVec ){
-            (*variantType)[variant.position] = normalizeVariantQuality(variant);
-            variantPositions.insert(variant.position);
+    // variant positions in genomic order
+    variantPositions.clear();
+    for( const ReadVariant &read : in_readVariant ){
+        for( const Variant &variant : read.variantVec ){
+            variantPositions.push_back(variant.position);
+        }
+    }
+    std::sort(variantPositions.begin(), variantPositions.end());
+    variantPositions.erase(std::unique(variantPositions.begin(), variantPositions.end()), variantPositions.end());
+    variantPositions.shrink_to_fit();
+
+    const size_t n = variantPositions.size();
+    edgeList.assign(n, nullptr);
+    variantType.assign(n, 0);
+    bkResult.assign(n * 2, 0);
+    subNodeHP.assign(n * 2, 0);
+    h1weight.assign(n, 0.0f);
+    h2weight.assign(n, 0.0f);
+    variantEntropy.assign(n, 0.0f);
+    hasEntropy.assign(n, 0);
+
+    // variant types (the last read seen sets the type of a position)
+    for( const ReadVariant &read : in_readVariant ){
+        for( auto variant : read.variantVec ){
+            variantType[variantIndex(variant.position)] = normalizeVariantQuality(variant);
         }
     }
 
@@ -858,10 +882,13 @@ void VairiantGraph::buildVariantGraph(std::vector<ReadVariant> &in_readVariant){
         // iter all pair of snp and construct initial graph
         std::vector<Variant>::iterator variant1Iter = readIter->variantVec.begin();
         std::vector<Variant>::iterator variant2Iter = std::next(variant1Iter,1);
-        
+        // index of variant1Iter; the read's variants are sorted, so the search starts there
+        int index1 = variantIndex(variant1Iter->position);
+
         while(variant1Iter != readIter->variantVec.end() && variant2Iter != readIter->variantVec.end() ){
+            while( variantPositions[index1] < variant1Iter->position ) index1++;
             // create new edge if not exist
-            VariantEdge *&edge = (*edgeList)[variant1Iter->position];
+            VariantEdge *&edge = edgeList[index1];
             if( edge == nullptr )
                 edge = new VariantEdge(variant1Iter->position);
 
@@ -887,9 +914,9 @@ void VairiantGraph::buildVariantGraph(std::vector<ReadVariant> &in_readVariant){
 
         //count the ref and alt base amount of the last variant on the read
         if ( variant1Iter != readIter->variantVec.end() && variant2Iter == readIter->variantVec.end() ) {
-            std::map<int,VariantEdge*>::iterator posIter = edgeList->find((*variant1Iter).position);
-            if( posIter == edgeList->end() ) {
-                (*edgeList)[(*variant1Iter).position] = new VariantEdge((*variant1Iter).position);
+            while( variantPositions[index1] < variant1Iter->position ) index1++;
+            if( edgeList[index1] == nullptr ) {
+                edgeList[index1] = new VariantEdge((*variant1Iter).position);
             }
         }
     }
@@ -906,15 +933,19 @@ void VairiantGraph::addEdge(std::vector<ReadVariant> &in_readVariant, Clip &clip
 } 
 
 void VairiantGraph::accumulateReadHaplotypeEvidence(const Variant& variant, double& refCount, double& altCount){
-    PosAllele refAllele = std::make_pair(variant.position, variant.allele + 1);
-    std::map<PosAllele, int>::iterator nodePS = bkResult->find(refAllele);
+    int index = variantIndex(variant.position);
+    if(index < 0 || (variant.allele != 0 && variant.allele != 1)){
+        return;
+    }
+    // allele slot of this read's allele
+    int refAllele = index * 2 + variant.allele;
 
-    if(nodePS == bkResult->end() || nodePS->second == 0){
+    if(bkResult[refAllele] == 0){
         return;
     }
 
-    int refHaplotype = (*subNodeHP)[refAllele];
-    int positionVariantType = (*variantType)[variant.position];
+    int refHaplotype = subNodeHP[refAllele];
+    int positionVariantType = variantType[index];
 
     if(positionVariantType == 0 || positionVariantType == 1){
         if(refHaplotype == 0) refCount++;
@@ -947,7 +978,9 @@ void VairiantGraph::assignReadHaplotypesAndCollectAlleleCounts(HpAlleleCountMap&
 
             for(auto variantIter = (*readIter).variantVec.begin(); variantIter != (*readIter).variantVec.end(); variantIter++){
                 if((*variantIter).allele == 0 || (*variantIter).allele == 1){
-                    hpAlleleCountMap[belongHP][(*variantIter).position][(*variantIter).allele]++;
+                    int index = variantIndex((*variantIter).position);
+                    if(index >= 0)
+                        hpAlleleCountMap[belongHP][index][(*variantIter).allele]++;
                 }
             }
         }
@@ -955,28 +988,23 @@ void VairiantGraph::assignReadHaplotypesAndCollectAlleleCounts(HpAlleleCountMap&
 }
 
 void VairiantGraph::reassignVariantHaplotypes(const HpAlleleCountMap& hpAlleleCountMap){
-    auto getHpAlleleCount = [&](int haplotype, int position, int allele){
-        auto positionIter = hpAlleleCountMap[haplotype].find(position);
-        if(positionIter == hpAlleleCountMap[haplotype].end()){
-            return 0.0;
-        }
-        return positionIter->second[allele];
+    auto getHpAlleleCount = [&](int haplotype, int index, int allele){
+        return hpAlleleCountMap[haplotype][index][allele];
     };
 
     double snpConfidenceThreshold = params->snpConfidence;
 
-    subNodeHP->clear();
+    std::fill(subNodeHP.begin(), subNodeHP.end(), 0);
 
     // reassign allele result
-    for(auto variantIter = variantPositions.begin(); variantIter != variantPositions.end(); variantIter++){
-        int position = *variantIter;
-        PosAllele refAllele = std::make_pair(position, 1);
-        PosAllele altAllele = std::make_pair(position, 2);
+    for(int index = 0; index < (int)variantPositions.size(); index++){
+        int refAllele = index * 2;
+        int altAllele = refAllele + 1;
 
-        double hp1Ref = getHpAlleleCount(0, position, 0);
-        double hp1Alt = getHpAlleleCount(0, position, 1);
-        double hp2Ref = getHpAlleleCount(1, position, 0);
-        double hp2Alt = getHpAlleleCount(1, position, 1);
+        double hp1Ref = getHpAlleleCount(0, index, 0);
+        double hp1Alt = getHpAlleleCount(0, index, 1);
+        double hp2Ref = getHpAlleleCount(1, index, 0);
+        double hp2Alt = getHpAlleleCount(1, index, 1);
         double result1reads = hp1Ref + hp2Alt;
         double result2reads = hp2Ref + hp1Alt;
         double resultConfidence = std::max(result1reads, result2reads) / (result1reads + result2reads);
@@ -996,18 +1024,20 @@ void VairiantGraph::reassignVariantHaplotypes(const HpAlleleCountMap& hpAlleleCo
         }
 
         if(hp1Result != -1 && hp2Result != -1){
-            (*subNodeHP)[refAllele] = hp1Result;
-            (*subNodeHP)[altAllele] = hp2Result;
+            subNodeHP[refAllele] = hp1Result;
+            subNodeHP[altAllele] = hp2Result;
         }
         else{
-            bkResult->erase(refAllele);
-            bkResult->erase(altAllele);
+            bkResult[refAllele] = 0;
+            bkResult[altAllele] = 0;
         }
     }
 }
 
 void VairiantGraph::readCorrection(){
     HpAlleleCountMap hpAlleleCountMap;
+    for(auto &counts : hpAlleleCountMap)
+        counts.assign(variantPositions.size(), std::array<double, 2>{0.0, 0.0});
     assignReadHaplotypesAndCollectAlleleCounts(hpAlleleCountMap);
     reassignVariantHaplotypes(hpAlleleCountMap);
 }
@@ -1038,40 +1068,28 @@ void VairiantGraph::exportGnnEdges(std::vector<DotEdge> &out){
 void VairiantGraph::exportResult(std::string chrName, PhasingResult &result){
     
     // loop all position
-    for( auto variantIter = variantPositions.begin() ; variantIter != variantPositions.end() ; variantIter++ ){
-        
-        PhasingElement tmp;
-        
-        PosAllele ref = std::make_pair( (*variantIter) , 1);
-        PosAllele alt = std::make_pair( (*variantIter) , 2);
-        
-        std::map<PosAllele,int>::iterator psRefIter = bkResult->find(ref);
-        std::map<PosAllele,int>::iterator psAltIter = bkResult->find(alt);
-        
-        if( psRefIter != bkResult->end() || psAltIter != bkResult->end() ){
-            if( psRefIter != bkResult->end() )
-                tmp.block = (*psRefIter).second;
-            else
-                tmp.block = (*psAltIter).second;
-            tmp.RAstatus = std::to_string((*subNodeHP)[ref]) + "|" + std::to_string((*subNodeHP)[alt]);
+    for( int index = 0 ; index < (int)variantPositions.size() ; index++ ){
+        int refAllele = index * 2;
+        int altAllele = refAllele + 1;
 
-            // Attach vote diagnostics (h1, h2, entropy) so writeDataLine
-            // can emit INFO/H1, INFO/H2, INFO/PE for phased positions.
-            // These maps are populated by scanVariantsAndBuildBlocks().
-            auto h1Iter  = h1weight->find((*variantIter));
-            auto h2Iter  = h2weight->find((*variantIter));
-            auto entIter = variantEntropy->find((*variantIter));
-            tmp.h1      = (h1Iter  != h1weight->end())       ? h1Iter->second  : 0.0f;
-            tmp.h2      = (h2Iter  != h2weight->end())       ? h2Iter->second  : 0.0f;
-            tmp.entropy = (entIter != variantEntropy->end()) ? entIter->second : 0.0f;
-        }
-        else
+        // 0: not in a block
+        int block = (bkResult[refAllele] != 0 ? bkResult[refAllele] : bkResult[altAllele]);
+        if( block == 0 )
             continue;
-        
-        if( tmp.block != 0){
-            std::string key = chrName + "_" + std::to_string( (*variantIter) );
-            result[key] = tmp;
-        }
+
+        PhasingElement tmp;
+        tmp.block = block;
+        tmp.RAstatus = std::to_string(subNodeHP[refAllele]) + "|" + std::to_string(subNodeHP[altAllele]);
+
+        // Attach vote diagnostics (h1, h2, entropy) so writeDataLine
+        // can emit INFO/H1, INFO/H2, INFO/PE for phased positions.
+        // These are filled by scanVariantsAndBuildBlocks().
+        tmp.h1      = h1weight[index];
+        tmp.h2      = h2weight[index];
+        tmp.entropy = variantEntropy[index];
+
+        std::string key = chrName + "_" + std::to_string( variantPositions[index] );
+        result[key] = tmp;
     }
 }
 

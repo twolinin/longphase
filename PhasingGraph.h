@@ -6,12 +6,15 @@
 #include "PhasingProcess.h"
 #include <set>
 #include <array>
+#include <algorithm>
+#include <cstdint>
 
 
 typedef std::pair<int, int> PosAllele;
 typedef std::map<std::string, int> ReadBaseMap;
 // [haplotype 0/1][position][allele 0/1] -> read count; haplotype and allele index fixed arrays
-using HpAlleleCountMap = std::array<std::map<int, std::array<double, 2>>, 2>;
+// [haplotype][variant index] -> < ref count, alt count >
+using HpAlleleCountMap = std::array<std::vector<std::array<double, 2>>, 2>;
 using PhasedBlocks = std::map<int, std::vector<int>>;
 
 class Clip{
@@ -115,7 +118,7 @@ struct VariantEdge{
     SubEdge* ref;
     VariantEdge(int currPos);
     // node pair 
-    std::pair<PosAllele,PosAllele> findBestEdgePair(int targetPos, bool isONT, double diffRatioThreshold, bool debug, std::map<int,int> &variantType, VoteResult &vote);
+    std::pair<PosAllele,PosAllele> findBestEdgePair(int targetPos, bool isONT, double diffRatioThreshold, bool debug, int currType, int targetType, VoteResult &vote);
     // number of read of two node. AA and AB combination
     std::pair<float,float> findNumberOfRead(int targetPos);
 };
@@ -151,30 +154,31 @@ class VairiantGraph{
         std::vector<DotEdge> gnnEdges;
         std::vector<ReadVariant> *readVariant;
         
-        // By default, a Map in C++ is sorted in increasing order based on its key.
-        // position, edge
-        std::map<int,VariantEdge*> *edgeList;
-
-        // Variant positions in genomic order.
-        std::set<int> variantPositions;
-        // position, type < 0=SNP 1=SV 2=MOD 3=INDEL >
-        std::map<int,int> *variantType;
+        // Variant positions in genomic order; every per-variant array below is indexed
+        // like this vector.
+        std::vector<int> variantPositions;
+        // edge from each variant to the following ones (nullptr if no read connects it)
+        std::vector<VariantEdge*> edgeList;
+        // type < 0=SNP 1=SV 2=MOD 3=INDEL 4=danger INDEL >
+        std::vector<int8_t> variantType;
 
         std::pair<float,float> Onelongcase( const std::vector<VoteResult> &vote ) ;
 
-        // phasing result     
-        // PosAllele , block_start    
-        std::map<PosAllele,int> *bkResult;
-        // record each position haplotype
-        std::map<PosAllele,int> *subNodeHP;
-        // per-position vote diagnostics recorded during
-        // scanVariantsAndBuildBlocks() and consumed in exportResult().
-        // position -> Shannon entropy of (h1, h2) in bits (0..1)
-        std::map<int, float> *variantEntropy;
-        // position -> weighted HP1 vote count used to derive entropy
-        std::map<int, float> *h1weight;
-        // position -> weighted HP2 vote count used to derive entropy
-        std::map<int, float> *h2weight;
+        // phasing result, per variant index * 2 + (0 ref, 1 alt):
+        // block start + 1 (0 = not in a block)
+        std::vector<int> bkResult;
+        // haplotype of each allele
+        std::vector<int8_t> subNodeHP;
+        // per-variant vote diagnostics recorded during
+        // scanVariantsAndBuildBlocks() and consumed in exportResult():
+        // weighted HP1 / HP2 vote counts and the Shannon entropy of (h1, h2) in bits (0..1)
+        std::vector<float> h1weight;
+        std::vector<float> h2weight;
+        std::vector<float> variantEntropy;
+        std::vector<char> hasEntropy;
+
+        // index of a variant position, -1 if absent
+        int variantIndex(int position) const;
 
         // produce PS tag and determine phased GT tag
         void storeResultPath();
@@ -190,15 +194,13 @@ class VairiantGraph{
         void edgeConnectResult();
 
         void scanVariantsAndBuildBlocks(
-            std::map<int, int>& hpResult,
+            std::vector<int>& hpResult,
             PhasedBlocks& phasedBlocks,
             std::string& outDotResult);
 
         void materializeBlockResults(
-            const std::map<int, int>& hpResult,
-            const PhasedBlocks& phasedBlocks,
-            std::map<PosAllele, int>& outBkResult,
-            std::map<PosAllele, int>& outSubNodeHP);
+            const std::vector<int>& hpResult,
+            const PhasedBlocks& phasedBlocks);
 
         void calculateCnvMismatchRate(std::vector<ReadVariant>& in_readVariant, Clip &clip);
 
