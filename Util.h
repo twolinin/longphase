@@ -2,6 +2,7 @@
 #define UTIL_H
 
 #include <string>
+#include <cstdint>
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -58,7 +59,7 @@ void setPhasingNumThreads(const int& defaultChrThreads,const int& availableThrea
  */
 void setModcallNumThreads(const int& availableThreads,  int& chrNumThreads, int& bamParserNumThreads);
 
-enum VariantType{
+enum VariantType : int8_t {
     MOD = 0,
     SNP = 1,
     INDEL = 2,
@@ -69,13 +70,14 @@ enum VariantType{
 struct Variant{
     Variant(int position, int allele, int quality, VariantType type):
     position(position), 
-    allele(allele), 
     quality(quality),
+    allele(allele), 
     type(type){};
     
+    // 12 bytes: reads hold many of these
     int position;
-    int allele;
-    int quality;
+    int16_t quality;     // base quality (0-255), or a negative code for SV / modification / indel
+    int8_t allele;
     VariantType type;
     bool underHomopolymer;
 };
@@ -84,17 +86,11 @@ struct ReadVariant{
     // init function
     ReadVariant(): read_name(""), 
             mapping_quality(0), 
-            source_id(""), 
-            sample_id(""), 
-            reference_start(0), 
-            BX_tag(""){}
+            reference_start(0){}
             
     std::string read_name;
     int mapping_quality;
-    std::string source_id;
-    std::string sample_id;
     int reference_start;
-    std::string BX_tag;
     bool is_reverse;
     std::map<int, int> cnv_mmrate_map;
 

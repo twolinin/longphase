@@ -38,7 +38,7 @@ static MethBamParser* runBamPipeline(
                         << "\t" << rv.is_reverse
                         << "\t" << rv.reference_start
                         << "\t" << v.position
-                        << "\t" << v.allele
+                        << "\t" << static_cast<int>(v.allele)
                         << "\t" << v.quality
                         << "\t" << static_cast<int>(v.type)
                         << "\n";

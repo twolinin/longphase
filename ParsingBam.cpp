@@ -1356,7 +1356,6 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln,
 
   ReadVariant tmpReadResult;
   tmpReadResult.read_name = bam_get_qname(&aln);
-  tmpReadResult.source_id = bamHdr.target_name[aln.core.tid];
   tmpReadResult.reference_start = aln.core.pos;
   tmpReadResult.is_reverse = bam_is_rev(&aln);
 
