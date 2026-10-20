@@ -921,8 +921,10 @@ int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, 
         }
             // 2: deletion from the reference
         else if( cigar_op == 2 ){
-            collectDeletionOpEvidence(aln, chrName, ref_pos, query_pos, length, ref_string,
-                                      currentVariantIter, variantsHP, countPS, hp1Count, hp2Count);
+            // no variant left on this chromosome (end() must not be dereferenced)
+            if( currentVariantIter != currentChrVariants.end() )
+                collectDeletionOpEvidence(aln, chrName, ref_pos, query_pos, length, ref_string,
+                                          currentVariantIter, variantsHP, countPS, hp1Count, hp2Count);
             ref_pos += length;
         }
             // 3: skipped region from the reference

@@ -1162,6 +1162,10 @@ bool BamParser::handleDeletionHomopolymerSNP(
     std::map<int, SnpVariant>::iterator &currentVariantIter,
     ReadVariant &tmpReadResult) {
 
+  // no variant left on this chromosome (end() must not be dereferenced)
+  if (currentVariantIter == currentVariants->end()) {
+    return false;
+  }
   if (ref_pos + del_len + 1 == (*currentVariantIter).first) {
     return false;
   } else if ((*currentVariantIter).first >= ref_pos &&
