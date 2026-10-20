@@ -160,16 +160,13 @@ class VairiantGraph{
         // position, type < 0=SNP 1=SV 2=MOD 3=INDEL >
         std::map<int,int> *variantType;
 
-        std::pair<float,float> Onelongcase( std::vector<VoteResult> vote ) ;
+        std::pair<float,float> Onelongcase( const std::vector<VoteResult> &vote ) ;
 
         // phasing result     
         // PosAllele , block_start    
         std::map<PosAllele,int> *bkResult;
         // record each position haplotype
         std::map<PosAllele,int> *subNodeHP;
-        // store phased read and read's haplotype
-        std::map<std::string,int> *readHpMap;
-
         // per-position vote diagnostics recorded during
         // scanVariantsAndBuildBlocks() and consumed in exportResult().
         // position -> Shannon entropy of (h1, h2) in bits (0..1)
@@ -230,7 +227,6 @@ class VairiantGraph{
         void phasingProcess();
         void writingDotFile(std::string dotPrefix);
         void exportGnnEdges(std::vector<DotEdge> &out);
-        std::map<std::string,int>* getReadHP();
         void exportResult(std::string chrName, PhasingResult &result);
         int totalNode();
 
