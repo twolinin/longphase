@@ -84,6 +84,17 @@ private:
 
 #ifdef GNN_MODEL_IMPL
 
+// linear() and forward() are also compiled for AVX2 and AVX-512 and the
+// version for the CPU is chosen at run time. Wider vectors only change how
+// many outputs are computed at once: each output still gets the same
+// operations in the same order (no FMA: the Makefile has -ffp-contract=off),
+// so the results are the same on every CPU.
+#if defined(__x86_64__) && defined(__GNUC__) && !defined(__clang__)
+#define GNN_CLONES __attribute__((target_clones("avx512f", "avx2", "default")))
+#else
+#define GNN_CLONES
+#endif
+
 // ── elementwise helpers ─────────────────────────────────────────────────
 
 inline float gelu(float x) {
@@ -98,7 +109,7 @@ inline float leaky_relu(float x) { return x >= 0.0f ? x : kLeaky * x; }
 // Each output is b[o] + in[0]*W[o][0] + in[1]*W[o][1] + ..., added in that order. The loop
 // runs over k outside and o inside (on the transposed weights) so the compiler can
 // vectorize across outputs; the order of the additions for each output is unchanged.
-inline void linear(const float* in, int n, int in_dim,
+GNN_CLONES void linear(const float* in, int n, int in_dim,
                    const Tensor& w, const std::vector<float>& b,
                    float* out) {
     const int out_dim = w.rows;
@@ -217,7 +228,7 @@ void Model::load() {
         throw std::runtime_error("embedded GNN weights not fully consumed");
 }
 
-std::vector<float> Model::forward(const std::vector<float>& node_feat,
+GNN_CLONES std::vector<float> Model::forward(const std::vector<float>& node_feat,
                                   const std::vector<float>& adjacency,
                                   const std::vector<float>& edge_feat,
                                          int n) const {

@@ -3,7 +3,9 @@ CXX      = g++
 AR       = ar
 AWK      = awk
 CFLAGS   = -g -Wall -O2 -pedantic -std=c99 -D_XOPEN_SOURCE=600
-CPPFLAGS = -std=c++11 -g -Wall -O3 -fopenmp
+# -ffp-contract=off: the AVX2 / AVX-512 versions of the GNN (GNNModel.h) must not
+# fuse a*b+c into FMA instructions, which round differently
+CPPFLAGS = -std=c++11 -g -Wall -O3 -fopenmp -ffp-contract=off
 LDFLAGS  =
 LIBS     =
 
