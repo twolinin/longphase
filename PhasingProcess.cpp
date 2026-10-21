@@ -621,16 +621,39 @@ void GNNModule::processChromosome(const std::string& chrom, int tidx,
     int wi_end   = std::min((int)vlist.size() - 1, tidx + params_.window);
 
     std::vector<const VariantInfo*> wvars;
-    std::unordered_set<int> wpos_set;
-    std::unordered_map<int, const VariantInfo*> pos_to_var;
+    // the window's positions, sorted and distinct; a position's index in wpos
+    // keys the per-position values below
+    std::vector<int> wpos;
     for (int i = wi_start; i <= wi_end; ++i) {
         wvars.push_back(&vlist[i]);
-        wpos_set.insert(vlist[i].pos);
-        pos_to_var[vlist[i].pos] = &vlist[i];
+        wpos.push_back(vlist[i].pos);
     }
+    std::sort(wpos.begin(), wpos.end());
+    wpos.erase(std::unique(wpos.begin(), wpos.end()), wpos.end());
+    const int nk = (int)wpos.size();
+    // index of a position in wpos, -1 outside the window
+    auto wk = [&](int pos) -> int {
+        auto it = std::lower_bound(wpos.begin(), wpos.end(), pos);
+        return (it != wpos.end() && *it == pos) ? (int)(it - wpos.begin()) : -1;
+    };
     int n_var = (int)wvars.size();
     int N = n_var * 2;
     if (N > MAX_NODES) { skipped_windows_.fetch_add(1); return; }
+    // the position index of each window variant; the last variant at a
+    // position stands for it
+    std::vector<int> kv(n_var);
+    std::vector<const VariantInfo*> pos_to_var(nk);
+    for (int i = 0; i < n_var; ++i) {
+        kv[i] = wk(wvars[i]->pos);
+        pos_to_var[kv[i]] = wvars[i];
+    }
+    // the edges of each position
+    std::vector<char> has_edges(nk);
+    std::vector<GnnEdgeList::Range> edges_of(nk);
+    for (int k = 0; k < nk; ++k) {
+        has_edges[k] = edge_map.count(wpos[k]) > 0;
+        if (has_edges[k]) edges_of[k] = edge_map.at(wpos[k]);
+    }
 
     float max_offset = 1.0f;
     for (auto* v : wvars) {
@@ -639,36 +662,43 @@ void GNNModule::processChromosome(const std::string& chrom, int tidx,
     }
 
     // h1/h2 from DOT first edge per allele
-    std::unordered_map<int, float> dot_h1, dot_h2;
-    for (auto* v : wvars) {
-        if (!edge_map.count(v->pos)) continue;
-        for (const GnnEdge& e : edge_map.at(v->pos)) {
-            if (e.src_allele == 1 && !dot_h1.count(v->pos)) dot_h1[v->pos] = e.weight;
-            else if (e.src_allele == 2 && !dot_h2.count(v->pos)) dot_h2[v->pos] = e.weight;
+    std::vector<char> has_h1(nk, 0), has_h2(nk, 0);
+    std::vector<float> dot_h1(nk), dot_h2(nk);
+    for (int i = 0; i < n_var; ++i) {
+        const int k = kv[i];
+        if (!has_edges[k]) continue;
+        for (const GnnEdge& e : edges_of[k]) {
+            if (e.src_allele == 1 && !has_h1[k]) { dot_h1[k] = e.weight; has_h1[k] = 1; }
+            else if (e.src_allele == 2 && !has_h2[k]) { dot_h2[k] = e.weight; has_h2[k] = 1; }
         }
     }
 
     // out_degree, out_weight_std
-    std::unordered_map<int, float> out_deg, out_wstd;
-    for (auto* v : wvars) {
-        if (!edge_map.count(v->pos)) { out_deg[v->pos]=0; out_wstd[v->pos]=0; continue; }
-        std::set<int> dsts; std::vector<float> ws;
-        for (const GnnEdge& e : edge_map.at(v->pos)) { dsts.insert(e.dst_pos); ws.push_back(e.weight); }
-        out_deg[v->pos] = std::min((float)dsts.size()/10.0f, 1.0f);
+    std::vector<float> out_deg(nk), out_wstd(nk);
+    std::vector<int> dsts; std::vector<float> ws;
+    for (int i = 0; i < n_var; ++i) {
+        const int k = kv[i];
+        if (!has_edges[k]) { out_deg[k]=0; out_wstd[k]=0; continue; }
+        dsts.clear(); ws.clear();
+        for (const GnnEdge& e : edges_of[k]) { dsts.push_back(e.dst_pos); ws.push_back(e.weight); }
+        // the number of distinct targets
+        std::sort(dsts.begin(), dsts.end());
+        const size_t n_dst = std::unique(dsts.begin(), dsts.end()) - dsts.begin();
+        out_deg[k] = std::min((float)n_dst/10.0f, 1.0f);
         if (ws.size() > 1) {
             float mu=0; for(float w:ws) mu+=w; mu/=ws.size();
             float var=0; for(float w:ws) var+=(w-mu)*(w-mu); var/=ws.size();
-            out_wstd[v->pos] = std::min(std::sqrt(var)/100.0f, 1.0f);
-        } else out_wstd[v->pos] = 0;
+            out_wstd[k] = std::min(std::sqrt(var)/100.0f, 1.0f);
+        } else out_wstd[k] = 0;
     }
 
     // window_mean_votes (VCF h1+h2, full chromosome ±10)
-    std::unordered_map<int, float> wmean;
+    std::vector<float> wmean(nk);
     for (int i = wi_start; i <= wi_end; ++i) {
         int lo = std::max(0, i-10), hi = std::min((int)vlist.size()-1, i+10);
         float sum=0; int cnt=0;
         for (int j=lo; j<=hi; ++j) { sum += vlist[j].h1 + vlist[j].h2; cnt++; }
-        wmean[vlist[i].pos] = cnt > 0 ? sum/cnt : 1.0f;
+        wmean[kv[i - wi_start]] = cnt > 0 ? sum/cnt : 1.0f;
     }
 
     // Neighbor density lambda
@@ -697,86 +727,86 @@ void GNNModule::processChromosome(const std::string& chrom, int tidx,
     // The window holds a few dozen variants, so recomputing per window is
     // cheaper than the chromosome-wide pass this replaces, and it is what
     // the model was trained on.
-    std::unordered_map<int, std::unordered_set<int>> pos_adj;
-    for (int pos : wpos_set) {
-        if (!edge_map.count(pos)) continue;
-        for (const GnnEdge& e : edge_map.at(pos)) {
-            if (!wpos_set.count(e.dst_pos)) continue;
-            if (pos == e.dst_pos) continue;
-            pos_adj[pos].insert(e.dst_pos);
-            pos_adj[e.dst_pos].insert(pos);
+    // pos_adj[a * nk + b]: positions a and b are joined; dst_k: the target's
+    // position index of each edge, in edge order, -1 outside the window
+    std::vector<char> pos_adj((size_t)nk * nk, 0), has_nb(nk, 0);
+    std::vector<std::vector<int>> dst_k(nk);
+    for (int a = 0; a < nk; ++a) {
+        if (!has_edges[a]) continue;
+        for (const GnnEdge& e : edges_of[a]) {
+            const int b = wk(e.dst_pos);
+            dst_k[a].push_back(b);
+            if (b < 0 || b == a) continue;
+            pos_adj[(size_t)a * nk + b] = pos_adj[(size_t)b * nk + a] = 1;
+            has_nb[a] = has_nb[b] = 1;
         }
     }
 
-    // Connected components of wpos_set, optionally with one node removed.
+    // Connected components of the window, optionally with one position removed.
+    std::vector<char> vis(nk);
+    std::vector<int> stack;
     auto n_components = [&](int exclude) -> int {
-        std::unordered_set<int> vis;
+        std::fill(vis.begin(), vis.end(), 0);
         int count = 0;
-        for (int start : wpos_set) {
-            if (start == exclude) continue;
-            if (vis.count(start)) continue;
+        for (int start = 0; start < nk; ++start) {
+            if (start == exclude || vis[start]) continue;
             ++count;
-            std::vector<int> q{start};
-            while (!q.empty()) {
-                int node = q.back(); q.pop_back();
-                if (vis.count(node)) continue;
-                vis.insert(node);
-                auto it = pos_adj.find(node);
-                if (it == pos_adj.end()) continue;
-                for (int nb : it->second)
-                    if (nb != exclude && wpos_set.count(nb) && !vis.count(nb))
-                        q.push_back(nb);
+            stack.assign(1, start);
+            while (!stack.empty()) {
+                int node = stack.back(); stack.pop_back();
+                if (vis[node]) continue;
+                vis[node] = 1;
+                for (int nb = 0; nb < nk; ++nb)
+                    if (pos_adj[(size_t)node * nk + nb] && nb != exclude && !vis[nb])
+                        stack.push_back(nb);
             }
         }
         return count;
     };
 
     const int comp_before = n_components(-1);
-    std::unordered_set<int> bridge_set;
-    for (int pos : wpos_set) {
-        if (wpos_set.size() <= 1) break;
-        auto it = pos_adj.find(pos);
-        if (it == pos_adj.end()) continue;
+    std::vector<char> bridge(nk, 0);
+    for (int k = 0; k < nk; ++k) {
+        if (nk <= 1) break;
         // Needs at least one neighbour that survives the removal.
-        bool has_active = false;
-        for (int nb : it->second)
-            if (nb != pos && wpos_set.count(nb)) { has_active = true; break; }
-        if (!has_active) continue;
-        if (n_components(pos) > comp_before) bridge_set.insert(pos);
+        if (!has_nb[k]) continue;
+        if (n_components(k) > comp_before) bridge[k] = 1;
     }
 
-    // out_wsum for weight_ratio
-    std::unordered_map<int64_t, float> out_wsum;
-    auto make_key = [](int pos, int al) -> int64_t { return ((int64_t)pos << 4) | al; };
-    for (int pos : wpos_set) {
-        if (!edge_map.count(pos)) continue;
-        for (const GnnEdge& e : edge_map.at(pos)) {
-            if (!wpos_set.count(e.dst_pos)) continue;
-            out_wsum[make_key(pos, e.src_allele)] += e.weight;
+    // out_wsum for weight_ratio, per position and source allele
+    std::vector<std::array<float, 2>> out_wsum(nk, std::array<float, 2>{{0.0f, 0.0f}});
+    for (int a = 0; a < nk; ++a) {
+        if (!has_edges[a]) continue;
+        size_t t = 0;
+        for (const GnnEdge& e : edges_of[a]) {
+            if (dst_k[a][t++] < 0) continue;
+            out_wsum[a][e.src_allele - 1] += e.weight;
         }
     }
 
     // ── Node features [N × NODE_FEAT_DIM] ──
     std::vector<float> nf(N * NODE_FEAT_DIM, 0.0f);
-    std::unordered_map<int64_t, int> pa_to_nid;
+    // node of each position and allele: the last variant at the position
+    std::vector<std::array<int, 2>> pa_to_nid(nk, std::array<int, 2>{{-1, -1}});
 
     for (int i = 0; i < n_var; ++i) {
         const auto* v = wvars[i];
-        float h1v = dot_h1.count(v->pos) ? dot_h1[v->pos] : v->h1;
-        float h2v = dot_h2.count(v->pos) ? dot_h2[v->pos] : v->h2;
+        const int k = kv[i];
+        float h1v = has_h1[k] ? dot_h1[k] : v->h1;
+        float h2v = has_h2[k] ? dot_h2[k] : v->h2;
         float total = h1v + h2v;
         float vote_r = total > 0 ? std::max(h1v,h2v)/total : 0.0f;
         float log_tot = std::log2(1.0f+total);
         float lcd = std::log10(1.0f + std::abs((float)(v->pos-center_pos)));
         float ps_blk = std::log1p((float)(ps_count.count(v->ps)?ps_count.at(v->ps):1))
                        / std::log1p(100.0f);
-        float wm = wmean.count(v->pos) ? wmean[v->pos] : 1.0f;
+        float wm = wmean[k];
         float rvd = std::log2(total / (wm+EPS) + EPS);
-        float bridge_f = bridge_set.count(v->pos) ? 1.0f : 0.0f;
+        float bridge_f = bridge[k] ? 1.0f : 0.0f;
 
         for (int a = 0; a < 2; ++a) {
             int allele = a+1, nid = i*2+a;
-            pa_to_nid[make_key(v->pos, allele)] = nid;
+            pa_to_nid[k][a] = nid;
             int hp_val = (allele==1) ? v->gt_ref : v->gt_alt;
             float* f = &nf[nid * NODE_FEAT_DIM];
             f[0]=v->pe; f[1]=(float)hp_val; f[2]=(float)v->gt_ref; f[3]=(float)v->gt_alt;
@@ -786,9 +816,9 @@ void GNNModule::processChromosome(const std::string& chrom, int tidx,
             f[8]=h1v; f[9]=h2v; f[10]=total; f[11]=vote_r;
             f[12]=log_tot; f[13]=std::log1p(std::max(0.0f,h1v)); f[14]=std::log1p(std::max(0.0f,h2v));
             f[15]=v->hp_len; f[16]=v->gc_content; f[17]=v->str_context; f[18]=v->seq_entropy;
-            f[19]=neigh_dens(v->pos); f[20]=out_deg[v->pos]; f[21]=ps_blk;
+            f[19]=neigh_dens(v->pos); f[20]=out_deg[k]; f[21]=ps_blk;
             f[22]=lcd; f[23]=dist_indel(v->pos); f[24]=rvd;
-            f[25]=out_wstd[v->pos]; f[26]=bridge_f;
+            f[25]=out_wstd[k]; f[26]=bridge_f;
             // v21 cophasing: variant type indicators
             f[27]=(v->vtype==GVT_SNV)?1.0f:0.0f;
             f[28]=(v->vtype==GVT_INDEL)?1.0f:0.0f;
@@ -801,18 +831,21 @@ void GNNModule::processChromosome(const std::string& chrom, int tidx,
     std::vector<float> adj(N*N, 0.0f);
     std::vector<float> ef(N*N*EDGE_FEAT_DIM, 0.0f);
 
-    for (int pos : wpos_set) {
-        if (!edge_map.count(pos)) continue;
-        for (const GnnEdge& e : edge_map.at(pos)) {
-            if (!wpos_set.count(e.dst_pos)) continue;
-            auto sit = pa_to_nid.find(make_key(pos, e.src_allele));
-            auto dit = pa_to_nid.find(make_key(e.dst_pos, e.dst_allele));
-            if (sit == pa_to_nid.end() || dit == pa_to_nid.end()) continue;
-            int sn = sit->second, dn = dit->second;
+    // A cell (row, col) is written only by edges of one source position, in
+    // their order, so the order of the positions does not matter.
+    for (int a = 0; a < nk; ++a) {
+        if (!has_edges[a]) continue;
+        const int pos = wpos[a];
+        size_t t = 0;
+        for (const GnnEdge& e : edges_of[a]) {
+            const int b = dst_k[a][t++];
+            if (b < 0) continue;
+            int sn = pa_to_nid[a][e.src_allele - 1], dn = pa_to_nid[b][e.dst_allele - 1];
+            if (sn < 0 || dn < 0) continue;
             float same_hp = (e.src_allele == e.dst_allele) ? 1.0f : 0.0f;
-            auto* sv = pos_to_var[pos]; auto* dv = pos_to_var[e.dst_pos];
+            auto* sv = pos_to_var[a]; auto* dv = pos_to_var[b];
             float inter_ps = (sv && dv && sv->ps != dv->ps) ? 1.0f : 0.0f;
-            float wsum = out_wsum[make_key(pos, e.src_allele)];
+            float wsum = out_wsum[a][e.src_allele - 1];
             int row = dn, col = sn;
             adj[row*N+col] = 1.0f;
             float* ep = &ef[(row*N+col)*EDGE_FEAT_DIM];
@@ -863,7 +896,7 @@ void GNNModule::processChromosome(const std::string& chrom, int tidx,
         if (rel > center_thr) continue;
         int n1=i*2, n2=i*2+1;
         float p_err = (op[n1*2+1]+op[n2*2+1])/2.0f;
-        bool br = bridge_set.count(wvars[i]->pos) > 0;
+        bool br = bridge[kv[i]] != 0;
         std::lock_guard<std::mutex> lk(pred_mutex_);
         auto& pr = predictions_[chrom][wvars[i]->pos];
         pr.prob_error = (pr.prob_error*pr.count + p_err)/(pr.count+1);
