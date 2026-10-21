@@ -10,6 +10,7 @@
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
+#include <climits>
 #include <thread>
 #include <set>
 #include <htslib/vcf.h>
@@ -948,68 +949,13 @@ void GNNModule::computeBlockSplits() {
                 pos_to_ps[v.pos] = v.ps;
             }
 
-            // Build adjacency (only same-PS, both-phased edges)
-            std::unordered_map<int, std::vector<int>> adj;
-            for (size_t gi = 0; gi < em.groups(); ++gi) {
-                const int src = em.src[gi];
-                GnnEdgeList::Range elist = em.group(gi);
-                if (unphase_pos.count(src)) continue;
-                auto it_s = pos_to_ps.find(src);
-                if (it_s == pos_to_ps.end()) continue;
-                for (const GnnEdge& e : elist) {
-                    int dst = e.dst_pos;
-                    if (unphase_pos.count(dst)) continue;
-                    auto it_d = pos_to_ps.find(dst);
-                    if (it_d == pos_to_ps.end()) continue;
-                    if (it_s->second != it_d->second) continue;
-                    adj[src].push_back(dst);
-                    adj[dst].push_back(src);
-                }
-            }
-            // A 5mC site merged into another site's graph node has no edges
-            // of its own; it is connected through that node.
-            for (auto& v : vl) {
-                if (v.link_pos < 0) continue;
-                auto it_s = pos_to_ps.find(v.pos);
-                auto it_d = pos_to_ps.find(v.link_pos);
-                if (it_s == pos_to_ps.end() || it_d == pos_to_ps.end()) continue;
-                if (it_s->second != it_d->second) continue;
-                adj[v.pos].push_back(v.link_pos);
-                adj[v.link_pos].push_back(v.pos);
-            }
-
             std::unordered_map<int, int> local_reassign;
             int local_splits = 0, local_new = 0;
 
-            // Per-PS connected components via BFS
-            for (auto& kv_ps : ps_blocks) {
-                auto& positions = kv_ps.second;
-                if (positions.size() <= 1) continue;
-
-                std::unordered_set<int> pos_set(positions.begin(), positions.end());
-                std::unordered_set<int> visited;
-                std::vector<std::vector<int>> components;
-
-                for (int start : positions) {
-                    if (visited.count(start)) continue;
-                    std::vector<int> comp;
-                    std::vector<int> queue = {start};
-                    while (!queue.empty()) {
-                        int node = queue.back(); queue.pop_back();
-                        if (visited.count(node)) continue;
-                        visited.insert(node);
-                        comp.push_back(node);
-                        auto it = adj.find(node);
-                        if (it != adj.end())
-                            for (int nb : it->second)
-                                if (!visited.count(nb) && pos_set.count(nb))
-                                    queue.push_back(nb);
-                    }
-                    components.push_back(std::move(comp));
-                }
-
-                if (components.size() <= 1) continue;
-
+            // components: positions of each connected part of a PS block, in
+            // the order the parts are first reached from the block's positions
+            auto split = [&](std::vector<std::vector<int>>& components) {
+                if (components.size() <= 1) return;
                 // Sort: largest component keeps original PS
                 std::sort(components.begin(), components.end(),
                           [](const std::vector<int>& a, const std::vector<int>& b){
@@ -1023,6 +969,90 @@ void GNNModule::computeBlockSplits() {
                     for (int pos : components[i])
                         local_reassign[pos] = new_ps;
                 }
+            };
+
+            // Graph nodes are positions, joined by same-PS, both-phased edges
+            // (and 5mC links); a position's PS is that of its last record.
+            std::vector<int> nodes;
+            nodes.reserve(pos_to_ps.size());
+            for (auto& kv : pos_to_ps) nodes.push_back(kv.first);
+            std::sort(nodes.begin(), nodes.end());
+            auto node_of = [&](int pos) {
+                auto it = std::lower_bound(nodes.begin(), nodes.end(), pos);
+                return (it != nodes.end() && *it == pos) ? (int)(it - nodes.begin()) : -1;
+            };
+            std::vector<int> node_ps(nodes.size());
+            for (size_t i = 0; i < nodes.size(); ++i) node_ps[i] = pos_to_ps[nodes[i]];
+            // A position with records in several blocks is "stale" in the blocks
+            // other than its PS: there it is connected only through edges to
+            // other positions that are stale in the same block.
+            std::vector<char> stale(nodes.size(), 0);
+            for (auto& kv_ps : ps_blocks)
+                for (int pos : kv_ps.second) {
+                    const int i = node_of(pos);
+                    if (node_ps[i] != kv_ps.first) stale[i] = 1;
+                }
+
+            std::vector<int> parent(nodes.size());
+            for (size_t i = 0; i < parent.size(); ++i) parent[i] = (int)i;
+            auto find = [](std::vector<int>& par, int i) {
+                while (par[i] != i) i = par[i] = par[par[i]];
+                return i;
+            };
+            auto unite = [&](std::vector<int>& par, int i, int j) {
+                i = find(par, i); j = find(par, j);
+                if (i != j) par[std::max(i, j)] = std::min(i, j);
+            };
+            std::vector<std::pair<int, int>> stale_edges;   // both ways
+            auto join = [&](int s, int d) {
+                if (s < 0 || d < 0 || node_ps[s] != node_ps[d]) return;
+                unite(parent, s, d);
+                if (stale[s] && stale[d]) {
+                    stale_edges.emplace_back(s, d);
+                    stale_edges.emplace_back(d, s);
+                }
+            };
+            for (size_t gi = 0; gi < em.groups(); ++gi) {
+                const int s = node_of(em.src[gi]);
+                if (s < 0) continue;
+                for (const GnnEdge& e : em.group(gi)) join(s, node_of(e.dst_pos));
+            }
+            for (auto& v : vl)
+                if (v.link_pos >= 0) join(node_of(v.pos), node_of(v.link_pos));
+            std::sort(stale_edges.begin(), stale_edges.end());
+
+            // Per-PS connected components, numbered in the order the block's
+            // positions first reach them
+            std::vector<int> comp_of(nodes.size(), -1);  // root -> component (roots differ between blocks)
+            std::vector<int> seen(nodes.size(), -1);     // last block that listed the position
+            std::vector<int> loc(nodes.size(), -1);      // index among the block's stale positions
+            int bi = 0;
+            for (auto& kv_ps : ps_blocks) {
+                auto& positions = kv_ps.second;
+                ++bi;
+                if (positions.size() <= 1) continue;
+                std::vector<int> order, stale_here;
+                for (int pos : positions) {
+                    const int i = node_of(pos);
+                    if (seen[i] == bi) continue;
+                    seen[i] = bi;
+                    order.push_back(i);
+                    if (node_ps[i] != kv_ps.first) { loc[i] = (int)stale_here.size(); stale_here.push_back(i); }
+                }
+                std::vector<int> lpar(stale_here.size()), lcomp(stale_here.size(), -1);
+                for (size_t k = 0; k < lpar.size(); ++k) lpar[k] = (int)k;
+                for (int i : stale_here)
+                    for (auto it = std::lower_bound(stale_edges.begin(), stale_edges.end(), std::make_pair(i, INT_MIN));
+                         it != stale_edges.end() && it->first == i; ++it)
+                        if (loc[it->second] >= 0) unite(lpar, loc[i], loc[it->second]);
+                std::vector<std::vector<int>> components;
+                for (int i : order) {
+                    int& c = loc[i] < 0 ? comp_of[find(parent, i)] : lcomp[find(lpar, loc[i])];
+                    if (c < 0) { c = (int)components.size(); components.emplace_back(); }
+                    components[c].push_back(nodes[i]);
+                }
+                for (int i : stale_here) loc[i] = -1;
+                split(components);
             }
 
             if (!local_reassign.empty()) {
