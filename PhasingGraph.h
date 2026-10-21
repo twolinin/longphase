@@ -150,7 +150,7 @@ class VairiantGraph{
         std::string *ref;
         std::string dotResult;
         // graph edges for the GNN
-        std::vector<DotEdge> gnnEdges;
+        GnnEdgeList gnnEdges;
         std::vector<ReadVariant> *readVariant;
         
         // Variant positions in genomic order; every per-variant array below is indexed
@@ -234,7 +234,7 @@ class VairiantGraph{
         
         void phasingProcess();
         void writingDotFile(std::string dotPrefix);
-        void exportGnnEdges(std::vector<DotEdge> &out);
+        void exportGnnEdges(GnnEdgeList &out);
         void exportResult(std::string chrName, PhasingResult &result);
         int totalNode();
 

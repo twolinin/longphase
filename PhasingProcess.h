@@ -64,9 +64,62 @@ struct PhasingParameters
 namespace gnn { class Model; }
 
 // One edge of the phasing graph: 1-indexed alleles, 0-based positions.
-struct DotEdge {
-    int src_pos, src_allele, dst_pos, dst_allele;
+// The source position is the one the edge is listed under in GnnEdgeList.
+struct GnnEdge {
+    int dst_pos;
     float weight;
+    int8_t src_allele, dst_allele;
+};
+
+// The graph edges of one chromosome, grouped by source position. The edges
+// of src[i] are edges[start[i]] up to the start of the next group, in the
+// order they were added.
+struct GnnEdgeList {
+    std::vector<int> src;
+    std::vector<size_t> start;
+    std::vector<GnnEdge> edges;
+
+    struct Range {
+        const GnnEdge *b, *e;
+        const GnnEdge *begin() const { return b; }
+        const GnnEdge *end() const { return e; }
+    };
+
+    void add(int srcPos, int srcAllele, int dstPos, int dstAllele, float weight) {
+        if (src.empty() || src.back() != srcPos) {
+            if (!src.empty() && srcPos < src.back())
+                sorted = false;
+            src.push_back(srcPos);
+            start.push_back(edges.size());
+        }
+        edges.push_back({dstPos, weight, (int8_t)srcAllele, (int8_t)dstAllele});
+    }
+    void swap(GnnEdgeList &o) {
+        src.swap(o.src);
+        start.swap(o.start);
+        edges.swap(o.edges);
+        std::swap(sorted, o.sorted);
+    }
+    // Group the edges by ascending source position. phase adds them in that
+    // order already; otherwise sort them, keeping the order within a source.
+    void finish();
+    size_t groups() const { return src.size(); }
+    Range group(size_t i) const {
+        size_t e = i + 1 < start.size() ? start[i + 1] : edges.size();
+        return {edges.data() + start[i], edges.data() + e};
+    }
+    // 1 if srcPos has edges
+    size_t count(int srcPos) const {
+        auto it = std::lower_bound(src.begin(), src.end(), srcPos);
+        return it != src.end() && *it == srcPos;
+    }
+    // the edges of srcPos, which must have some
+    Range at(int srcPos) const {
+        return group(std::lower_bound(src.begin(), src.end(), srcPos) - src.begin());
+    }
+
+private:
+    bool sorted = true;
 };
 
 enum GnnVariantType { GVT_SNV=0, GVT_INDEL, GVT_SV, GVT_METHYL };
@@ -113,7 +166,7 @@ public:
     ~GNNModule();
     // Graph edges from phase, per chromosome, in the order phase emitted
     // them. Taken over by run().
-    void setDotEdges(std::map<std::string, std::vector<DotEdge>>&& edges);
+    void setDotEdges(std::map<std::string, GnnEdgeList>&& edges);
     int run();
 
 private:
@@ -124,9 +177,9 @@ private:
     std::unique_ptr<const gnn::Model> model_;
 
     std::map<std::string, std::vector<VariantInfo>> variants_;
-    // dot_edges_[chrom][src_pos] = list of edges from that position
-    std::map<std::string, std::unordered_map<int, std::vector<DotEdge>>> dot_edges_;
-    std::map<std::string, std::vector<DotEdge>> pending_edges_;
+    // dot_edges_[chrom]: the edges of each source position
+    std::map<std::string, GnnEdgeList> dot_edges_;
+    std::map<std::string, GnnEdgeList> pending_edges_;
 
     std::mutex pred_mutex_;
     // Windows skipped because they exceed MAX_NODES

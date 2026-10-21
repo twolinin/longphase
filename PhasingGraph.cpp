@@ -22,11 +22,11 @@ void appendDotEdges(std::string& outDotResult, int currPos, const std::pair<PosA
 // Same edges as appendDotEdges, for the GNN. The model was trained on
 // weights read back from the DOT label, so they take the same text round
 // trip (std::to_string, then parsed as float) to give identical values.
-void appendGnnEdges(std::vector<DotEdge>& outEdges, int currPos, const std::pair<PosAllele, PosAllele>& edgePair, float h1Weight, float h2Weight){
+void appendGnnEdges(GnnEdgeList& outEdges, int currPos, const std::pair<PosAllele, PosAllele>& edgePair, float h1Weight, float h2Weight){
     float w1 = std::strtof(std::to_string(h1Weight).c_str(), NULL);
     float w2 = std::strtof(std::to_string(h2Weight).c_str(), NULL);
-    outEdges.push_back({currPos, 1, edgePair.first.first, edgePair.first.second, w1});
-    outEdges.push_back({currPos, 2, edgePair.second.first, edgePair.second.second, w2});
+    outEdges.add(currPos, 1, edgePair.first.first, edgePair.first.second, w1);
+    outEdges.add(currPos, 2, edgePair.second.first, edgePair.second.second, w2);
 }
 
 void recordVoteForNextPosition(
@@ -511,7 +511,7 @@ VairiantGraph::~VairiantGraph(){
 void VairiantGraph::destroy(){
     dotResult.clear();
     dotResult.shrink_to_fit();
-    std::vector<DotEdge>().swap(gnnEdges);
+    GnnEdgeList().swap(gnnEdges);
 
     std::vector<std::array<float, 4> >().swap(edgeCounts);
     std::vector<char>().swap(hasEdge);
@@ -1049,7 +1049,11 @@ void VairiantGraph::writingDotFile(std::string dotPrefix){
     return;
 }
 
-void VairiantGraph::exportGnnEdges(std::vector<DotEdge> &out){
+void VairiantGraph::exportGnnEdges(GnnEdgeList &out){
+    // drop the spare capacity; these are kept until the GNN runs
+    gnnEdges.src.shrink_to_fit();
+    gnnEdges.start.shrink_to_fit();
+    gnnEdges.edges.shrink_to_fit();
     out.swap(gnnEdges);
 }
 

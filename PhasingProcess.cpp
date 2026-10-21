@@ -106,7 +106,7 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
     }
     // Graph edges for the GNN, per chromosome; pre-created for the
     // same reason as chrPhasingResult.
-    std::map<std::string, std::vector<DotEdge> > chrGnnEdges;
+    std::map<std::string, GnnEdgeList> chrGnnEdges;
     if (params.enableGNN) {
         for (std::vector<std::string>::iterator chrIter = chrName.begin(); chrIter != chrName.end(); chrIter++) {
             chrGnnEdges[*chrIter];
@@ -493,55 +493,47 @@ void GNNModule::parseVCF() {
 // ═══════════════════════════════════════════════════════════
 // Graph edges from phase
 // ═══════════════════════════════════════════════════════════
-void GNNModule::setDotEdges(std::map<std::string, std::vector<DotEdge>>&& edges) {
+void GNNModule::setDotEdges(std::map<std::string, GnnEdgeList>&& edges) {
     pending_edges_ = std::move(edges);
 }
 
 void GNNModule::loadDotEdges() {
-    // Collect chromosome list and pre-initialize dot_edges_ map
-    std::vector<std::string> chroms;
+    // Take over the edges of each chromosome with variants
+    size_t total = 0;
     for (auto& kv : variants_) {
         const std::string& ch = kv.first;
-        chroms.push_back(ch);
-        dot_edges_[ch]; // pre-create entry to avoid concurrent map insertion
+        auto& em = dot_edges_[ch];
+        auto pit = pending_edges_.find(ch);
+        if (pit == pending_edges_.end()) continue;
+        em.swap(pit->second);
+        em.finish();
+        total += em.edges.size();
     }
-
-    // Index all chromosomes in parallel
-    std::atomic<int> total{0};
-    std::vector<std::thread> threads;
-    std::atomic<size_t> cidx{0};
-
-    int n_threads = std::min(params_.threads, (int)chroms.size());
-    for (int t = 0; t < n_threads; ++t) {
-        threads.emplace_back([&]() {
-            while (true) {
-                size_t i = cidx.fetch_add(1);
-                if (i >= chroms.size()) return;
-                auto& ch = chroms[i];
-                auto pit = pending_edges_.find(ch);
-                if (pit == pending_edges_.end()) continue;
-                const std::vector<DotEdge>& edges = pit->second;
-
-                // phase emits all edges of a source position together, so
-                // store each run at its exact size.
-                auto& em = dot_edges_[ch];
-                size_t r = 0;
-                while (r < edges.size()) {
-                    size_t e = r + 1;
-                    while (e < edges.size() && edges[e].src_pos == edges[r].src_pos) ++e;
-                    auto& v = em[edges[r].src_pos];
-                    if (v.empty()) v.assign(edges.begin() + r, edges.begin() + e);
-                    else v.insert(v.end(), edges.begin() + r, edges.begin() + e);
-                    r = e;
-                }
-                total += (int)edges.size();
-                std::vector<DotEdge>().swap(pit->second);
-            }
-        });
-    }
-    for (auto& t : threads) t.join();
     pending_edges_.clear();
-    std::cerr << "  " << total.load() << " graph edges\n";
+    std::cerr << "  " << total << " graph edges\n";
+}
+
+void GnnEdgeList::finish() {
+    if (sorted) return;
+    // order the groups by source position; a stable sort keeps the groups
+    // of one source in the order they were added
+    std::vector<size_t> order(src.size());
+    for (size_t i = 0; i < order.size(); ++i) order[i] = i;
+    std::stable_sort(order.begin(), order.end(),
+                     [&](size_t x, size_t y) { return src[x] < src[y]; });
+    GnnEdgeList out;
+    out.edges.reserve(edges.size());
+    for (size_t i : order) {
+        const GnnEdge* b = group(i).begin();
+        const GnnEdge* e = group(i).end();
+        if (out.src.empty() || out.src.back() != src[i]) {
+            out.src.push_back(src[i]);
+            out.start.push_back(out.edges.size());
+        }
+        out.edges.insert(out.edges.end(), b, e);
+    }
+    swap(out);
+    sorted = true;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -688,9 +680,9 @@ void GNNModule::processChromosome(const std::string& chrom, int tidx,
         if (!edge_map.count(pos)) continue;
         for (auto& e : edge_map.at(pos)) {
             if (!wpos_set.count(e.dst_pos)) continue;
-            if (e.src_pos == e.dst_pos) continue;
-            pos_adj[e.src_pos].insert(e.dst_pos);
-            pos_adj[e.dst_pos].insert(e.src_pos);
+            if (pos == e.dst_pos) continue;
+            pos_adj[pos].insert(e.dst_pos);
+            pos_adj[e.dst_pos].insert(pos);
         }
     }
 
@@ -738,7 +730,7 @@ void GNNModule::processChromosome(const std::string& chrom, int tidx,
         if (!edge_map.count(pos)) continue;
         for (auto& e : edge_map.at(pos)) {
             if (!wpos_set.count(e.dst_pos)) continue;
-            out_wsum[make_key(e.src_pos, e.src_allele)] += e.weight;
+            out_wsum[make_key(pos, e.src_allele)] += e.weight;
         }
     }
 
@@ -791,19 +783,19 @@ void GNNModule::processChromosome(const std::string& chrom, int tidx,
         if (!edge_map.count(pos)) continue;
         for (auto& e : edge_map.at(pos)) {
             if (!wpos_set.count(e.dst_pos)) continue;
-            auto sit = pa_to_nid.find(make_key(e.src_pos, e.src_allele));
+            auto sit = pa_to_nid.find(make_key(pos, e.src_allele));
             auto dit = pa_to_nid.find(make_key(e.dst_pos, e.dst_allele));
             if (sit == pa_to_nid.end() || dit == pa_to_nid.end()) continue;
             int sn = sit->second, dn = dit->second;
             float same_hp = (e.src_allele == e.dst_allele) ? 1.0f : 0.0f;
-            auto* sv = pos_to_var[e.src_pos]; auto* dv = pos_to_var[e.dst_pos];
+            auto* sv = pos_to_var[pos]; auto* dv = pos_to_var[e.dst_pos];
             float inter_ps = (sv && dv && sv->ps != dv->ps) ? 1.0f : 0.0f;
-            float wsum = out_wsum[make_key(e.src_pos, e.src_allele)];
+            float wsum = out_wsum[make_key(pos, e.src_allele)];
             int row = dn, col = sn;
             adj[row*N+col] = 1.0f;
             float* ep = &ef[(row*N+col)*EDGE_FEAT_DIM];
             ep[0] = 1.0f/(1.0f+std::exp(-e.weight));
-            ep[1] = std::log10(1.0f+std::abs((float)(e.dst_pos-e.src_pos)));
+            ep[1] = std::log10(1.0f+std::abs((float)(e.dst_pos-pos)));
             ep[2] = std::log1p(e.weight);
             ep[3] = same_hp; ep[4] = inter_ps;
             ep[5] = e.weight/(wsum+EPS);
@@ -903,9 +895,9 @@ void GNNModule::computeBlockSplits() {
 
             // Build adjacency (only same-PS, both-phased edges)
             std::unordered_map<int, std::vector<int>> adj;
-            for (auto& kv_src : em) {
-                const auto& src = kv_src.first;
-                auto& elist = kv_src.second;
+            for (size_t gi = 0; gi < em.groups(); ++gi) {
+                const int src = em.src[gi];
+                GnnEdgeList::Range elist = em.group(gi);
                 if (unphase_pos.count(src)) continue;
                 auto it_s = pos_to_ps.find(src);
                 if (it_s == pos_to_ps.end()) continue;
