@@ -105,23 +105,58 @@ inline float gelu(float x) {
 
 inline float leaky_relu(float x) { return x >= 0.0f ? x : kLeaky * x; }
 
+// 16 floats, the unit of linear()'s tiles (GCC vector extension; the
+// compiler splits it into narrower registers where needed)
+typedef float vec16 __attribute__((vector_size(64), aligned(4)));
+
+// R rows by 16 outputs of linear(), from output o: the 16 sums are kept in
+// registers while k runs, each b[o] + x[0]*W[o][0] + x[1]*W[o][1] + ...
+// Always inlined, so it is compiled for each version of linear().
+template <int R>
+__attribute__((always_inline)) inline void linear_tile(const float* x0, int in_dim, const Tensor& w,
+                        const float* b, int o, float* out0, int out_dim) {
+    vec16 acc[R];
+    vec16 bv;
+    std::memcpy(&bv, b + o, sizeof bv);
+    for (int r = 0; r < R; ++r) acc[r] = bv;
+    for (int k = 0; k < in_dim; ++k) {
+        vec16 wv;
+        std::memcpy(&wv, w.col(k) + o, sizeof wv);
+        for (int r = 0; r < R; ++r) acc[r] += x0[(size_t)r * in_dim + k] * wv;
+    }
+    for (int r = 0; r < R; ++r)
+        std::memcpy(out0 + (size_t)r * out_dim + o, &acc[r], sizeof(vec16));
+}
+
 // out[n, out_dim] = in[n, in_dim] * W^T + b, with W stored as [out_dim, in_dim]
-// Each output is b[o] + in[0]*W[o][0] + in[1]*W[o][1] + ..., added in that order. The loop
-// runs over k outside and o inside (on the transposed weights) so the compiler can
-// vectorize across outputs; the order of the additions for each output is unchanged.
+// Each output is b[o] + in[0]*W[o][0] + in[1]*W[o][1] + ..., added in that order.
+// Tiles of 4 rows by 16 outputs keep their sums in registers while k runs
+// (on the transposed weights, vectorized across outputs); other outputs are
+// summed one at a time. The order of the additions for each output is the same
+// everywhere.
 GNN_CLONES void linear(const float* in, int n, int in_dim,
                    const Tensor& w, const std::vector<float>& b,
                    float* out) {
     const int out_dim = w.rows;
-    for (int i = 0; i < n; ++i) {
-        const float* xi = in + (size_t)i * in_dim;
-        float* oi = out + (size_t)i * out_dim;
-        for (int o = 0; o < out_dim; ++o) oi[o] = b[o];
-        for (int k = 0; k < in_dim; ++k) {
-            const float xk = xi[k];
-            const float* wk = w.col(k);
-            for (int o = 0; o < out_dim; ++o) oi[o] += xk * wk[o];
+    constexpr int R = 4, C = 16;
+    for (int i = 0; i < n; ) {
+        // 4 rows, then the last ones one by one
+        const int rows = (i + R <= n) ? R : 1;
+        const float* x0 = in + (size_t)i * in_dim;
+        float* out0 = out + (size_t)i * out_dim;
+        int o = 0;
+        for (; o + C <= out_dim; o += C) {
+            if (rows == R) linear_tile<R>(x0, in_dim, w, b.data(), o, out0, out_dim);
+            else           linear_tile<1>(x0, in_dim, w, b.data(), o, out0, out_dim);
         }
+        for (; o < out_dim; ++o)
+            for (int r = 0; r < rows; ++r) {
+                float s = b[o];
+                for (int k = 0; k < in_dim; ++k)
+                    s += x0[(size_t)r * in_dim + k] * w.col(k)[o];
+                out0[(size_t)r * out_dim + o] = s;
+            }
+        i += rows;
     }
 }
 
