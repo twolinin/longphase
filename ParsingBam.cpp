@@ -1,5 +1,7 @@
 #include "ParsingBam.h"
 #include <htslib/bgzf.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 #include <cstdio>
 #include <cctype>
@@ -67,11 +69,177 @@ std::string fetchChrReference(faidx_t *fai, const std::string &chr,
 
 std::string loadChrReference(const std::string &fastaFile,
                              const std::string &chr, int lastPos) {
-  // a handle of its own, so chromosomes can be read in parallel
-  faidx_t *fai = fai_load(fastaFile.c_str());
-  std::string ref = fetchChrReference(fai, chr, lastPos);
-  fai_destroy(fai);
+  // a reader of its own, so chromosomes can be read in parallel
+  FastaReader reader(fastaFile);
+  int ref_len = 0;
+  std::string ref = reader.fetch(chr, 0, lastPos + 5, ref_len, false);
+  if (ref_len == 0) {
+    std::cout << "nothing in reference file \n";
+  }
   return ref;
+}
+
+FastaReader::FastaReader(const std::string &fastaFile)
+    : fai(fai_load(fastaFile.c_str())) {
+  if (!fai)
+    return;
+  int f = open(fastaFile.c_str(), O_RDONLY);
+  if (f < 0)
+    return;
+  // not gzip / BGZF compressed
+  unsigned char magic[2] = {0, 0};
+  if (pread(f, magic, 2, 0) == 2 && magic[0] == 0x1f && magic[1] == 0x8b) {
+    close(f);
+    return;
+  }
+  // the .fai fai_load read: name, length, offset, line bases, line width
+  std::ifstream in(fastaFile + ".fai");
+  std::string line;
+  while (in && std::getline(in, line)) {
+    std::vector<std::string> col;
+    size_t b = 0;
+    while (true) {
+      size_t e = line.find('\t', b);
+      col.push_back(line.substr(b, e == std::string::npos ? std::string::npos : e - b));
+      if (e == std::string::npos)
+        break;
+      b = e + 1;
+    }
+    if (col.size() < 5) {
+      index.clear();
+      break;
+    }
+    Entry e;
+    char *stop;
+    e.len = strtoll(col[1].c_str(), &stop, 10);
+    e.offset = strtoll(col[2].c_str(), &stop, 10);
+    e.lineBases = (int)strtol(col[3].c_str(), &stop, 10);
+    e.lineWidth = (int)strtol(col[4].c_str(), &stop, 10);
+    if (e.len <= 0 || e.offset < 0 || e.lineBases <= 0 ||
+        e.lineWidth < e.lineBases)
+      e.irregular = true;
+    index[col[0]] = e;
+  }
+  if (index.empty()) {
+    close(f);
+    return;
+  }
+  fd = f;
+}
+
+FastaReader::~FastaReader() {
+  if (fd >= 0)
+    close(fd);
+  if (fai)
+    fai_destroy(fai);
+}
+
+namespace {
+// isgraph in the C locale, which htslib uses to skip line ends
+inline bool isBase(unsigned char c) { return c >= 0x21 && c <= 0x7e; }
+
+// Append the bases in [p, end) to out, up to need of them in all. col is the
+// column of p in its line, B bases then W - B line-end characters per line.
+// False if a line is not laid out that way.
+bool appendBases(const char *&p, const char *end, int64_t &col, int64_t B,
+                 int64_t W, size_t need, std::string &out) {
+  while (p < end && out.size() < need) {
+    if (col < B) {
+      size_t k = std::min<size_t>(std::min<int64_t>(B - col, end - p),
+                                  need - out.size());
+      bool ok = true;
+      for (size_t i = 0; i < k; i++)
+        ok &= isBase((unsigned char)p[i]);
+      if (!ok)
+        return false;
+      out.append(p, k);
+      p += k;
+      col += k;
+    } else {
+      if (isBase((unsigned char)*p))
+        return false;
+      p++;
+      if (++col == W)
+        col = 0;
+    }
+  }
+  return true;
+}
+} // namespace
+
+bool FastaReader::readSeq(const Entry &e, int64_t beg, int64_t end,
+                          std::string &out, bool cache) {
+  out.clear();
+  const int64_t B = e.lineBases, W = e.lineWidth;
+  const size_t need = end - beg + 1;
+  // file offsets of the first and the last base
+  const int64_t first = e.offset + beg / B * W + beg % B;
+  const int64_t last = e.offset + end / B * W + end % B;
+  int64_t col = beg % B;
+  if (cache) {
+    if (rawStart < 0 || first < rawStart ||
+        last >= rawStart + (int64_t)raw.size()) {
+      // at least 1 MB from the first base
+      raw.resize(std::max<int64_t>(last - first + 1, 1 << 20));
+      ssize_t got = pread(fd, raw.data(), raw.size(), first);
+      if (got < last - first + 1) {
+        rawStart = -1;
+        return false;
+      }
+      raw.resize(got);
+      rawStart = first;
+    }
+    const char *p = raw.data() + (first - rawStart);
+    return appendBases(p, raw.data() + raw.size(), col, B, W, need, out) &&
+           out.size() == need;
+  }
+  out.reserve(need);
+  std::vector<char> buf(1 << 22);
+  int64_t off = first;
+  while (out.size() < need) {
+    ssize_t got = pread(fd, buf.data(),
+                        std::min<int64_t>(buf.size(), last - off + 1), off);
+    if (got <= 0)
+      return false;
+    off += got;
+    const char *p = buf.data();
+    if (!appendBases(p, buf.data() + got, col, B, W, need, out))
+      return false;
+  }
+  return true;
+}
+
+std::string FastaReader::fetch(const std::string &chr, int beg, int end,
+                               int &len, bool cache) {
+  auto it = fd >= 0 ? index.find(chr) : index.end();
+  if (it != index.end() && !it->second.irregular) {
+    const Entry &e = it->second;
+    // positions as faidx_fetch_seq adjusts them
+    int64_t b = beg, en = end;
+    if (en < b)
+      b = en;
+    if (b < 0)
+      b = 0;
+    else if (e.len <= b)
+      b = e.len - 1;
+    if (en < 0)
+      en = 0;
+    else if (e.len <= en)
+      en = e.len - 1;
+    if (en >= b) {
+      std::string seq;
+      if (readSeq(e, b, en, seq, cache)) {
+        len = (int)seq.size();
+        return seq;
+      }
+      // not as the .fai describes: htslib from now on
+      it->second.irregular = true;
+    }
+  }
+  char *seq = faidx_fetch_seq(fai, chr.c_str(), beg, end, &len);
+  std::string out = seq ? std::string(seq, len) : std::string();
+  free(seq);
+  return out;
 }
 
 FastaParser::~FastaParser() {}

@@ -30,6 +30,42 @@ struct ModVariant {
 };
 
 
+// Reads sequences of a FASTA file as faidx_fetch_seq does. htslib reads the
+// file one character at a time; for an uncompressed FASTA with its .fai and
+// regular lines this reads the same bytes in blocks. Otherwise (compressed
+// FASTA, no .fai, irregular lines) it calls htslib. One reader per thread.
+class FastaReader {
+public:
+  explicit FastaReader(const std::string &fastaFile);
+  ~FastaReader();
+  bool loaded() const { return fai != nullptr; }
+  // faidx_fetch_seq(fai, chr, beg, end, &len) as a string ("" when it returns
+  // NULL). With cache, a block of sequence around the range is kept, for many
+  // small fetches in increasing order.
+  std::string fetch(const std::string &chr, int beg, int end, int &len,
+                    bool cache);
+
+private:
+  faidx_t *fai;
+  int fd = -1; // the FASTA, if it can be read in blocks
+  struct Entry {
+    int64_t len, offset;
+    int lineBases, lineWidth;
+    bool irregular = false;
+  };
+  std::map<std::string, Entry> index;
+  // cached bytes of the file, from rawStart
+  int64_t rawStart = -1;
+  std::vector<char> raw;
+  // sequence [beg, end] of e into out, reading the file in blocks or from
+  // the cached bytes; false if the lines are not as the .fai describes or
+  // the file is short
+  bool readSeq(const Entry &e, int64_t beg, int64_t end, std::string &out,
+               bool cache);
+  FastaReader(const FastaReader &) = delete;
+  FastaReader &operator=(const FastaReader &) = delete;
+};
+
 // The reference of chr up to 5 bases past lastPos (0-based), as
 // FastaParser reads it. loadChrReference opens the FASTA itself, so
 // several threads can call it at once.

@@ -572,12 +572,12 @@ void GNNModule::computeGenomicFeatures() {
 
     for (int t = 0; t < n_threads; ++t) {
         threads.emplace_back([&]() {
-            // Each thread gets its own faidx handle
-            faidx_t* fai = fai_load(params_.reference_path.c_str());
-            if (!fai) return;
+            // Each thread gets its own reader
+            FastaReader reader(params_.reference_path);
+            if (!reader.loaded()) return;
             while (true) {
                 size_t i = cidx.fetch_add(1);
-                if (i >= chroms.size()) { fai_destroy(fai); return; }
+                if (i >= chroms.size()) return;
                 auto& ch = chroms[i];
                 for (auto& v : variants_[ch]) {
                     // The model was trained with these four features set
@@ -586,19 +586,16 @@ void GNNModule::computeGenomicFeatures() {
                     if (v.vtype == GVT_SV) continue;
                     int len = 0;
                     int s1 = std::max(0, v.pos - HP_RADIUS);
-                    char* seq = faidx_fetch_seq(fai, ch.c_str(), s1, v.pos+HP_RADIUS, &len);
-                    if (seq && len > 0) {
-                        std::string ss(seq, len);
+                    std::string ss = reader.fetch(ch, s1, v.pos+HP_RADIUS, len, true);
+                    if (len > 0) {
                         v.seq_entropy = calcSeqEntropy(ss);
                         v.hp_len = (float)calcHPLength(ss, v.pos-s1);
                         v.str_context = calcSTRContext(ss, v.pos-s1);
-                        free(seq);
                     }
                     int s2 = std::max(0, v.pos - GC_RADIUS);
-                    seq = faidx_fetch_seq(fai, ch.c_str(), s2, v.pos+GC_RADIUS, &len);
-                    if (seq && len > 0) {
-                        v.gc_content = calcGCContent(std::string(seq, len));
-                        free(seq);
+                    ss = reader.fetch(ch, s2, v.pos+GC_RADIUS, len, true);
+                    if (len > 0) {
+                        v.gc_content = calcGCContent(ss);
                     }
                 }
             }
