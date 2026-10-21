@@ -64,7 +64,8 @@ int homopolymerLength(int snp_pos, const std::string &ref_string){
     char element = ref_string.at(snp_pos);
     
     int pos = snp_pos-1;
-    while( ref_string.at(pos) == element ){
+    // pos is -1 for a variant at the first base
+    while( pos >= 0 && ref_string.at(pos) == element ){
         pos--;
         homopolymer_length++;
         if(homopolymer_length>=10 || pos < 0 )

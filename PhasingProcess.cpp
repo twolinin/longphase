@@ -122,6 +122,7 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
     }
 
     begin = time(NULL);
+    std::mutex referenceMutex;
     
     // loop all chromosome
     #pragma omp parallel for schedule(dynamic) num_threads(params.numThreads)
@@ -136,22 +137,30 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
             continue;
         }
 
-	    // read this chromosome's reference; it is freed with the chromosome
-        std::string chr_reference = loadChrReference(params.fastaFile, *chrIter, lastSNPpos);
+        // The reference is only read near the variants: mark them, then free
+        // it. One chromosome's reference is held at a time.
+        // (a mutex, not omp critical: waiting threads sleep instead of spinning)
+        bool hasReference;
+        {
+            std::lock_guard<std::mutex> lock(referenceMutex);
+            std::string chr_reference = loadChrReference(params.fastaFile, *chrIter, lastSNPpos);
+            snpFile.markChrVariants(*chrIter, chr_reference);
+            hasReference = !chr_reference.empty();
+        }
         // create a bam parser object and prepare to fetch varint from each vcf file
-	    BamParser *bamParser = new BamParser((*chrIter), params.bamFile, snpFile, svFile, modFile, chr_reference);
+	    BamParser *bamParser = new BamParser((*chrIter), params.bamFile, snpFile, svFile, modFile);
         // use to store variant
         std::vector<ReadVariant> readVariantVec;
         // use to store clip count
         ClipCount clipCount;
         // run fetch variant process
-        bamParser->direct_detect_alleles(lastSNPpos, threadPool, params, readVariantVec, clipCount, chr_reference);
+        bamParser->direct_detect_alleles(lastSNPpos, threadPool, params, readVariantVec, clipCount, hasReference);
         // free memory
         delete bamParser;
         
         // filter variants prone to switch errors in ONT sequencing.
         if(params.isONT){
-            snpFile.filterSNP((*chrIter), readVariantVec, chr_reference);
+            snpFile.filterSNP((*chrIter), readVariantVec);
         }
 
         // bam files are partial file or no read support this chromosome's SNP
@@ -163,7 +172,7 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
         
 
         // create a graph object and prepare to phasing.
-        VairiantGraph *vGraph = new VairiantGraph(chr_reference, params, (*chrIter));
+        VairiantGraph *vGraph = new VairiantGraph(params, (*chrIter));
         // trans read-snp info to edge info
         vGraph->addEdge(readVariantVec, *clip);
         // run main algorithm

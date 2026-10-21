@@ -618,25 +618,27 @@ std::map<int, SnpVariant> SnpParser::getVariants(std::string chrName) {
   return targetVariants;
 }
 
-std::map<int, SnpVariant>
-SnpParser::getVariants_markindel(std::string chrName, const std::string &ref) {
-  std::map<int, SnpVariant> targetVariants;
+void SnpParser::markChrVariants(const std::string &chrName,
+                                const std::string &ref) {
   std::map<std::string, std::map<int, SnpVariant>>::iterator chrIter =
       chrVariant->find(chrName);
-
-  // Mark the indel which lies in the tandem repeat
-  if (chrIter != chrVariant->end()) {
-    for (auto innerIter = chrIter->second.begin();
-         innerIter != chrIter->second.end(); innerIter++) {
-      innerIter->second.is_danger = isDangerIndel(
-          innerIter->first, ref, innerIter->second.Ref.length(),
-          innerIter->second.Alt.length());
-    }
-
-    targetVariants = (*chrIter).second;
+  if (chrIter == chrVariant->end())
+    return;
+  for (auto innerIter = chrIter->second.begin();
+       innerIter != chrIter->second.end(); innerIter++) {
+    // Mark the indel which lies in the tandem repeat
+    innerIter->second.is_danger = isDangerIndel(
+        innerIter->first, ref, innerIter->second.Ref.length(),
+        innerIter->second.Alt.length());
+    innerIter->second.homopolymer =
+        homopolymerLength(innerIter->first, ref);
   }
+}
 
-  return targetVariants;
+std::map<int, SnpVariant> *SnpParser::chrVariants(const std::string &chrName) {
+  std::map<std::string, std::map<int, SnpVariant>>::iterator chrIter =
+      chrVariant->find(chrName);
+  return chrIter == chrVariant->end() ? nullptr : &chrIter->second;
 }
 
 std::vector<std::string> SnpParser::getChrVec() { return chrName; }
@@ -858,8 +860,7 @@ bool SnpParser::findSNP(std::string chr, int position) {
 }
 
 void SnpParser::filterSNP(std::string chr,
-                          std::vector<ReadVariant> &readVariantVec,
-                          std::string &chr_reference) {
+                          std::vector<ReadVariant> &readVariantVec) {
 
   // pos, <allele, <strand, True>
   std::map<int, std::map<int, std::map<int, bool>>> posAlleleStrand;
@@ -900,8 +901,7 @@ void SnpParser::filterSNP(std::string chr,
     for (std::map<int, SnpVariant>::iterator posIter =
              (*chrIter).second.begin();
          posIter != (*chrIter).second.end(); posIter++) {
-      consecutiveAllele[(*posIter).first] =
-          homopolymerLength((*posIter).first, chr_reference);
+      consecutiveAllele[(*posIter).first] = (*posIter).second.homopolymer;
     }
     std::map<int, SnpVariant>::iterator currSNPIter = (*chrIter).second.begin();
     std::map<int, SnpVariant>::iterator nextSNPIter = std::next(currSNPIter, 1);
@@ -1165,34 +1165,29 @@ bool SVParser::findSV(std::string chr, int position) {
 }
 BamParser::BamParser(std::string inputChrName,
                      std::vector<std::string> inputBamFileVec,
-                     SnpParser &snpMap, SVParser &svFile, METHParser &modFile,
-                     const std::string &ref_string)
+                     SnpParser &snpMap, SVParser &svFile, METHParser &modFile)
     : chrName(inputChrName), BamFileVec(inputBamFileVec) {
 
-  currentVariants = new std::map<int, SnpVariant>;
   currentSV = new std::map<int, std::map<int, bool>>;
-  currentMod = new std::map<int, std::map<std::string, ModVariant>>;
 
-  initSnpVariants(snpMap, ref_string);
+  initSnpVariants(snpMap);
   initSvVariants(svFile);
   initModVariants(modFile);
 }
 
 BamParser::~BamParser() {
-  delete currentVariants;
   delete currentSV;
-  delete currentMod;
 }
 
-void BamParser::initSnpVariants(SnpParser &snpMap, const std::string &ref_string) {
+void BamParser::initSnpVariants(SnpParser &snpMap) {
   // use chromosome to find recorded snp map
-  (*currentVariants) = snpMap.getVariants_markindel(chrName, ref_string);
-  // set skip variant start iterator
-  firstVariantIter = currentVariants->begin();
-  if (firstVariantIter == currentVariants->end()) {
+  currentVariants = snpMap.chrVariants(chrName);
+  if (currentVariants == nullptr || currentVariants->empty()) {
     std::cerr << "error chromosome name or empty map: " << chrName << "\n";
     exit(1);
   }
+  // set skip variant start iterator
+  firstVariantIter = currentVariants->begin();
 }
 
 void BamParser::initSvVariants(SVParser &svFile) {
@@ -1210,7 +1205,9 @@ void BamParser::initSvVariants(SVParser &svFile) {
 
 void BamParser::initModVariants(METHParser &modFile) {
   // set current chromosome MOD map
-  (*currentMod) = modFile.getVariants(chrName);
+  currentMod = modFile.chrVariants(chrName);
+  if (currentMod == nullptr)
+    currentMod = &emptyMod;
   firstModIter = currentMod->begin();
 }
 
@@ -1235,7 +1232,7 @@ void BamParser::direct_detect_alleles(int lastSNPPos, htsThreadPool &threadPool,
                                       PhasingParameters params,
                                       std::vector<ReadVariant> &readVariantVec,
                                       ClipCount &clipCount,
-                                      const std::string &ref_string) {
+                                      bool hasReference) {
 
   // record SNP start iter
   std::map<int, SnpVariant>::iterator tmpFirstVariantIter = firstVariantIter;
@@ -1252,7 +1249,7 @@ void BamParser::direct_detect_alleles(int lastSNPPos, htsThreadPool &threadPool,
     firstModIter = tmpFirstModIter;
 
     processBamFile(bamFile, lastSNPPos, threadPool, params, readVariantVec,
-                   clipCount, ref_string);
+                   clipCount, hasReference);
   }
 }
 
@@ -1261,7 +1258,7 @@ void BamParser::processBamFile(const std::string &bamFile, int lastSNPPos,
                                 const PhasingParameters &params,
                                 std::vector<ReadVariant> &readVariantVec,
                                 ClipCount &clipCount,
-                                const std::string &ref_string) {
+                                bool hasReference) {
   // open bam file
   samFile *fp_in = hts_open(bamFile.c_str(), "r");
   // load reference file
@@ -1287,7 +1284,7 @@ void BamParser::processBamFile(const std::string &bamFile, int lastSNPPos,
       continue;
     }
 
-      get_snp(*bamHdr, *aln, readVariantVec, clipCount, ref_string,
+      get_snp(*bamHdr, *aln, readVariantVec, clipCount, hasReference,
             params.isONT, params.svWindow, params.svThreshold);
   }
   hts_idx_destroy(idx);
@@ -1299,7 +1296,6 @@ void BamParser::processBamFile(const std::string &bamFile, int lastSNPPos,
 // Returns true if get_snp() should return immediately (read bounds exceeded).
 bool BamParser::handleDeletionHomopolymerSNP(
     const bam1_t &aln, int ref_pos, int query_pos, int del_len,
-    const std::string &ref_string,
     std::map<int, SnpVariant>::iterator &currentVariantIter,
     ReadVariant &tmpReadResult) {
 
@@ -1312,7 +1308,7 @@ bool BamParser::handleDeletionHomopolymerSNP(
   } else if ((*currentVariantIter).first >= ref_pos &&
              (*currentVariantIter).first < ref_pos + del_len) {
     // check snp in homopolymer
-    if (homopolymerLength((*currentVariantIter).first, ref_string) >= 3) {
+    if ((*currentVariantIter).second.homopolymer >= 3) {
       int refAlleleLen = (*currentVariantIter).second.Ref.length();
       int altAlleleLen = (*currentVariantIter).second.Alt.length();
       int base_q = 0;
@@ -1492,7 +1488,7 @@ void BamParser::handleSVVariant(
 
 void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln,
                         std::vector<ReadVariant> &readVariantVec,
-                        ClipCount &clipCount, const std::string &ref_string,
+                        ClipCount &clipCount, bool hasReference,
                         bool isONT, int svWindow, double svThreshold) {
 
   ReadVariant tmpReadResult;
@@ -1634,9 +1630,9 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln,
     } else if (cigar_op == 2) {
       // If a reference is given, check whether any SNP falls in a homopolymer
       // region spanned by this deletion and handle it specially.
-      if (ref_string != "") {
+      if (hasReference) {
         if (handleDeletionHomopolymerSNP(aln, ref_pos, query_pos, cigar_oplen,
-                                         ref_string, currentVariantIter,
+                                         currentVariantIter,
                                          tmpReadResult))
           return;
       }
@@ -1866,6 +1862,12 @@ void METHParser::writeDataLine(const std::string &input,
     fields[9] = fields[9] + ":.";
   }
   writeFields(resultVcf);
+}
+
+std::map<int, std::map<std::string, ModVariant>> *
+METHParser::chrVariants(const std::string &chrName) {
+  auto chrIter = chrVariant->find(chrName);
+  return chrIter == chrVariant->end() ? nullptr : &chrIter->second;
 }
 
 std::map<int, std::map<std::string, ModVariant>>

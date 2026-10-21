@@ -18,6 +18,9 @@ struct SnpVariant {
   std::string Ref;
   std::string Alt;
   bool is_danger = false;
+  // homopolymerLength() at this position, set with is_danger while the
+  // chromosome's reference is loaded (markChrVariants)
+  int8_t homopolymer = 1;
 };
 
 struct ModVariant {
@@ -139,8 +142,13 @@ public:
 
   std::map<int, SnpVariant> getVariants(std::string chrName);
 
-  std::map<int, SnpVariant> getVariants_markindel(std::string chrName,
-                                                  const std::string &ref);
+  // Set is_danger and homopolymer of chrName's variants from its reference.
+  // These are the only uses of the reference while phasing, so it can be
+  // freed before the reads are scanned.
+  void markChrVariants(const std::string &chrName, const std::string &ref);
+
+  // chrName's variants, or nullptr
+  std::map<int, SnpVariant> *chrVariants(const std::string &chrName);
 
   std::vector<std::string> getChrVec();
 
@@ -150,8 +158,7 @@ public:
 
   bool findSNP(std::string chr, int posistion);
 
-  void filterSNP(std::string chr, std::vector<ReadVariant> &readVariantVec,
-                 std::string &chr_reference);
+  void filterSNP(std::string chr, std::vector<ReadVariant> &readVariantVec);
 };
 
 class SVParser : public BaseVairantParser {
@@ -213,6 +220,10 @@ public:
   std::map<int, std::map<std::string, ModVariant>>
   getVariants(std::string chrName);
 
+  // chrName's modifications, or nullptr
+  std::map<int, std::map<std::string, ModVariant>> *
+  chrVariants(const std::string &chrName);
+
   METHParser(PhasingParameters &params, SnpParser &snpFile, SVParser &svFile);
   ~METHParser();
 
@@ -242,22 +253,22 @@ class BamParser {
 private:
   std::string chrName;
   std::vector<std::string> BamFileVec;
-  // SNP map and iter
+  // SNP map and iter (the SnpParser's map of this chromosome, read in place)
   std::map<int, SnpVariant> *currentVariants;
   std::map<int, SnpVariant>::iterator firstVariantIter;
   // SV map and iter
   std::map<int, std::map<int, bool>> *currentSV;
   std::vector<std::pair<int, int>>::iterator firstSVIter;
   std::map<std::string, std::vector<std::pair<int, int>>> SV_map;
-  // mod map and iter
+  // mod map and iter (the METHParser's map of this chromosome, read in place)
   std::map<int, std::map<std::string, ModVariant>> *currentMod;
+  std::map<int, std::map<std::string, ModVariant>> emptyMod;
   std::map<int, std::map<std::string, ModVariant>>::iterator firstModIter;
-  void initSnpVariants(SnpParser &snpMap, const std::string &ref_string);
+  void initSnpVariants(SnpParser &snpMap);
   void initSvVariants(SVParser &svFile);
   void initModVariants(METHParser &modFile);
   bool handleDeletionHomopolymerSNP(
       const bam1_t &aln, int ref_pos, int query_pos, int del_len,
-      const std::string &ref_string,
       std::map<int, SnpVariant>::iterator &currentVariantIter,
       ReadVariant &tmpReadResult);
   void handleSNPVariant(const bam1_t &aln, int cigar_idx, int cigar_oplen,
@@ -274,26 +285,25 @@ private:
       ReadVariant &tmpReadResult);
   void get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln,
                std::vector<ReadVariant> &readVariantVec, ClipCount &clipCount,
-               const std::string &ref_string, bool isONT, int svWindow,
+               bool hasReference, bool isONT, int svWindow,
                double svThreshold);
   void getClip(int pos, int clipFrontBack, int len, ClipCount &clipCount);
   bool isValidAlignment(const bam1_t &aln, int mappingQuality);
   void processBamFile(const std::string &bamFile, int lastSNPPos,
                       htsThreadPool &threadPool, const PhasingParameters &params,
                       std::vector<ReadVariant> &readVariantVec,
-                      ClipCount &clipCount, const std::string &ref_string);
+                      ClipCount &clipCount, bool hasReference);
 
 public:
   BamParser(std::string chrName, std::vector<std::string> inputBamFileVec,
-            SnpParser &snpMap, SVParser &svFile, METHParser &modFile,
-            const std::string &ref_string);
+            SnpParser &snpMap, SVParser &svFile, METHParser &modFile);
   ~BamParser();
 
   void direct_detect_alleles(int lastSNPPos, htsThreadPool &threadPool,
                              PhasingParameters params,
                              std::vector<ReadVariant> &readVariantVec,
                              ClipCount &clipCount,
-                             const std::string &ref_string);
+                             bool hasReference);
 };
 
 #endif

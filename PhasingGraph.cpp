@@ -499,9 +499,8 @@ int VairiantGraph::variantIndex(int position) const{
     return it - variantPositions.begin();
 }
 
-VairiantGraph::VairiantGraph(std::string &in_ref, PhasingParameters &in_params, std::string &in_chrName){
+VairiantGraph::VairiantGraph(PhasingParameters &in_params, std::string &in_chrName){
     params=&in_params;
-    ref=&in_ref;
     chrName = &in_chrName;
 }
 

@@ -147,7 +147,6 @@ class VairiantGraph{
     private:
         std::string *chrName;
         PhasingParameters *params;
-        std::string *ref;
         std::string dotResult;
         // graph edges for the GNN
         GnnEdgeList gnnEdges;
@@ -227,7 +226,7 @@ class VairiantGraph{
 
     public:
     
-        VairiantGraph(std::string &ref, PhasingParameters &params, std::string &chrName);
+        VairiantGraph(PhasingParameters &params, std::string &chrName);
         ~VairiantGraph();
     
         void addEdge(std::vector<ReadVariant> &in_readVariant, Clip &clip);
