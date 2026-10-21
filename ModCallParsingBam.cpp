@@ -74,7 +74,7 @@ bool MethBamParser::isValidAlignment(const bam1_t *aln) const {
 bool MethBamParser::extractSnpAllele(
     std::map<int, SnpVariant>::iterator &currentVariantIter, int ref_pos,
     int length, int querypos, int cigaridx, int aln_core_n_cigar,
-    const uint32_t *cigar, const bam1_t &aln, ReadVariant *tmpReadResult) {
+    const uint32_t *cigar, const bam1_t &aln, ModReadVariant *tmpReadResult) {
   while (currentVariantIter != currentVariants->end() &&
          currentVariantIter->first < ref_pos + length) {
     int variantPos = currentVariantIter->first;
@@ -143,7 +143,7 @@ bool MethBamParser::extractSnpAllele(
 
 void MethBamParser::classifyMethylationBase(
     int &n, int &pos, hts_base_mod *mods, int querypos, int length,
-    int refpos, const bam1_t &aln, ReadVariant *tmpReadResult,
+    int refpos, const bam1_t &aln, ModReadVariant *tmpReadResult,
     hts_base_mod_state *mod_state) {
   while (true) {
     if (pos > (querypos + length)) {
@@ -196,7 +196,7 @@ void MethBamParser::classifyMethylationBase(
 bool MethBamParser::handleDeletionInHomopolymer(
     std::map<int, SnpVariant>::iterator &currentVariantIter, int ref_pos,
     int length, int querypos, const bam1_t &aln,
-    hts_base_mod_state *mod_state, ReadVariant *tmpReadResult) {
+    hts_base_mod_state *mod_state, ModReadVariant *tmpReadResult) {
   int del_len = length;
   if (ref_pos + del_len + 1 == currentVariantIter->first) {
     return true;
@@ -259,7 +259,7 @@ void MethBamParser::updateDepthBoundary(int refstart, int refpos,
 
 void MethBamParser::detectMeth(std::string chrName, int lastSNPPos,
                                htsThreadPool &threadPool,
-                               std::vector<ReadVariant> &readVariantVec) {
+                               std::vector<ModReadVariant> &readVariantVec) {
   // record SNP start iter
   std::map<int, SnpVariant>::iterator tmpFirstVariantIter = firstVariantIter;
   for (auto bamFile : params->bamFileVec) {
@@ -296,7 +296,7 @@ void MethBamParser::detectMeth(std::string chrName, int lastSNPPos,
 }
 
 void MethBamParser::parse_CIGAR(const bam_hdr_t &bamHdr, const bam1_t &aln,
-                                std::vector<ReadVariant> &readVariantVec) {
+                                std::vector<ModReadVariant> &readVariantVec) {
   // see detail https://github.com/samtools/htslib/blob/develop/sam_mods.c
 
   // hts_base_mod_state can parse MM, ML and MN tags
@@ -305,7 +305,7 @@ void MethBamParser::parse_CIGAR(const bam_hdr_t &bamHdr, const bam1_t &aln,
     hts_base_mod_state_free(mod_state);
     return;
   }
-  ReadVariant *tmpReadResult = new ReadVariant();
+  ModReadVariant *tmpReadResult = new ModReadVariant();
   (*tmpReadResult).read_name = bam_get_qname(&aln);
   (*tmpReadResult).reference_start = aln.core.pos;
   (*tmpReadResult).is_reverse = bam_is_rev(&aln);
@@ -648,10 +648,10 @@ std::set<int> MethBamParser::applyCpGStrandPairGenotype() {
 
 void MethBamParser::filterModReadVariants(
     const std::set<int> &positionPairs,
-    std::vector<ReadVariant> &readVariantVec,
-    std::vector<ReadVariant> &modReadVariantVec) {
+    std::vector<ModReadVariant> &readVariantVec,
+    std::vector<ModReadVariant> &modReadVariantVec) {
   for (auto &read : readVariantVec) {
-    ReadVariant newRead;
+    ModReadVariant newRead;
     newRead.read_name = read.read_name;
     newRead.is_reverse = read.is_reverse;
 
@@ -687,8 +687,8 @@ void MethBamParser::filterModReadVariants(
 }
 
 void MethBamParser::judgeMethGenotype(
-    std::string chrName, std::vector<ReadVariant> &readVariantVec,
-    std::vector<ReadVariant> &modReadVariantVec) {
+    std::string chrName, std::vector<ModReadVariant> &readVariantVec,
+    std::vector<ModReadVariant> &modReadVariantVec) {
   computeSinglePositionGenotype();
   std::set<int> positionPairs = applyCpGStrandPairGenotype();
   filterModReadVariants(positionPairs, readVariantVec, modReadVariantVec);
@@ -771,15 +771,15 @@ MethylationGraph::MethylationGraph(ModCallParameters &in_params) {
 
 MethylationGraph::~MethylationGraph() {}
 
-void MethylationGraph::addEdge(std::vector<ReadVariant> &in_readVariant,
+void MethylationGraph::addEdge(std::vector<ModReadVariant> &in_readVariant,
                                std::string chrName) {
   readVariant = &in_readVariant;
   int readCount = 0;
   int vectorSize = 0;
   // iter all read
-  for (std::vector<ReadVariant>::iterator readIter = in_readVariant.begin();
+  for (std::vector<ModReadVariant>::iterator readIter = in_readVariant.begin();
        readIter != in_readVariant.end(); readIter++) {
-    ReadVariant tmpRead;
+    ModReadVariant tmpRead;
     vectorSize += (*readIter).variantVec.size();
     readCount++;
 

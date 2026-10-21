@@ -12,8 +12,8 @@ static MethBamParser* runBamPipeline(
     ModCallParameters &params,
     htsThreadPool &threadPool,
     MethSnpParser &snpFile,
-    std::vector<ReadVariant> &readVariantVec,
-    std::vector<ReadVariant> &modReadVariantVec)
+    std::vector<ModReadVariant> &readVariantVec,
+    std::vector<ModReadVariant> &modReadVariantVec)
 {
     MethBamParser *methbamparser = new MethBamParser(chrName, params, snpFile, chrSeq);
     methbamparser->detectMeth(chrName, chrLen, threadPool, readVariantVec);
@@ -61,7 +61,7 @@ static MethBamParser* runBamPipeline(
 static void runGraphPipeline(
     const std::string &chrName,
     ModCallParameters &params,
-    std::vector<ReadVariant> &modReadVariantVec,
+    std::vector<ModReadVariant> &modReadVariantVec,
     std::vector<int> &passPosition,
     MethSnpParser &snpFile)
 {
@@ -81,8 +81,8 @@ static void processChromosome(
 {
     std::time_t chrbegin = time(NULL);
 
-    std::vector<ReadVariant> readVariantVec;
-    std::vector<ReadVariant> modReadVariantVec;
+    std::vector<ModReadVariant> readVariantVec;
+    std::vector<ModReadVariant> modReadVariantVec;
     std::vector<int> passPosition;
 
     std::string chrName = chr.name;

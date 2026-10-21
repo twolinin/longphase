@@ -5,6 +5,10 @@ void ReadVariant::sort(){
     std::sort(variantVec.begin(), variantVec.end(), less_than_key());
 }
 
+void ModReadVariant::sort(){
+    std::sort(variantVec.begin(), variantVec.end(), less_than_key());
+}
+
 void mergeAllChrPhasingResult(const ChrPhasingResult& allChrPhasingResults, PhasingResult& mergedPhasingResult) {
     for(const auto& chrPair : allChrPhasingResults){
         const PhasingResult& singlePhasingResult = chrPair.second;

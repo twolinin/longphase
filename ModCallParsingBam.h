@@ -108,27 +108,27 @@ private:
   bool extractSnpAllele(
       std::map<int, SnpVariant>::iterator &currentVariantIter, int ref_pos,
       int length, int querypos, int cigaridx, int aln_core_n_cigar,
-      const uint32_t *cigar, const bam1_t &aln, ReadVariant *tmpReadResult);
+      const uint32_t *cigar, const bam1_t &aln, ModReadVariant *tmpReadResult);
   void classifyMethylationBase(int &n, int &pos, hts_base_mod *mods,
                                int querypos, int length, int refpos,
-                               const bam1_t &aln, ReadVariant *tmpReadResult,
+                               const bam1_t &aln, ModReadVariant *tmpReadResult,
                                hts_base_mod_state *mod_state);
   bool handleDeletionInHomopolymer(
       std::map<int, SnpVariant>::iterator &currentVariantIter, int ref_pos,
       int length, int querypos, const bam1_t &aln,
-      hts_base_mod_state *mod_state, ReadVariant *tmpReadResult);
+      hts_base_mod_state *mod_state, ModReadVariant *tmpReadResult);
   void updateDepthBoundary(int refstart, int refpos, bool is_reverse);
   void computeSinglePositionGenotype();
   std::set<int> applyCpGStrandPairGenotype();
   void filterModReadVariants(const std::set<int> &positionPairs,
-                             std::vector<ReadVariant> &readVariantVec,
-                             std::vector<ReadVariant> &modReadVariantVec);
+                             std::vector<ModReadVariant> &readVariantVec,
+                             std::vector<ModReadVariant> &modReadVariantVec);
   std::string buildInfoStr(const MethPosInfo &info) const;
   std::string formatMethVcfLine(int pos, const MethPosInfo &info,
                                 const std::string &chrSequence,
                                 int chrLen) const;
   void parse_CIGAR(const bam_hdr_t &bamHdr, const bam1_t &aln,
-                   std::vector<ReadVariant> &readVariantVec);
+                   std::vector<ModReadVariant> &readVariantVec);
 
   // record methylation position and probability from methylation tag
   void getmeth(AlignmentMethExtend &align);
@@ -141,7 +141,7 @@ public:
   ~MethBamParser();
   void detectMeth(std::string chrName, int lastSNPPos,
                   htsThreadPool &threadPool,
-                  std::vector<ReadVariant> &readVariantVec);
+                  std::vector<ModReadVariant> &readVariantVec);
   void dumpMethMap(const std::string &chrName, std::ofstream &out) const;
   void dumpReadStartEnd(const std::string &chrName, std::ofstream &out) const;
   void calculateDepth();
@@ -149,8 +149,8 @@ public:
                     std::vector<int> &passPosition,
                     std::ostringstream &modCallResult);
   void judgeMethGenotype(std::string chrName,
-                         std::vector<ReadVariant> &readVariantVec,
-                         std::vector<ReadVariant> &modReadVariantVec);
+                         std::vector<ModReadVariant> &readVariantVec,
+                         std::vector<ModReadVariant> &modReadVariantVec);
   void dumpMethGenoMap(const std::string &chrName, std::ofstream &out) const;
 };
 
@@ -161,7 +161,7 @@ void writeResultVCF(ModCallParameters &params,
 class MethylationGraph {
 private:
   ModCallParameters *params;
-  std::vector<ReadVariant> *readVariant;
+  std::vector<ModReadVariant> *readVariant;
 
   // modifications
   // position, quality
@@ -198,7 +198,7 @@ public:
   MethylationGraph(ModCallParameters &params);
   ~MethylationGraph();
 
-  void addEdge(std::vector<ReadVariant> &in_readVariant, std::string chrName);
+  void addEdge(std::vector<ModReadVariant> &in_readVariant, std::string chrName);
   void connectResults(std::string chrName, std::vector<int> &passPosition,
                       bool hasValidSnpData = true);
   void destroy();

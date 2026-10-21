@@ -88,10 +88,24 @@ struct Variant{
 
 struct ReadVariant{
     // init function
-    ReadVariant(): read_name(""), 
+    ReadVariant(): reference_start(0), read_id(0){}
+            
+    // 40 bytes: phase holds one per alignment with variants
+    std::vector<Variant> variantVec;
+    int reference_start;
+    // the rank of the read name among the chromosome's read names, so that
+    // alignments of one read have the same id and ids sort as the names do
+    uint32_t read_id;
+    bool is_reverse;
+    
+    void sort();
+};
+
+// modcall's read record, which keeps the read name
+struct ModReadVariant{
+    ModReadVariant(): read_name(""), 
             reference_start(0){}
             
-    // 64 bytes: phase holds one per alignment with variants
     std::string read_name;
     std::vector<Variant> variantVec;
     int reference_start;

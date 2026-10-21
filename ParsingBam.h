@@ -321,6 +321,11 @@ private:
   std::map<int, std::map<std::string, ModVariant>> *currentMod;
   std::map<int, std::map<std::string, ModVariant>> emptyMod;
   std::map<int, std::map<std::string, ModVariant>>::iterator firstModIter;
+  // names of the reads kept in readVariantVec, one after another (read_id
+  // indexes nameStart until rankReadNames turns it into the name's rank)
+  std::string readNames;
+  std::vector<size_t> nameStart;
+  void rankReadNames(std::vector<ReadVariant> &readVariantVec);
   void initSnpVariants(SnpParser &snpMap);
   void initSvVariants(SVParser &svFile);
   void initModVariants(METHParser &modFile);

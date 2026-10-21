@@ -11,6 +11,8 @@
 #include <iomanip>   // std::fixed / std::setprecision for INFO/PE|H1|H2
 #include <sstream>
 #include <string.h>
+#include <cstring>
+#include <algorithm>
 
 // vcf parser modify from
 // http://wresch.github.io/2014/11/18/process-vcf-file-with-htslib.html
@@ -1507,6 +1509,35 @@ void BamParser::direct_detect_alleles(int lastSNPPos, htsThreadPool &threadPool,
     processBamFile(bamFile, lastSNPPos, threadPool, params, readVariantVec,
                    clipCount, hasReference);
   }
+  rankReadNames(readVariantVec);
+}
+
+void BamParser::rankReadNames(std::vector<ReadVariant> &readVariantVec) {
+  const size_t n = nameStart.size();
+  nameStart.push_back(readNames.size());
+  // compares as std::string does: bytes, then length
+  auto less = [&](uint32_t a, uint32_t b) {
+    const size_t la = nameStart[a + 1] - nameStart[a];
+    const size_t lb = nameStart[b + 1] - nameStart[b];
+    const int c = std::memcmp(readNames.data() + nameStart[a],
+                              readNames.data() + nameStart[b], std::min(la, lb));
+    return c != 0 ? c < 0 : la < lb;
+  };
+  std::vector<uint32_t> order(n);
+  for (size_t i = 0; i < n; i++)
+    order[i] = i;
+  std::sort(order.begin(), order.end(), less);
+  std::vector<uint32_t> rank(n);
+  uint32_t r = 0;
+  for (size_t i = 0; i < n; i++) {
+    if (i > 0 && less(order[i - 1], order[i]))
+      r++;
+    rank[order[i]] = r;
+  }
+  for (ReadVariant &read : readVariantVec)
+    read.read_id = rank[read.read_id];
+  std::string().swap(readNames);
+  std::vector<size_t>().swap(nameStart);
 }
 
 void BamParser::processBamFile(const std::string &bamFile, int lastSNPPos,
@@ -1748,7 +1779,6 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln,
                         bool isONT, int svWindow, double svThreshold) {
 
   ReadVariant tmpReadResult;
-  tmpReadResult.read_name = bam_get_qname(&aln);
   tmpReadResult.reference_start = aln.core.pos;
   tmpReadResult.is_reverse = bam_is_rev(&aln);
 
@@ -1918,6 +1948,9 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln,
   }
 
   if (tmpReadResult.variantVec.size() > 0) {
+    tmpReadResult.read_id = nameStart.size();
+    nameStart.push_back(readNames.size());
+    readNames += bam_get_qname(&aln);
     readVariantVec.push_back(tmpReadResult);
   }
 }

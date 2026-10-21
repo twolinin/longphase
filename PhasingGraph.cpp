@@ -719,25 +719,41 @@ void VairiantGraph::filterHighMismatchVariants(std::vector<ReadVariant>& in_read
     }
 }
     
+// Indices of the reads grouped by read_id (so in read name order), each read's
+// alignments in their input order.
+static std::vector<uint32_t> alignmentsByRead(const std::vector<ReadVariant> &in_readVariant){
+    uint32_t maxId = 0;
+    for( const ReadVariant &read : in_readVariant ) maxId = std::max(maxId, read.read_id);
+    std::vector<uint32_t> next(in_readVariant.empty() ? 0 : (size_t)maxId + 1, 0);
+    for( const ReadVariant &read : in_readVariant ) next[read.read_id]++;
+    uint32_t sum = 0;
+    for( uint32_t &c : next ){ uint32_t k = c; c = sum; sum += k; }
+    std::vector<uint32_t> order(in_readVariant.size());
+    for( size_t i = 0; i < in_readVariant.size(); i++ ) order[next[in_readVariant[i].read_id]++] = i;
+    return order;
+}
+
 void VairiantGraph::filterOverlappingAlignments(std::vector<ReadVariant> &in_readVariant){
-    // each read will record first and last variant posistion
-    std::map<std::string, std::pair<int,int>> alignRange;
-    // record an iterator for all alignments of a read.
-    std::map<std::string, std::vector<int>> readIdxVec;
     // record need del read index
     std::vector<int> delReadIdx;
+    // the kept alignments of the current read
+    std::vector<int> readIdxVecRef;
 
     // Check for overlaps among different alignments of a read and filter out the shorter overlapping alignments.
-    for (int readIter = 0; readIter < (int)in_readVariant.size(); readIter++) {
+    // One read at a time, its alignments in input order.
+    std::vector<uint32_t> order = alignmentsByRead(in_readVariant);
+    for (size_t g = 0; g < order.size(); ) {
+      const uint32_t readId = in_readVariant[order[g]].read_id;
+      // the first and last variant position of the read; {0, 0} before its
+      // first alignment, so the overlap condition below does not hold then
+      std::pair<int,int> readRange(0, 0);
+      readIdxVecRef.clear();
+      for ( ; g < order.size() && in_readVariant[order[g]].read_id == readId; g++) {
+        int readIter = order[g];
         int is_toDelete = 0;
-        std::string readName = in_readVariant[readIter].read_name;
         int firstVariantPos = in_readVariant[readIter].variantVec.front().position;
         int lastVariantPos = in_readVariant[readIter].variantVec.back().position;
-        auto& readRange = alignRange[readName];
-        auto& readIdxVecRef = readIdxVec[readName];
 
-        // On the first appearance, operator[] initializes readRange to {0, 0},
-        // so the overlap condition below naturally does not hold.
         while (readRange.first <= firstVariantPos && firstVariantPos <= readRange.second) {
             if (lastVariantPos < readRange.second) {
                 is_toDelete = 1;
@@ -785,6 +801,7 @@ void VairiantGraph::filterOverlappingAlignments(std::vector<ReadVariant> &in_rea
         readRange.second = lastVariantPos;
         if (is_toDelete == 0 )
             readIdxVecRef.push_back(readIter);
+      }
     }
 
     // sort read index
@@ -856,18 +873,14 @@ void VairiantGraph::buildVariantGraph(std::vector<ReadVariant> &in_readVariant){
     }
 
     // alignments of one read, in read name order
-    std::vector<size_t> order(in_readVariant.size());
-    for(size_t i = 0; i < order.size(); i++) order[i] = i;
-    std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b){
-        return in_readVariant[a].read_name < in_readVariant[b].read_name;
-    });
+    std::vector<uint32_t> order = alignmentsByRead(in_readVariant);
 
     ReadVariant merged;
     for(size_t g = 0; g < order.size(); ){
-        const std::string &readName = in_readVariant[order[g]].read_name;
+        const uint32_t readId = in_readVariant[order[g]].read_id;
         merged.variantVec.clear();
         size_t e = g;
-        for( ; e < order.size() && in_readVariant[order[e]].read_name == readName; e++){
+        for( ; e < order.size() && in_readVariant[order[e]].read_id == readId; e++){
             for( auto variant : in_readVariant[order[e]].variantVec ){
                 normalizeVariantQuality(variant);
                 merged.variantVec.push_back(variant);
