@@ -15,6 +15,8 @@
 #include <omp.h>
 #include <numeric> 
 #include <set>
+#include <functional>
+#include <htslib/vcf.h>
 
 struct PhasingElement{
     // i.e. 0|1  or   1|0
@@ -122,5 +124,16 @@ int homopolymerLength(int snp_pos, const std::string &ref_string);
 
 template <typename T>
 double calculateMean(const std::vector<T>& data);
+
+// readVcfRecords reads the records of fp as a bcf_read loop does: in file
+// order, up to the first one that does not parse. They are read in batches;
+// each batch is parsed on up to `threads` threads, each with its own copy of
+// the header (parsing adds contigs and tags missing from the header to it),
+// and work(i, hdr, rec) is called there for the i-th record of the batch.
+// Then done(i, hdr, rec) is called for the records in file order. work may
+// only write data of record i.
+typedef std::function<void(size_t, bcf_hdr_t*, bcf1_t*)> VcfRecordFn;
+void readVcfRecords(htsFile* fp, bcf_hdr_t* hdr, int threads, size_t batch,
+                    const VcfRecordFn& work, const VcfRecordFn& done);
 
 #endif

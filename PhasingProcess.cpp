@@ -15,6 +15,8 @@
 #include <htslib/vcf.h>
 #include <htslib/hts.h>
 #include <htslib/faidx.h>
+#include <htslib/hfile.h>
+#include <htslib/kseq.h>
 
 // Feature counts come from the generated weight header, so the code and the
 // model can never disagree: a mismatch is a compile error.
@@ -444,6 +446,13 @@ void GNNModule::setSamplePS(bcf_hdr_t* hdr, bcf1_t* rec, int si, int32_t ps) {
     free(v);
 }
 
+namespace {
+// readVcfRecords: records per batch, and threads; reading and writing the
+// records on one thread limit the gain from more threads
+constexpr size_t kVcfBatch = 1024;
+constexpr int kVcfThreads = 8;
+}
+
 void GNNModule::parseVCF() {
     htsFile* fp = hts_open(params_.vcf_path.c_str(), "r");
     if (!fp) {
@@ -455,22 +464,27 @@ void GNNModule::parseVCF() {
         std::cerr << "[GNN] ERROR: cannot read VCF header of " << params_.vcf_path << "\n";
         std::exit(EXIT_FAILURE);
     }
-    bcf1_t* rec = bcf_init();
     int n = 0;
     const int si = sampleIndex(hdr);
-    while (bcf_read(fp, hdr, rec) == 0) {
+    // the variant of each record of a batch, if it is a phased heterozygote
+    std::vector<VariantInfo> got(kVcfBatch);
+    std::vector<char> keep(kVcfBatch);
+    readVcfRecords(fp, hdr, std::min(params_.threads, kVcfThreads), kVcfBatch,
+        [&](size_t i, bcf_hdr_t* hdr, bcf1_t* rec) {
+        keep[i] = 0;
         bcf_unpack(rec, BCF_UN_ALL);
         int32_t* gt = nullptr; int ng = 0;
-        if (bcf_get_genotypes(hdr, rec, &gt, &ng) < 0) continue;
+        if (bcf_get_genotypes(hdr, rec, &gt, &ng) < 0) return;
         const int ploidy = ng / bcf_hdr_nsamples(hdr);
-        if (ploidy < 2) { free(gt); continue; }
+        if (ploidy < 2) { free(gt); return; }
         int32_t* sg = gt + si * ploidy;
-        if (!bcf_gt_is_phased(sg[1])) { free(gt); continue; }
+        if (!bcf_gt_is_phased(sg[1])) { free(gt); return; }
         int a0 = bcf_gt_allele(sg[0]), a1 = bcf_gt_allele(sg[1]);
         free(gt);
-        if (a0 == a1) continue;
+        if (a0 == a1) return;
 
-        VariantInfo vi;
+        VariantInfo& vi = got[i];
+        vi = VariantInfo();
         vi.chrom = bcf_hdr_id2name(hdr, rec->rid);
         vi.pos = rec->pos; vi.gt_ref = a0; vi.gt_alt = a1;
         vi.is_phased = true; vi.pe = vi.h1 = vi.h2 = 0; vi.ps = -1;
@@ -487,10 +501,14 @@ void GNNModule::parseVCF() {
         free(ps);
         vi.hp_len = vi.gc_content = vi.str_context = vi.seq_entropy = 0;
         vi.vtype = (vi.indel_len == 0) ? GVT_SNV : GVT_INDEL;
-        variants_[vi.chrom].push_back(vi);
+        keep[i] = 1;
+    },
+        [&](size_t i, bcf_hdr_t*, bcf1_t*) {
+        if (!keep[i]) return;
+        variants_[got[i].chrom].push_back(got[i]);
         n++;
-    }
-    bcf_destroy(rec); bcf_hdr_destroy(hdr); hts_close(fp);
+    });
+    bcf_hdr_destroy(hdr); hts_close(fp);
     for (auto& kv : variants_) {
         auto& vl = kv.second;
         std::sort(vl.begin(), vl.end(),
@@ -1097,71 +1115,93 @@ void GNNModule::writeOutputVCF(const std::string& in_path, const std::string& ou
         std::cerr << "[GNN] ERROR: failed to write VCF header to " << out_path << "\n";
         std::exit(EXIT_FAILURE);
     }
-    bcf1_t* rec = bcf_init();
     int nu = 0, nsplit = 0, norphan = 0;
     // --sample applies to the SNP VCF; the SV and 5mC VCFs written by phase
     // carry the phase in their first sample column
     const int si = (in_path == params_.vcf_path) ? sampleIndex(hdr) : 0;
     const int nsmpl = bcf_hdr_nsamples(hdr);
-    while (bcf_read(ifp, hdr, rec) == 0) {
+    // Each record of a batch is changed and formatted as VCF text (as
+    // bcf_write does) on the threads, then written in order.
+    struct Out {
+        kstring_t text = KS_INITIALIZE;
+        bool formatted;
+        char unph, orphan, split;
+    };
+    std::vector<Out> out(kVcfBatch);
+    readVcfRecords(ifp, hdr, std::min(params_.threads, kVcfThreads), kVcfBatch,
+        [&](size_t i, bcf_hdr_t* hdr, bcf1_t* rec) {
+        Out& o = out[i];
+        o.unph = o.orphan = o.split = 0;
         bcf_unpack(rec, BCF_UN_ALL);
         // Only the phased record at a position is the one the GNN saw; other
         // records at the same position are written unchanged (issue #133).
+        bool phased = false;
         {
             int32_t* gt=nullptr; int ng=0;
-            bool phased = false;
             if (bcf_get_genotypes(hdr,rec,&gt,&ng) > 0 && ng / nsmpl >= 2)
                 phased = bcf_gt_is_phased(gt[si * (ng / nsmpl) + 1]);
             free(gt);
-            if (!phased) {
-                if (bcf_write(ofp, hdr, rec) < 0) {
-                    std::cerr << "[GNN] ERROR: failed to write record to " << out_path << "\n";
-                    std::exit(EXIT_FAILURE);
+        }
+        if (phased) {
+            std::string ch = bcf_hdr_id2name(hdr, rec->rid);
+            bool unph = false;
+            auto pch = predictions_.find(ch);
+            if (pch != predictions_.end()) {
+                auto pit = pch->second.find(rec->pos);
+                if (pit != pch->second.end() && shouldUnphase(pit->second)) unph = true;
+            }
+            if (!unph) {
+                auto och = orphans_.find(ch);
+                if (och != orphans_.end() && och->second.count(rec->pos)) {
+                    unph = true;
+                    o.orphan = 1;
                 }
-                continue;
+            }
+            if (unph) {
+                int32_t* gt=nullptr; int ng=0;
+                if (bcf_get_genotypes(hdr,rec,&gt,&ng) > 0 && ng / nsmpl >= 2) {
+                    // An unphased genotype carries no order, and the VCF spec
+                    // writes it ascending, so sort the alleles rather than
+                    // leaving "1/0" behind.
+                    int32_t* sg = gt + si * (ng / nsmpl);
+                    int a0 = bcf_gt_allele(sg[0]), a1 = bcf_gt_allele(sg[1]);
+                    if (a0 > a1) std::swap(a0, a1);
+                    sg[0]=bcf_gt_unphased(a0);
+                    sg[1]=bcf_gt_unphased(a1);
+                    bcf_update_genotypes(hdr,rec,gt,ng);
+                }
+                free(gt);
+                setSamplePS(hdr, rec, si, bcf_int32_missing);
+                o.unph = 1;
+            } else if (params_.split_blocks) {
+                // Variant stays phased but its block was split → new PS
+                auto rch = ps_reassign_.find(ch);
+                if (rch != ps_reassign_.end()) {
+                    auto it = rch->second.find(rec->pos);
+                    if (it != rch->second.end()) {
+                        setSamplePS(hdr, rec, si, it->second);
+                        o.split = 1;
+                    }
+                }
             }
         }
-        std::string ch = bcf_hdr_id2name(hdr, rec->rid);
-        bool unph = false;
-        if (predictions_.count(ch) && predictions_[ch].count(rec->pos)) {
-            auto& pr = predictions_[ch][rec->pos];
-            if (shouldUnphase(pr)) unph = true;
-        }
-        if (!unph && orphans_.count(ch) && orphans_[ch].count(rec->pos)) {
-            unph = true;
-            norphan++;
-        }
-        if (unph) {
-            int32_t* gt=nullptr; int ng=0;
-            if (bcf_get_genotypes(hdr,rec,&gt,&ng) > 0 && ng / nsmpl >= 2) {
-                // An unphased genotype carries no order, and the VCF spec
-                // writes it ascending, so sort the alleles rather than
-                // leaving "1/0" behind.
-                int32_t* sg = gt + si * (ng / nsmpl);
-                int a0 = bcf_gt_allele(sg[0]), a1 = bcf_gt_allele(sg[1]);
-                if (a0 > a1) std::swap(a0, a1);
-                sg[0]=bcf_gt_unphased(a0);
-                sg[1]=bcf_gt_unphased(a1);
-                bcf_update_genotypes(hdr,rec,gt,ng);
-            }
-            free(gt);
-            setSamplePS(hdr, rec, si, bcf_int32_missing);
-            nu++;
-        } else if (params_.split_blocks && ps_reassign_.count(ch)) {
-            // Variant stays phased but its block was split → new PS
-            auto& rmap = ps_reassign_[ch];
-            auto it = rmap.find(rec->pos);
-            if (it != rmap.end()) {
-                setSamplePS(hdr, rec, si, it->second);
-                nsplit++;
-            }
-        }
-        if (bcf_write(ofp, hdr, rec) < 0) {
+        o.text.l = 0;
+        o.formatted = !(hdr->dirty && bcf_hdr_sync(hdr) < 0)
+                      && bcf_hdr_nsamples(hdr) == rec->n_sample
+                      && vcf_format(hdr, rec, &o.text) == 0;
+    },
+        [&](size_t i, bcf_hdr_t* hdr, bcf1_t* rec) {
+        Out& o = out[i];
+        nu += o.unph; norphan += o.orphan; nsplit += o.split;
+        // bcf_write reports why the record could not be formatted
+        if (!o.formatted && bcf_write(ofp, hdr, rec) == 0) return;
+        if (!o.formatted || hwrite(ofp->fp.hfile, o.text.s, o.text.l) != (ssize_t)o.text.l) {
             std::cerr << "[GNN] ERROR: failed to write record to " << out_path << "\n";
             std::exit(EXIT_FAILURE);
         }
-    }
-    bcf_destroy(rec); bcf_hdr_destroy(hdr);
+    });
+    for (auto& o : out) free(o.text.s);
+    bcf_hdr_destroy(hdr);
     hts_close(ifp);
     if (hts_close(ofp) != 0) {
         std::cerr << "[GNN] ERROR: failed to close " << out_path << "\n";
@@ -1186,37 +1226,39 @@ void GNNModule::parseSecondaryVCF(const std::string& path, GnnVariantType vtype)
         std::cerr << "[GNN] ERROR: cannot read VCF header of " << path << "\n";
         std::exit(EXIT_FAILURE);
     }
-    bcf1_t* rec = bcf_init();
     int n = 0;
     // Run of consecutive heterozygous 5mC positions, as phase merges them
-    int run_rid = -1, run_start = -1, run_last = -2;
-    while (bcf_read(fp, hdr, rec) == 0) {
+    // (a run is on one contig: same contig name, same header id)
+    bool run_any = false;
+    std::string run_chrom;
+    int run_start = -1, run_last = -2;
+    // each record of a batch: heterozygous, phased, and its variant
+    std::vector<VariantInfo> got(kVcfBatch);
+    std::vector<char> het(kVcfBatch), phased(kVcfBatch);
+    readVcfRecords(fp, hdr, std::min(params_.threads, kVcfThreads), kVcfBatch,
+        [&](size_t i, bcf_hdr_t* hdr, bcf1_t* rec) {
+        het[i] = 0;
         bcf_unpack(rec, BCF_UN_ALL);
         int32_t* gt = nullptr; int ng = 0;
-        if (bcf_get_genotypes(hdr, rec, &gt, &ng) < 0) continue;
-        if (ng < 2) { free(gt); continue; }
-        bool phased = bcf_gt_is_phased(gt[1]);
+        if (bcf_get_genotypes(hdr, rec, &gt, &ng) < 0) return;
+        if (ng < 2) { free(gt); return; }
+        bool ph = bcf_gt_is_phased(gt[1]);
         int a0 = bcf_gt_allele(gt[0]), a1 = bcf_gt_allele(gt[1]);
         free(gt);
-        if (a0 == a1) continue;
-        int link_pos = -1;
-        if (vtype == GVT_METHYL) {
-            if (rec->rid != run_rid || rec->pos != run_last + 1)
-                run_start = (int)rec->pos;
-            run_rid = rec->rid;
-            run_last = (int)rec->pos;
-            if (run_start != rec->pos) link_pos = run_start;
-        }
-        if (!phased) continue;
-        VariantInfo vi;
+        if (a0 == a1) return;
+        het[i] = 1;
+        phased[i] = ph;
+        VariantInfo& vi = got[i];
+        vi = VariantInfo();
         vi.chrom = bcf_hdr_id2name(hdr, rec->rid);
-        vi.pos = rec->pos; vi.gt_ref = a0; vi.gt_alt = a1;
+        vi.pos = rec->pos;
+        if (!ph) return;
+        vi.gt_ref = a0; vi.gt_alt = a1;
         vi.is_phased = true; vi.pe = vi.h1 = vi.h2 = 0; vi.ps = -1;
         int rl = (int)strlen(rec->d.allele[0]);
         int al = rec->n_allele > 1 ? (int)strlen(rec->d.allele[1]) : rl;
         vi.indel_len = abs(al - rl);
         vi.vtype = vtype;
-        vi.link_pos = link_pos;
         float* fv = nullptr; int nv = 0;
         if (bcf_get_info_float(hdr, rec, "PE", &fv, &nv) > 0) { vi.pe = fv[0]; free(fv); fv=nullptr; nv=0; }
         if (bcf_get_info_float(hdr, rec, "H1", &fv, &nv) > 0) { vi.h1 = fv[0]; free(fv); fv=nullptr; nv=0; }
@@ -1224,10 +1266,25 @@ void GNNModule::parseSecondaryVCF(const std::string& path, GnnVariantType vtype)
         int32_t* ps = nullptr; int np = 0;
         if (bcf_get_format_int32(hdr, rec, "PS", &ps, &np) > 0) { vi.ps = ps[0]; free(ps); }
         vi.hp_len = vi.gc_content = vi.str_context = vi.seq_entropy = 0;
+    },
+        [&](size_t i, bcf_hdr_t*, bcf1_t*) {
+        if (!het[i]) return;
+        VariantInfo& vi = got[i];
+        int link_pos = -1;
+        if (vtype == GVT_METHYL) {
+            if (!run_any || vi.chrom != run_chrom || vi.pos != run_last + 1)
+                run_start = vi.pos;
+            if (!run_any || vi.chrom != run_chrom) run_chrom = vi.chrom;
+            run_any = true;
+            run_last = vi.pos;
+            if (run_start != vi.pos) link_pos = run_start;
+        }
+        if (!phased[i]) return;
+        vi.link_pos = link_pos;
         variants_[vi.chrom].push_back(vi);
         n++;
-    }
-    bcf_destroy(rec); bcf_hdr_destroy(hdr); hts_close(fp);
+    });
+    bcf_hdr_destroy(hdr); hts_close(fp);
     const char* tname[] = {"SNV","INDEL","SV","METHYL"};
     std::cerr << "  " << n << " phased " << tname[vtype] << " variants\n";
 }
