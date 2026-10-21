@@ -2,6 +2,7 @@
 #define PHASINGPROCESS_H
 #include "Util.h"
 
+#include <array>
 #include <map>
 #include <unordered_map>
 #include <unordered_set>
@@ -71,43 +72,89 @@ struct GnnEdge {
     int8_t src_allele, dst_allele;
 };
 
-// The graph edges of one chromosome, grouped by source position. The edges
-// of src[i] are edges[start[i]] up to the start of the next group, in the
-// order they were added.
+// The graph edges of one chromosome, for the GNN. phase connects a variant
+// to a later one by two edges, src.1 -> dst.a and src.2 -> dst.(3-a), with the
+// weights of the two haplotypes at src, which are the same for all of src's
+// edges. So a group keeps the source position and the two weights once, and
+// each link keeps only the target position and whether a is 2:
+// links[k] = dst << 1 | (a == 2). Iterating a group gives the two edges of
+// each link, allele 1 first, in the order they were added.
 struct GnnEdgeList {
-    std::vector<int> src;
-    std::vector<size_t> start;
-    std::vector<GnnEdge> edges;
+    std::vector<int> src;                    // source position of each group
+    std::vector<std::array<float, 2>> weight; // h1, h2 weight of each group
+    std::vector<size_t> start;               // first link of each group
+    std::vector<uint32_t> links;
 
-    struct Range {
-        const GnnEdge *b, *e;
-        const GnnEdge *begin() const { return b; }
-        const GnnEdge *end() const { return e; }
+    struct Iterator {
+        const GnnEdgeList *l;
+        size_t g;              // group of p
+        const uint32_t *p;     // link
+        const uint32_t *gEnd;  // end of group g's links
+        int half;              // 0: the allele 1 edge, 1: the allele 2 edge
+        GnnEdge operator*() const {
+            uint32_t x = *p;
+            int a = (x & 1) ? 2 : 1;
+            return {(int)(x >> 1), l->weight[g][half],
+                    (int8_t)(half + 1), (int8_t)(half ? 3 - a : a)};
+        }
+        Iterator &operator++() {
+            if (half == 0) { half = 1; return *this; }
+            half = 0;
+            if (++p == gEnd && g + 1 < l->start.size()) {
+                ++g;
+                gEnd = l->linkEnd(g);
+            }
+            return *this;
+        }
+        bool operator!=(const Iterator &o) const { return p != o.p || half != o.half; }
     };
+    struct Range {
+        Iterator b, e;
+        Iterator begin() const { return b; }
+        Iterator end() const { return e; }
+    };
+    const uint32_t *linkEnd(size_t g) const {
+        return links.data() + (g + 1 < start.size() ? start[g + 1] : links.size());
+    }
 
-    void add(int srcPos, int srcAllele, int dstPos, int dstAllele, float weight) {
-        if (src.empty() || src.back() != srcPos) {
+    // src.1 -> dst.dstAllele and src.2 -> dst.(3 - dstAllele), weighted w1, w2
+    void add(int srcPos, float w1, float w2, int dstPos, int dstAllele) {
+        if (src.empty() || src.back() != srcPos ||
+            weight.back()[0] != w1 || weight.back()[1] != w2) {
             if (!src.empty() && srcPos < src.back())
                 sorted = false;
             src.push_back(srcPos);
-            start.push_back(edges.size());
+            weight.push_back({w1, w2});
+            start.push_back(links.size());
         }
-        edges.push_back({dstPos, weight, (int8_t)srcAllele, (int8_t)dstAllele});
+        links.push_back((uint32_t)dstPos << 1 | (dstAllele == 2));
     }
     void swap(GnnEdgeList &o) {
         src.swap(o.src);
+        weight.swap(o.weight);
         start.swap(o.start);
-        edges.swap(o.edges);
+        links.swap(o.links);
         std::swap(sorted, o.sorted);
     }
-    // Group the edges by ascending source position. phase adds them in that
-    // order already; otherwise sort them, keeping the order within a source.
+    void shrink_to_fit() {
+        src.shrink_to_fit();
+        weight.shrink_to_fit();
+        start.shrink_to_fit();
+        links.shrink_to_fit();
+    }
+    size_t edgeCount() const { return 2 * links.size(); }
+    // Order the groups by source position. phase adds them in that order
+    // already; otherwise sort them, keeping the order of a source's groups.
     void finish();
     size_t groups() const { return src.size(); }
-    Range group(size_t i) const {
-        size_t e = i + 1 < start.size() ? start[i + 1] : edges.size();
-        return {edges.data() + start[i], edges.data() + e};
+    // groups [g0, g1)
+    Range groupRange(size_t g0, size_t g1) const {
+        const uint32_t *p0 = links.data() + (g0 < start.size() ? start[g0] : links.size());
+        const uint32_t *p1 = links.data() + (g1 < start.size() ? start[g1] : links.size());
+        return {{this, g0, p0, g0 < start.size() ? linkEnd(g0) : p0, 0},
+                {this, g1, p1, p1, 0}};
     }
+    Range group(size_t i) const { return groupRange(i, i + 1); }
     // 1 if srcPos has edges
     size_t count(int srcPos) const {
         auto it = std::lower_bound(src.begin(), src.end(), srcPos);
@@ -115,7 +162,8 @@ struct GnnEdgeList {
     }
     // the edges of srcPos, which must have some
     Range at(int srcPos) const {
-        return group(std::lower_bound(src.begin(), src.end(), srcPos) - src.begin());
+        auto r = std::equal_range(src.begin(), src.end(), srcPos);
+        return groupRange(r.first - src.begin(), r.second - src.begin());
     }
 
 private:

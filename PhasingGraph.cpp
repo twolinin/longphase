@@ -19,14 +19,11 @@ void appendDotEdges(std::string& outDotResult, int currPos, const std::pair<PosA
     outDotResult += '\n';
 }
 
-// Same edges as appendDotEdges, for the GNN. The model was trained on
-// weights read back from the DOT label, so they take the same text round
-// trip (std::to_string, then parsed as float) to give identical values.
-void appendGnnEdges(GnnEdgeList& outEdges, int currPos, const std::pair<PosAllele, PosAllele>& edgePair, float h1Weight, float h2Weight){
-    float w1 = std::strtof(std::to_string(h1Weight).c_str(), NULL);
-    float w2 = std::strtof(std::to_string(h2Weight).c_str(), NULL);
-    outEdges.add(currPos, 1, edgePair.first.first, edgePair.first.second, w1);
-    outEdges.add(currPos, 2, edgePair.second.first, edgePair.second.second, w2);
+// The weight of the GNN edges. The model was trained on weights read back
+// from the DOT label, so they take the same text round trip
+// (std::to_string, then parsed as float) to give identical values.
+float gnnEdgeWeight(float weight){
+    return std::strtof(std::to_string(weight).c_str(), NULL);
 }
 
 void recordVoteForNextPosition(
@@ -375,6 +372,10 @@ void VairiantGraph::scanVariantsAndBuildBlocks(std::vector<int>& hpResult, Phase
             continue;
         }
 
+        // weights of curr's GNN edges, converted once per value
+        float gnnRaw[2] = {0.0f, 0.0f}, gnnWeight[2] = {0.0f, 0.0f};
+        bool gnnWeightSet = false;
+
         for(int i = 0; i < params->connectAdjacent; i++ ){
             VoteResult vote(currPos, 1);
             const std::array<float, 4> &counts = edgeCounts[(size_t)curr * params->connectAdjacent + i];
@@ -399,9 +400,18 @@ void VairiantGraph::scanVariantsAndBuildBlocks(std::vector<int>& hpResult, Phase
                                    hpCountMap2[curr][1]);
                 }
                 if(params->enableGNN){
-                    appendGnnEdges(gnnEdges, currPos, bestEdgePair,
-                                   hpCountMap2[curr][0],
-                                   hpCountMap2[curr][1]);
+                    // the same edges as the DOT file: curr.1 -> next.a and
+                    // curr.2 -> next.(3-a)
+                    const float h1 = hpCountMap2[curr][0], h2 = hpCountMap2[curr][1];
+                    if(!gnnWeightSet || h1 != gnnRaw[0] || h2 != gnnRaw[1]){
+                        gnnRaw[0] = h1;
+                        gnnRaw[1] = h2;
+                        gnnWeight[0] = gnnEdgeWeight(h1);
+                        gnnWeight[1] = gnnEdgeWeight(h2);
+                        gnnWeightSet = true;
+                    }
+                    gnnEdges.add(currPos, gnnWeight[0], gnnWeight[1],
+                                 bestEdgePair.first.first, bestEdgePair.first.second);
                 }
 
                 lastConnectPos = variantPositions[next];
@@ -1050,9 +1060,7 @@ void VairiantGraph::writingDotFile(std::string dotPrefix){
 
 void VairiantGraph::exportGnnEdges(GnnEdgeList &out){
     // drop the spare capacity; these are kept until the GNN runs
-    gnnEdges.src.shrink_to_fit();
-    gnnEdges.start.shrink_to_fit();
-    gnnEdges.edges.shrink_to_fit();
+    gnnEdges.shrink_to_fit();
     out.swap(gnnEdges);
 }
 

@@ -516,7 +516,7 @@ void GNNModule::loadDotEdges() {
         if (pit == pending_edges_.end()) continue;
         em.swap(pit->second);
         em.finish();
-        total += em.edges.size();
+        total += em.edgeCount();
     }
     pending_edges_.clear();
     std::cerr << "  " << total << " graph edges\n";
@@ -531,15 +531,13 @@ void GnnEdgeList::finish() {
     std::stable_sort(order.begin(), order.end(),
                      [&](size_t x, size_t y) { return src[x] < src[y]; });
     GnnEdgeList out;
-    out.edges.reserve(edges.size());
+    out.links.reserve(links.size());
     for (size_t i : order) {
-        const GnnEdge* b = group(i).begin();
-        const GnnEdge* e = group(i).end();
-        if (out.src.empty() || out.src.back() != src[i]) {
-            out.src.push_back(src[i]);
-            out.start.push_back(out.edges.size());
-        }
-        out.edges.insert(out.edges.end(), b, e);
+        size_t b = start[i], e = i + 1 < start.size() ? start[i + 1] : links.size();
+        out.src.push_back(src[i]);
+        out.weight.push_back(weight[i]);
+        out.start.push_back(out.links.size());
+        out.links.insert(out.links.end(), links.begin() + b, links.begin() + e);
     }
     swap(out);
     sorted = true;
@@ -629,7 +627,7 @@ void GNNModule::processChromosome(const std::string& chrom, int tidx,
     std::unordered_map<int, float> dot_h1, dot_h2;
     for (auto* v : wvars) {
         if (!edge_map.count(v->pos)) continue;
-        for (auto& e : edge_map.at(v->pos)) {
+        for (const GnnEdge& e : edge_map.at(v->pos)) {
             if (e.src_allele == 1 && !dot_h1.count(v->pos)) dot_h1[v->pos] = e.weight;
             else if (e.src_allele == 2 && !dot_h2.count(v->pos)) dot_h2[v->pos] = e.weight;
         }
@@ -640,7 +638,7 @@ void GNNModule::processChromosome(const std::string& chrom, int tidx,
     for (auto* v : wvars) {
         if (!edge_map.count(v->pos)) { out_deg[v->pos]=0; out_wstd[v->pos]=0; continue; }
         std::set<int> dsts; std::vector<float> ws;
-        for (auto& e : edge_map.at(v->pos)) { dsts.insert(e.dst_pos); ws.push_back(e.weight); }
+        for (const GnnEdge& e : edge_map.at(v->pos)) { dsts.insert(e.dst_pos); ws.push_back(e.weight); }
         out_deg[v->pos] = std::min((float)dsts.size()/10.0f, 1.0f);
         if (ws.size() > 1) {
             float mu=0; for(float w:ws) mu+=w; mu/=ws.size();
@@ -687,7 +685,7 @@ void GNNModule::processChromosome(const std::string& chrom, int tidx,
     std::unordered_map<int, std::unordered_set<int>> pos_adj;
     for (int pos : wpos_set) {
         if (!edge_map.count(pos)) continue;
-        for (auto& e : edge_map.at(pos)) {
+        for (const GnnEdge& e : edge_map.at(pos)) {
             if (!wpos_set.count(e.dst_pos)) continue;
             if (pos == e.dst_pos) continue;
             pos_adj[pos].insert(e.dst_pos);
@@ -737,7 +735,7 @@ void GNNModule::processChromosome(const std::string& chrom, int tidx,
     auto make_key = [](int pos, int al) -> int64_t { return ((int64_t)pos << 4) | al; };
     for (int pos : wpos_set) {
         if (!edge_map.count(pos)) continue;
-        for (auto& e : edge_map.at(pos)) {
+        for (const GnnEdge& e : edge_map.at(pos)) {
             if (!wpos_set.count(e.dst_pos)) continue;
             out_wsum[make_key(pos, e.src_allele)] += e.weight;
         }
@@ -790,7 +788,7 @@ void GNNModule::processChromosome(const std::string& chrom, int tidx,
 
     for (int pos : wpos_set) {
         if (!edge_map.count(pos)) continue;
-        for (auto& e : edge_map.at(pos)) {
+        for (const GnnEdge& e : edge_map.at(pos)) {
             if (!wpos_set.count(e.dst_pos)) continue;
             auto sit = pa_to_nid.find(make_key(pos, e.src_allele));
             auto dit = pa_to_nid.find(make_key(e.dst_pos, e.dst_allele));
@@ -910,7 +908,7 @@ void GNNModule::computeBlockSplits() {
                 if (unphase_pos.count(src)) continue;
                 auto it_s = pos_to_ps.find(src);
                 if (it_s == pos_to_ps.end()) continue;
-                for (auto& e : elist) {
+                for (const GnnEdge& e : elist) {
                     int dst = e.dst_pos;
                     if (unphase_pos.count(dst)) continue;
                     auto it_d = pos_to_ps.find(dst);
