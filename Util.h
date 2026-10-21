@@ -16,6 +16,9 @@
 #include <numeric> 
 #include <set>
 #include <functional>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
 #include <htslib/vcf.h>
 
 struct PhasingElement{
@@ -121,15 +124,39 @@ int homopolymerLength(int snp_pos, const std::string &ref_string);
 template <typename T>
 double calculateMean(const std::vector<T>& data);
 
+// Threads that run a job, fn(t) for t = 0 .. n-1 (0 on the calling thread),
+// each time run() is called, and sleep in between (OpenMP threads would spin
+// while the caller reads and writes the batches).
+class BatchThreads {
+public:
+    explicit BatchThreads(int n);
+    ~BatchThreads();
+    int size() const { return n_; }
+    void run(const std::function<void(int)>& fn);
+private:
+    int n_;
+    std::vector<std::thread> threads_;
+    std::mutex m_;
+    std::condition_variable cv_, doneCv_;
+    const std::function<void(int)>* job_ = nullptr;
+    uint64_t gen_ = 0;
+    int pending_ = 0;
+    bool stop_ = false;
+};
+
 // readVcfRecords reads the records of fp as a bcf_read loop does: in file
 // order, up to the first one that does not parse. They are read in batches;
 // each batch is parsed on up to `threads` threads, each with its own copy of
 // the header (parsing adds contigs and tags missing from the header to it),
 // and work(i, hdr, rec) is called there for the i-th record of the batch.
 // Then done(i, hdr, rec) is called for the records in file order. work may
-// only write data of record i.
+// only write data of record i. setup(h, original), if given, is called for
+// the header and each copy before any record is parsed (copies are made
+// first, from the header as it is).
 typedef std::function<void(size_t, bcf_hdr_t*, bcf1_t*)> VcfRecordFn;
 void readVcfRecords(htsFile* fp, bcf_hdr_t* hdr, int threads, size_t batch,
-                    const VcfRecordFn& work, const VcfRecordFn& done);
+                    const VcfRecordFn& work, const VcfRecordFn& done,
+                    const std::function<void(bcf_hdr_t*, bool)>& setup =
+                        std::function<void(bcf_hdr_t*, bool)>());
 
 #endif

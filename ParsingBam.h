@@ -12,6 +12,7 @@
 #include <htslib/vcf.h>
 #include <htslib/vcfutils.h>
 #include <functional>
+#include <memory>
 #include <zlib.h>
 
 struct SnpVariant {
@@ -67,9 +68,13 @@ public:
   void dispatchWriteResult(const std::string &inputFile,
                            const std::string &outputFile,
                            PhasingResult &phasingResult);
-  void writeLine(std::string &input, bool &ps_def,
-                 std::ofstream &resultVcf,
-                 PhasingResult &phasingResult);
+  virtual void writeLine(std::string &input, bool &ps_def,
+                         std::ostream &resultVcf,
+                         PhasingResult &phasingResult);
+  // called after the last line
+  virtual void finishWriting(std::ostream &resultVcf,
+                             PhasingResult &phasingResult) {}
+  virtual ~BaseVairantParser() {}
 
 protected:
   PhasingParameters *params;
@@ -82,16 +87,16 @@ protected:
   std::vector<std::string> lineFields;
   std::string lineOut;
   // join fields with tabs and write them as one line
-  void writeFields(std::ofstream &resultVcf);
+  void writeFields(std::ostream &resultVcf);
   // Emit the three ##INFO header lines for PE / H1 / H2 exactly once.
   // Idempotent: repeated calls are no-ops after the first successful call.
-  void writePeInfoHeaders(std::ofstream &resultVcf);
+  void writePeInfoHeaders(std::ostream &resultVcf);
   virtual void writeMetaHeader(const std::string &input, bool &ps_def,
-                               std::ofstream &resultVcf);
+                               std::ostream &resultVcf);
   void writeColumnHeader(const std::string &input, bool &ps_def,
-                         std::ofstream &resultVcf);
+                         std::ostream &resultVcf);
   virtual void writeDataLine(const std::string &input,
-                             std::ofstream &resultVcf,
+                             std::ostream &resultVcf,
                              PhasingResult &phasingResult) = 0;
 
 private:
@@ -117,23 +122,39 @@ private:
   // column of the phased sample (--sample) in a VCF data line
   size_t sampleCol = 9;
 
-  // writeDataLine lookups for the chromosome of the last line
-  std::string writeChr;
-  bool writeChrSet = false;
-  std::map<int, SnpVariant> *writeChrVariants = nullptr;
-  std::map<int, SnpVariant>::iterator writeVariantCursor;
-  const std::set<int> *writeChrFiltered = nullptr;
-  // phased positions of each chromosome, sorted, from the PhasingResult
-  std::map<std::string, std::vector<std::pair<int, const PhasingElement *>>> writePhased;
-  const std::vector<std::pair<int, const PhasingElement *>> *writeChrPhased = nullptr;
-  void selectWriteChr(const std::string &chr, PhasingResult &phasingResult);
+  // What writing a data line looks up for its chromosome: its SNPs, its
+  // filtered indels and its phased positions (sorted, from the PhasingResult)
+  struct WriteChr {
+    const std::map<int, SnpVariant> *variants;
+    const std::set<int> *filtered;
+    std::vector<std::pair<int, const PhasingElement *>> phased;
+  };
+  std::map<std::string, WriteChr> writeChrs;
+  const WriteChr &writeChrLookup(const std::string &chr,
+                                 PhasingResult &phasingResult);
+  // The data lines are formatted in batches on several threads and written
+  // in order; a header line first writes the data lines before it.
+  std::vector<std::string> pendingLines;
+  size_t pendingCount = 0;
+  std::vector<const WriteChr *> pendingChr;
+  std::vector<std::string> pendingOut;
+  std::vector<std::vector<std::string>> threadFields;
+  std::unique_ptr<BatchThreads> writeThreads;
+  void formatDataLine(const std::string &input, const WriteChr &chr,
+                      std::vector<std::string> &fields,
+                      std::string &out) const;
+  void flushDataLines(std::ostream &resultVcf, PhasingResult &phasingResult);
+  void writeLine(std::string &input, bool &ps_def, std::ostream &resultVcf,
+                 PhasingResult &phasingResult) override;
+  void finishWriting(std::ostream &resultVcf,
+                     PhasingResult &phasingResult) override;
 
   // override input parser
   void parserProcess(std::string &input);
   // override output parser
   void writeMetaHeader(const std::string &input, bool &ps_def,
-                       std::ofstream &resultVcf);
-  void writeDataLine(const std::string &input, std::ofstream &resultVcf,
+                       std::ostream &resultVcf);
+  void writeDataLine(const std::string &input, std::ostream &resultVcf,
                      PhasingResult &phasingResult);
 
 public:
@@ -175,8 +196,8 @@ private:
   void parserProcess(std::string &input);
   // override output parser
   void writeMetaHeader(const std::string &input, bool &ps_def,
-                       std::ofstream &resultVcf);
-  void writeDataLine(const std::string &input, std::ofstream &resultVcf,
+                       std::ostream &resultVcf);
+  void writeDataLine(const std::string &input, std::ostream &resultVcf,
                      PhasingResult &phasingResult);
 
 public:
@@ -212,8 +233,8 @@ private:
   void parserProcess(std::string &input);
   // override output parser
   void writeMetaHeader(const std::string &input, bool &ps_def,
-                       std::ofstream &resultVcf);
-  void writeDataLine(const std::string &input, std::ofstream &resultVcf,
+                       std::ostream &resultVcf);
+  void writeDataLine(const std::string &input, std::ostream &resultVcf,
                      PhasingResult &phasingResult);
 
 public:

@@ -1255,7 +1255,7 @@ MethSnpParser::~MethSnpParser() { delete chrVariant; }
 bool MethSnpParser::hasValidSnpData() const { return hasSnpData; }
 
 void MethSnpParser::writeDataLine(const std::string &input,
-                                  std::ofstream &resultVcf,
+                                  std::ostream &resultVcf,
                                   PhasingResult &phasingResult) {
   std::istringstream iss(input);
   std::vector<std::string> fields((std::istream_iterator<std::string>(iss)),

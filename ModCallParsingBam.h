@@ -76,7 +76,7 @@ private:
 
   bool loadSNPVCF();
   void parserProcess(std::string &input);
-  void writeDataLine(const std::string &input, std::ofstream &resultVcf,
+  void writeDataLine(const std::string &input, std::ostream &resultVcf,
                      PhasingResult &phasingResult);
 
 public:

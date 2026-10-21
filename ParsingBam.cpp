@@ -169,6 +169,7 @@ void BaseVairantParser::compressInput(std::string variantFile,
   readGzLines(variantFile, [&](const std::string &line) {
     writeLine(const_cast<std::string &>(line), ps_def, resultVcf, phasingResult);
   });
+  finishWriting(resultVcf, phasingResult);
 }
 
 void BaseVairantParser::unCompressInput(std::string variantFile,
@@ -190,6 +191,7 @@ void BaseVairantParser::unCompressInput(std::string variantFile,
         writeLine(input, ps_def, resultVcf, phasingResult);
       }
     }
+    finishWriting(resultVcf, phasingResult);
   }
 }
 
@@ -203,7 +205,7 @@ void BaseVairantParser::dispatchWriteResult(const std::string &inputFile,
 }
 
 void BaseVairantParser::writeLine(std::string &input, bool &ps_def,
-                                  std::ofstream &resultVcf,
+                                  std::ostream &resultVcf,
                                   PhasingResult &phasingResult) {
   if (input.compare(0, 2, "##") == 0) {
     // Drop PE/H1/H2 declarations carried over from an input that was
@@ -222,7 +224,7 @@ void BaseVairantParser::writeLine(std::string &input, bool &ps_def,
 }
 
 void BaseVairantParser::writeMetaHeader(const std::string &input, bool &ps_def,
-                                        std::ofstream &resultVcf) {
+                                        std::ostream &resultVcf) {
   if (input.substr(0, 16) == "##FORMAT=<ID=PS,")
     ps_def = true;
   resultVcf << input << "\n";
@@ -230,7 +232,7 @@ void BaseVairantParser::writeMetaHeader(const std::string &input, bool &ps_def,
 
 void BaseVairantParser::writeColumnHeader(const std::string &input,
                                           bool &ps_def,
-                                          std::ofstream &resultVcf) {
+                                          std::ostream &resultVcf) {
   if (commandLine == false) {
     if (ps_def == false) {
       resultVcf << "##FORMAT=<ID=PS,Number=1,Type=Integer,Description="
@@ -248,7 +250,7 @@ void BaseVairantParser::writeColumnHeader(const std::string &input,
   resultVcf << input << "\n";
 }
 
-void BaseVairantParser::writePeInfoHeaders(std::ofstream &resultVcf) {
+void BaseVairantParser::writePeInfoHeaders(std::ostream &resultVcf) {
   // Idempotent: writes the three ##INFO lines the first time we're
   // called, then never again for this parser instance. Every parser
   // (SNP, SV, MOD) shares this via inheritance.
@@ -278,9 +280,20 @@ void splitWhitespace(const std::string &line, std::vector<std::string> &fields) 
   }
   fields.resize(n);
 }
+
+// The first field of a line, as splitWhitespace splits it
+std::string firstField(const std::string &line) {
+  size_t b = 0;
+  while (b < line.size() && std::isspace((unsigned char)line[b]))
+    b++;
+  size_t e = b;
+  while (e < line.size() && !std::isspace((unsigned char)line[e]))
+    e++;
+  return line.substr(b, e - b);
+}
 } // namespace
 
-void BaseVairantParser::writeFields(std::ofstream &resultVcf) {
+void BaseVairantParser::writeFields(std::ostream &resultVcf) {
   lineOut.clear();
   for (size_t i = 0; i < lineFields.size(); i++) {
     if (i != 0)
@@ -434,6 +447,10 @@ static void setSamplePs(std::vector<std::string> &fields, size_t sampleCol,
   }
 }
 
+// readVcfRecords for the SNP VCF: records per batch, and threads
+static const size_t kVcfReadBatch = 1024;
+static const int kVcfReadThreads = 8;
+
 static bool isHetGt(const int *gt) {
   return (gt[0] == 2 && gt[1] == 4) || // 0/1
          (gt[0] == 4 && gt[1] == 2) || // 1/0
@@ -508,95 +525,112 @@ SnpParser::SnpParser(PhasingParameters &in_params) {
   // column of this sample in the VCF text, used when writing the result
   sampleCol = 9 + sampleIdx;
   // limit the VCF data to this sample
-  int is_file = bcf_hdr_set_samples(hdr, sampleName.c_str(), 0);
-  if (is_file != 0) {
-    std::cout << "error or a positive integer if the list contains samples not "
-                 "present in the VCF header\n";
-  }
+  auto limitSamples = [&](bcf_hdr_t *h, bool original) {
+    int is_file = bcf_hdr_set_samples(h, sampleName.c_str(), 0);
+    if (original && is_file != 0) {
+      std::cout << "error or a positive integer if the list contains samples not "
+                   "present in the VCF header\n";
+    }
+  };
 
-  // struct for storing each record
-  bcf1_t *rec = bcf_init();
-  int ngt_arr = 0;
-  int ngt = 0;
-  int *gt = NULL;
-
-  // loop vcf line
-  while (bcf_read(inf, hdr, rec) == 0) {
-    // snp
-    if (bcf_is_snp(rec)) {
-      ngt = bcf_get_format_int32(hdr, rec, "GT", &gt, &ngt_arr);
-
-      if (ngt < 0) {
-        std::cerr << "pos " << rec->pos << " missing GT value" << "\n";
-        exit(1);
+  // What a record gives: examineSnpRecord reads one record (on any thread),
+  // useSnpRecord records the variants in file order.
+  struct SnpRecord {
+    bool readGt;     // GT was read: SNP records, and others with --indels
+    int ngt, gt0, gt1;
+    bool snp;
+    std::string chr, ref, alt;
+    int pos;
+    float qual;
+    bool multiAllelic;
+    bool noAlt;
+  };
+  auto examine = [&](bcf_hdr_t *h, bcf1_t *rec, SnpRecord &r) {
+    r.snp = bcf_is_snp(rec);
+    r.readGt = r.snp || params->phaseIndel;
+    if (!r.readGt)
+      return;
+    int *gt = NULL, ngt_arr = 0;
+    r.ngt = bcf_get_format_int32(h, rec, "GT", &gt, &ngt_arr);
+    r.pos = rec->pos;
+    if (r.ngt >= 1) r.gt0 = gt[0];
+    if (r.ngt >= 2) r.gt1 = gt[1];
+    free(gt);
+    if (r.ngt < 0)
+      return;
+    r.chr = bcf_hdr_id2name(h, rec->rid);
+    r.qual = rec->qual;
+    // a record without ALT allele is not used
+    r.noAlt = rec->n_allele < 2;
+    if (r.noAlt)
+      return;
+    r.ref = rec->d.allele[0];
+    r.alt = rec->d.allele[1];
+    // prevent the MAVs calling error which makes the GT=0/1: another ALT
+    // allele follows (the last allele ends with two NULs)
+    r.multiAllelic = rec->d.allele[1][r.alt.size() + 1] != '\0';
+  };
+  // The GT values were read into one buffer, reused from record to record:
+  // with a single GT value, isHetGt read the second one left there.
+  int gtBuf[2] = {0, 0};
+  auto use = [&](const SnpRecord &r) {
+    if (!r.readGt)
+      return;
+    if (r.ngt < 0) {
+      std::cerr << "pos " << r.pos << " missing GT value" << "\n";
+      exit(1);
+    }
+    if (r.ngt >= 1) gtBuf[0] = r.gt0;
+    if (r.ngt >= 2) gtBuf[1] = r.gt1;
+    // just phase hetero SNP
+    if (!isHetGt(gtBuf) || r.noAlt)
+      return;
+    // position is 0-base
+    int variantPos = r.pos;
+    if (!r.snp) {
+      // indel
+      float qual = r.qual;
+      if (std::isnan(qual)) {
+        qual = 0.0;
       }
-
-      // just phase hetero SNP
-      if (isHetGt(gt)) {
-
-        // get chromosome string
-        std::string chr = seqnames[rec->rid];
-        // position is 0-base
-        int variantPos = rec->pos;
-        // get r alleles
-        SnpVariant tmp;
-        tmp.Ref = rec->d.allele[0];
-        tmp.Alt = rec->d.allele[1];
-
-        // prevent the MAVs calling error which makes the GT=0/1
-        if (rec->d.allele[1][2] != '\0') {
-          continue;
+      if (params->indelQuality > 0 && qual < params->indelQuality) {
+        if (removedIndelsLog.is_open()) {
+          removedIndelsLog << r.chr << "\t" << (variantPos + 1) << "\t"
+                           << r.ref << "\t" << r.alt << "\t"
+                           << (std::isnan(r.qual) ? "." : std::to_string(r.qual))
+                           << "\n";
         }
-
-        // record
-        (*chrVariant)[chr][variantPos] = tmp;
+        // Record the position of filtered indels (0-based)
+        filteredIndelPositions[r.chr].insert(variantPos);
+        return;
       }
     }
-    // indel
-    else if (params->phaseIndel) {
-      ngt = bcf_get_format_int32(hdr, rec, "GT", &gt, &ngt_arr);
+    if (r.multiAllelic)
+      return;
+    // record
+    SnpVariant &tmp = (*chrVariant)[r.chr][variantPos];
+    tmp = SnpVariant();
+    tmp.Ref = r.ref;
+    tmp.Alt = r.alt;
+  };
 
-      if (ngt < 0) {
-        std::cerr << "pos " << rec->pos << " missing GT value" << "\n";
-        exit(1);
-      }
-
-      if (isHetGt(gt)) {
-
-        // get chromosome string
-        std::string chr = seqnames[rec->rid];
-        // position is 0-base
-        int variantPos = rec->pos;
-        // get r alleles
-        SnpVariant tmp;
-        tmp.Ref = rec->d.allele[0];
-        tmp.Alt = rec->d.allele[1];
-
-        float qual = rec->qual;
-        if (std::isnan(qual)) {
-          qual = 0.0;
-        }
-        if (params->indelQuality > 0 && qual < params->indelQuality) {
-          if (removedIndelsLog.is_open()) {
-            removedIndelsLog << chr << "\t" << (variantPos + 1) << "\t"
-                             << tmp.Ref << "\t" << tmp.Alt << "\t"
-                             << (std::isnan(rec->qual) ? "." : std::to_string(rec->qual))
-                             << "\n";
-          }
-          // Record the position of filtered indels (0-based)
-          filteredIndelPositions[chr].insert(variantPos);
-          continue;
-        }
-
-        // prevent the MAVs calling error which makes the GT=0/1
-        if (rec->d.allele[1][tmp.Alt.size() + 1] != '\0') {
-          continue;
-        }
-
-        // record
-        (*chrVariant)[chr][variantPos] = tmp;
-      }
+  if (inf->format.format == vcf) {
+    // VCF text: parsed on several threads, used in file order
+    std::vector<SnpRecord> got(kVcfReadBatch);
+    readVcfRecords(inf, hdr, std::min(params->numThreads, kVcfReadThreads),
+                   kVcfReadBatch,
+                   [&](size_t i, bcf_hdr_t *h, bcf1_t *rec) { examine(h, rec, got[i]); },
+                   [&](size_t i, bcf_hdr_t *, bcf1_t *) { use(got[i]); },
+                   limitSamples);
+  } else {
+    limitSamples(hdr, true);
+    bcf1_t *rec = bcf_init();
+    SnpRecord r;
+    while (bcf_read(inf, hdr, rec) == 0) {
+      examine(hdr, rec, r);
+      use(r);
     }
+    bcf_destroy(rec);
   }
 }
 
@@ -659,20 +693,76 @@ int SnpParser::getLastSNP(std::string chrName) {
   return (*lastVariantIter).first;
 }
 
+// VCF data lines per batch, and threads; reading and writing the lines on
+// one thread limit the gain from more threads
+static const size_t kWriteBatch = 1024;
+static const int kWriteThreads = 8;
+
 void SnpParser::writeResult(PhasingResult &phasingResult,
                             const std::string &outPrefix) {
-  writeChrSet = false;
-  writePhased.clear();
+  writeChrs.clear();
+  pendingCount = 0;
+  const int threads = std::max(1, std::min(params->numThreads, kWriteThreads));
+  writeThreads.reset(new BatchThreads(threads));
+  threadFields.assign(threads, std::vector<std::string>());
   dispatchWriteResult(params->snpFile, outPrefix + ".vcf",
                       phasingResult);
-  writePhased.clear();
-  writeChrSet = false;
+  writeThreads.reset();
+  writeChrs.clear();
+  std::vector<std::string>().swap(pendingLines);
+  std::vector<const WriteChr *>().swap(pendingChr);
+  std::vector<std::string>().swap(pendingOut);
+  std::vector<std::vector<std::string>>().swap(threadFields);
+}
+
+void SnpParser::writeLine(std::string &input, bool &ps_def,
+                          std::ostream &resultVcf,
+                          PhasingResult &phasingResult) {
+  // the lines BaseVairantParser::writeLine passes to writeDataLine
+  if (input.compare(0, 2, "##") != 0 && input.compare(0, 6, "#CHROM") != 0 &&
+      input.compare(0, 6, "#chrom") != 0) {
+    if (pendingCount == pendingLines.size())
+      pendingLines.emplace_back();
+    pendingLines[pendingCount++].swap(input);
+    if (pendingCount == kWriteBatch)
+      flushDataLines(resultVcf, phasingResult);
+    return;
+  }
+  flushDataLines(resultVcf, phasingResult);
+  BaseVairantParser::writeLine(input, ps_def, resultVcf, phasingResult);
+}
+
+void SnpParser::finishWriting(std::ostream &resultVcf,
+                              PhasingResult &phasingResult) {
+  flushDataLines(resultVcf, phasingResult);
+}
+
+void SnpParser::flushDataLines(std::ostream &resultVcf,
+                               PhasingResult &phasingResult) {
+  const size_t n = pendingCount;
+  if (n == 0)
+    return;
+  // the chromosome lookups are built here, in order; the threads only read them
+  pendingChr.resize(n);
+  for (size_t i = 0; i < n; i++)
+    pendingChr[i] = &writeChrLookup(firstField(pendingLines[i]), phasingResult);
+  if (pendingOut.size() < n)
+    pendingOut.resize(n);
+  const int threads = writeThreads->size();
+  writeThreads->run([&](int t) {
+    for (size_t i = n * t / threads; i < n * (t + 1) / threads; i++)
+      formatDataLine(pendingLines[i], *pendingChr[i], threadFields[t],
+                     pendingOut[i]);
+  });
+  for (size_t i = 0; i < n; i++)
+    resultVcf.write(pendingOut[i].data(), pendingOut[i].size());
+  pendingCount = 0;
 }
 
 void SnpParser::parserProcess(std::string &input) {}
 
 void SnpParser::writeMetaHeader(const std::string &input, bool &ps_def,
-                               std::ofstream &resultVcf) {
+                               std::ostream &resultVcf) {
   if (input.substr(0, 16) == "##FORMAT=<ID=PS,") {
     ps_def = true;
   }
@@ -694,52 +784,59 @@ void SnpParser::writeMetaHeader(const std::string &input, bool &ps_def,
 
 
 
-// Point the per-chromosome lookups at chr: its SNPs, its filtered indels and
-// its phased positions. The phased positions are the PhasingResult keys
-// chr + "_" + std::to_string(pos), collected and sorted once per chromosome.
-void SnpParser::selectWriteChr(const std::string &chr,
-                               PhasingResult &phasingResult) {
-  writeChr = chr;
-  writeChrSet = true;
-  writeChrVariants = &(*chrVariant)[chr];
-  writeVariantCursor = writeChrVariants->begin();
-  writeChrFiltered = nullptr;
+// The lookups of chr for writing its lines, built once per chromosome. The
+// phased positions are the PhasingResult keys chr + "_" + std::to_string(pos).
+const SnpParser::WriteChr &
+SnpParser::writeChrLookup(const std::string &chr, PhasingResult &phasingResult) {
+  auto cached = writeChrs.find(chr);
+  if (cached != writeChrs.end())
+    return cached->second;
+  static const std::map<int, SnpVariant> noVariants;
+  WriteChr w;
+  auto variantIter = chrVariant->find(chr);
+  w.variants = variantIter != chrVariant->end() ? &variantIter->second : &noVariants;
+  w.filtered = nullptr;
   auto filteredIter = filteredIndelPositions.find(chr);
   if (filteredIter != filteredIndelPositions.end())
-    writeChrFiltered = &filteredIter->second;
+    w.filtered = &filteredIter->second;
 
-  auto cached = writePhased.find(chr);
-  if (cached == writePhased.end()) {
-    std::vector<std::pair<int, const PhasingElement *>> phased;
-    const std::string prefix = chr + "_";
-    for (auto it = phasingResult.lower_bound(prefix);
-         it != phasingResult.end() &&
-         it->first.compare(0, prefix.size(), prefix) == 0;
-         ++it) {
-      // keep only keys whose rest is a position as std::to_string writes it
-      const char *rest = it->first.c_str() + prefix.size();
-      char *stop = nullptr;
-      errno = 0;
-      long pos = strtol(rest, &stop, 10);
-      if (errno != 0 || *stop != '\0' || pos < INT_MIN || pos > INT_MAX ||
-          std::to_string((int)pos) != rest)
-        continue;
-      phased.emplace_back((int)pos, &it->second);
-    }
-    std::sort(phased.begin(), phased.end(),
-              [](const std::pair<int, const PhasingElement *> &a,
-                 const std::pair<int, const PhasingElement *> &b) {
-                return a.first < b.first;
-              });
-    cached = writePhased.emplace(chr, std::move(phased)).first;
+  const std::string prefix = chr + "_";
+  for (auto it = phasingResult.lower_bound(prefix);
+       it != phasingResult.end() &&
+       it->first.compare(0, prefix.size(), prefix) == 0;
+       ++it) {
+    // keep only keys whose rest is a position as std::to_string writes it
+    const char *rest = it->first.c_str() + prefix.size();
+    char *stop = nullptr;
+    errno = 0;
+    long pos = strtol(rest, &stop, 10);
+    if (errno != 0 || *stop != '\0' || pos < INT_MIN || pos > INT_MAX ||
+        std::to_string((int)pos) != rest)
+      continue;
+    w.phased.emplace_back((int)pos, &it->second);
   }
-  writeChrPhased = &cached->second;
+  std::sort(w.phased.begin(), w.phased.end(),
+            [](const std::pair<int, const PhasingElement *> &a,
+               const std::pair<int, const PhasingElement *> &b) {
+              return a.first < b.first;
+            });
+  return writeChrs.emplace(chr, std::move(w)).first->second;
 }
 
 void SnpParser::writeDataLine(const std::string &input,
-                              std::ofstream &resultVcf,
+                              std::ostream &resultVcf,
                               PhasingResult &phasingResult) {
-  std::vector<std::string> &fields = lineFields;
+  formatDataLine(input, writeChrLookup(firstField(input), phasingResult),
+                 lineFields, lineOut);
+  resultVcf.write(lineOut.data(), lineOut.size());
+}
+
+// The output line of a VCF data line, "" when the line has no fields. Only
+// reads the parser, so lines can be formatted on several threads.
+void SnpParser::formatDataLine(const std::string &input, const WriteChr &chr,
+                               std::vector<std::string> &fields,
+                               std::string &out) const {
+  out.clear();
   splitWhitespace(input, fields);
 
   if (fields.size() == 0)
@@ -748,25 +845,23 @@ void SnpParser::writeDataLine(const std::string &input,
   // the phased sample's column (--sample); other sample columns are kept
   const size_t sc = sampleCol;
   if (fields.size() <= sc) {
-    resultVcf << input << "\n";
+    out = input;
+    out += '\n';
     return;
   }
 
   int pos = std::stoi(fields[1]);
   int posIdx = pos - 1;
 
-  if (!writeChrSet || fields[0] != writeChr)
-    selectWriteChr(fields[0], phasingResult);
-
   // the phased element at this position, if any
   const PhasingElement *phased = nullptr;
   {
     auto it = std::lower_bound(
-        writeChrPhased->begin(), writeChrPhased->end(), posIdx,
+        chr.phased.begin(), chr.phased.end(), posIdx,
         [](const std::pair<int, const PhasingElement *> &a, int p) {
           return a.first < p;
         });
-    if (it != writeChrPhased->end() && it->first == posIdx)
+    if (it != chr.phased.end() && it->first == posIdx)
       phased = it->second;
   }
 
@@ -784,27 +879,15 @@ void SnpParser::writeDataLine(const std::string &input,
     }
   }
 
-  // Check if the variant is extracted from this VCF. Lines come sorted, so
-  // a cursor moving forward finds it; otherwise search from the start.
-  std::map<int, SnpVariant>::iterator &cur = writeVariantCursor;
-  if (cur != writeChrVariants->begin() && std::prev(cur)->first >= posIdx) {
-    cur = writeChrVariants->lower_bound(posIdx);
-  } else {
-    int steps = 0;
-    while (cur != writeChrVariants->end() && cur->first < posIdx && steps < 16) {
-      ++cur;
-      steps++;
-    }
-    if (cur != writeChrVariants->end() && cur->first < posIdx)
-      cur = writeChrVariants->lower_bound(posIdx);
-  }
-  bool inVcf = cur != writeChrVariants->end() && cur->first == posIdx;
+  // Check if the variant is extracted from this VCF
+  std::map<int, SnpVariant>::const_iterator cur = chr.variants->lower_bound(posIdx);
+  bool inVcf = cur != chr.variants->end() && cur->first == posIdx;
 
   // Check if this indel was filtered out due to quality
   bool isFilteredIndel = false;
   if (params->phaseIndel && params->indelQuality > 0) {
-    if (writeChrFiltered != nullptr &&
-        writeChrFiltered->find(posIdx) != writeChrFiltered->end()) {
+    if (chr.filtered != nullptr &&
+        chr.filtered->find(posIdx) != chr.filtered->end()) {
       isFilteredIndel = true;
     }
   }
@@ -840,7 +923,12 @@ void SnpParser::writeDataLine(const std::string &input,
     fields[6] = "INDEL_QUAL_FILTERED";
   }
 
-  writeFields(resultVcf);
+  for (size_t i = 0; i < fields.size(); i++) {
+    if (i != 0)
+      out += '\t';
+    out += fields[i];
+  }
+  out += '\n';
 }
 
 bool SnpParser::findSNP(std::string chr, int position) {
@@ -1049,7 +1137,7 @@ void SVParser::writeResult(PhasingResult &phasingResult,
 }
 
 void SVParser::writeMetaHeader(const std::string &input, bool &ps_def,
-                               std::ofstream &resultVcf) {
+                               std::ostream &resultVcf) {
   if (input.substr(0, 16) == "##FORMAT=<ID=PS,") {
     ps_def = true;
   }
@@ -1065,7 +1153,7 @@ void SVParser::writeMetaHeader(const std::string &input, bool &ps_def,
 }
 
 void SVParser::writeDataLine(const std::string &input,
-                               std::ofstream &resultVcf,
+                               std::ostream &resultVcf,
                                PhasingResult &phasingResult) {
   std::vector<std::string> &fields = lineFields;
   splitWhitespace(input, fields);
@@ -1705,7 +1793,7 @@ void METHParser::writeResult(PhasingResult &phasingResult,
 }
 
 void METHParser::writeMetaHeader(const std::string &input, bool &ps_def,
-                                 std::ofstream &resultVcf) {
+                                 std::ostream &resultVcf) {
   if (input.substr(0, 16) == "##FORMAT=<ID=PS,") {
     ps_def = true;
   }
@@ -1777,7 +1865,7 @@ void METHParser::parserProcess(std::string &input) {
 }
 
 void METHParser::writeDataLine(const std::string &input,
-                                   std::ofstream &resultVcf,
+                                   std::ostream &resultVcf,
                                    PhasingResult &phasingResult) {
   std::vector<std::string> &fields = lineFields;
   splitWhitespace(input, fields);

@@ -1,7 +1,4 @@
 #include "Util.h"
-#include <condition_variable>
-#include <mutex>
-#include <thread>
 #include <htslib/kseq.h>
 
 void ReadVariant::sort(){
@@ -103,70 +100,56 @@ double calculateMean(const std::vector<T>& data) {
 template double calculateMean<int>(const std::vector<int>& data);
 template double calculateMean<double>(const std::vector<double>& data);
 
-namespace {
-
-// Threads that run a job, fn(t) for t = 0 .. n-1 (0 on the calling thread),
-// each time run() is called, and sleep in between (OpenMP threads would spin
-// while the batches are read and written).
-class BatchThreads {
-public:
-    explicit BatchThreads(int n) : n_(n) {
-        for (int t = 1; t < n; ++t)
-            threads_.emplace_back([this, t]() {
-                uint64_t seen = 0;
-                while (true) {
-                    const std::function<void(int)>* job;
-                    {
-                        std::unique_lock<std::mutex> lock(m_);
-                        cv_.wait(lock, [&]() { return stop_ || gen_ != seen; });
-                        if (stop_) return;
-                        seen = gen_;
-                        job = job_;
-                    }
-                    (*job)(t);
-                    std::lock_guard<std::mutex> lock(m_);
-                    if (--pending_ == 0) doneCv_.notify_one();
+BatchThreads::BatchThreads(int n) : n_(n) {
+    for (int t = 1; t < n; ++t)
+        threads_.emplace_back([this, t]() {
+            uint64_t seen = 0;
+            while (true) {
+                const std::function<void(int)>* job;
+                {
+                    std::unique_lock<std::mutex> lock(m_);
+                    cv_.wait(lock, [&]() { return stop_ || gen_ != seen; });
+                    if (stop_) return;
+                    seen = gen_;
+                    job = job_;
                 }
-            });
-    }
-    ~BatchThreads() {
-        {
-            std::lock_guard<std::mutex> lock(m_);
-            stop_ = true;
-        }
-        cv_.notify_all();
-        for (auto& th : threads_) th.join();
-    }
-    void run(const std::function<void(int)>& fn) {
-        {
-            std::lock_guard<std::mutex> lock(m_);
-            job_ = &fn;
-            pending_ = n_ - 1;
-            ++gen_;
-        }
-        cv_.notify_all();
-        fn(0);
-        std::unique_lock<std::mutex> lock(m_);
-        doneCv_.wait(lock, [&]() { return pending_ == 0; });
-    }
-private:
-    int n_;
-    std::vector<std::thread> threads_;
-    std::mutex m_;
-    std::condition_variable cv_, doneCv_;
-    const std::function<void(int)>* job_ = nullptr;
-    uint64_t gen_ = 0;
-    int pending_ = 0;
-    bool stop_ = false;
-};
+                (*job)(t);
+                std::lock_guard<std::mutex> lock(m_);
+                if (--pending_ == 0) doneCv_.notify_one();
+            }
+        });
+}
 
+BatchThreads::~BatchThreads() {
+    {
+        std::lock_guard<std::mutex> lock(m_);
+        stop_ = true;
+    }
+    cv_.notify_all();
+    for (auto& th : threads_) th.join();
+}
+
+void BatchThreads::run(const std::function<void(int)>& fn) {
+    {
+        std::lock_guard<std::mutex> lock(m_);
+        job_ = &fn;
+        pending_ = n_ - 1;
+        ++gen_;
+    }
+    cv_.notify_all();
+    fn(0);
+    std::unique_lock<std::mutex> lock(m_);
+    doneCv_.wait(lock, [&]() { return pending_ == 0; });
 }
 
 void readVcfRecords(htsFile* fp, bcf_hdr_t* hdr, int threads, size_t batch,
-                    const VcfRecordFn& work, const VcfRecordFn& done) {
+                    const VcfRecordFn& work, const VcfRecordFn& done,
+                    const std::function<void(bcf_hdr_t*, bool)>& setup) {
     threads = std::max(1, threads);
     std::vector<bcf_hdr_t*> hdrs(threads, hdr);
     for (int t = 1; t < threads; ++t) hdrs[t] = bcf_hdr_dup(hdr);
+    if (setup)
+        for (int t = 0; t < threads; ++t) setup(hdrs[t], t == 0);
     std::vector<kstring_t> lines(batch);
     for (auto& l : lines) l = KS_INITIALIZE;
     std::vector<bcf1_t*> recs(batch);
