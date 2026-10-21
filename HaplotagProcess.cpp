@@ -1,4 +1,5 @@
 #include "HaplotagProcess.h"
+#include <htslib/bgzf.h>
 
 namespace {
 
@@ -22,7 +23,9 @@ VariantInputKind classifyVariantInput(const std::string &variantFile)
 template <typename Callback>
 void readGzLines(const std::string &variantFile, Callback callback)
 {
-    gzFile file = gzopen(variantFile.c_str(), "rb");
+    // htslib's BGZF reader inflates with libdeflate, several times faster than
+    // zlib's gzread; it also reads plain gzip and uncompressed files.
+    BGZF* file = bgzf_open(variantFile.c_str(), "r");
     if(!file){
         std::cerr<< "Fail to open vcf: " << variantFile << "\n";
         return;
@@ -51,11 +54,10 @@ void readGzLines(const std::string &variantFile, Callback callback)
             len = buffer_size - (offset - buffer);
         }
 
-        len = gzread(file, offset, len);
+        len = (int)bgzf_read(file, offset, len);
         if (len == 0) break;    
         if (len <  0){ 
-            int err;
-            fprintf (stderr, "Error: %s.\n", gzerror(file, &err));
+            fprintf (stderr, "Error: failed to read %s.\n", variantFile.c_str());
             exit(EXIT_FAILURE);
         }
 
@@ -69,7 +71,7 @@ void readGzLines(const std::string &variantFile, Callback callback)
         // any trailing data in [eol, end) now is a partial line
         offset = std::copy(cur, end, buffer);
     }
-    gzclose (file);
+    bgzf_close(file);
     free(buffer);
 }
 
