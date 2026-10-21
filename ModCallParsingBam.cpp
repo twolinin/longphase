@@ -277,6 +277,8 @@ void MethBamParser::detectMeth(std::string chrName, int lastSNPPos,
 
     std::string range = chrName + ":1-" + std::to_string(lastSNPPos);
     hts_itr_t *iter = sam_itr_querys(idx, bamHdr, range.c_str());
+    // the iterator keeps its own chunk offsets; the index is not needed while reading
+    hts_idx_destroy(idx);
 
     hts_set_opt(fp_in, HTS_OPT_THREAD_POOL, &threadPool);
 
@@ -288,7 +290,6 @@ void MethBamParser::detectMeth(std::string chrName, int lastSNPPos,
     }
 
     hts_itr_destroy(iter);
-    hts_idx_destroy(idx);
     bam_hdr_destroy(bamHdr);
     bam_destroy1(aln);
     sam_close(fp_in);

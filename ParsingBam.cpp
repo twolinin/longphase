@@ -1563,6 +1563,9 @@ void BamParser::processBamFile(const std::string &bamFile, int lastSNPPos,
 
   std::string range = chrName + ":1-" + std::to_string(lastSNPPos);
   hts_itr_t *iter = sam_itr_querys(idx, bamHdr, range.c_str());
+  // the iterator keeps its own chunk offsets, so the whole-BAM index is not
+  // held while the chromosome is read
+  hts_idx_destroy(idx);
 
   hts_set_opt(fp_in, HTS_OPT_THREAD_POOL, &threadPool);
   int result;
@@ -1574,7 +1577,7 @@ void BamParser::processBamFile(const std::string &bamFile, int lastSNPPos,
       get_snp(*bamHdr, *aln, readVariantVec, clipCount, hasReference,
             params.isONT, params.svWindow, params.svThreshold);
   }
-  hts_idx_destroy(idx);
+  hts_itr_destroy(iter);
   bam_hdr_destroy(bamHdr);
   bam_destroy1(aln);
   sam_close(fp_in);
