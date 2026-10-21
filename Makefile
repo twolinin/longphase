@@ -7,7 +7,7 @@ CPPFLAGS = -std=c++11 -g -Wall -O3 -fopenmp
 LDFLAGS  =
 LIBS     =
 
-OBJ = Haplotag.o ParsingBam.o Util.o HaplotagProcess.o PhasingProcess.o \
+OBJ = Haplotag.o ParsingBam.o Util.o HaplotagProcess.o PhasingProcess.o GNNModel.o \
       Phasing.o PhasingGraph.o ModCall.o ModCallParsingBam.o ModCallProcess.o \
       Compare.o CompareProcess.o main.o
 

@@ -11,6 +11,10 @@
 // Memory is O(N^2 * heads) for the attention scores, which is fine for the
 // windows used here (tens to a couple of hundred nodes) but would need
 // revisiting for whole-chromosome graphs.
+//
+// The implementation below the class is compiled only in GNNModel.cpp
+// (GNN_MODEL_IMPL). In PhasingProcess.cpp, how GCC inlined it into forward()
+// changed with unrelated edits there, and with it the speed of the GNN.
 
 #ifndef GNN_MODEL_H
 #define GNN_MODEL_H
@@ -77,6 +81,8 @@ private:
 
     void load();
 };
+
+#ifdef GNN_MODEL_IMPL
 
 // ── elementwise helpers ─────────────────────────────────────────────────
 
@@ -174,7 +180,7 @@ struct Cursor {
 };
 }  // namespace detail
 
-inline void Model::load() {
+void Model::load() {
     const std::vector<float> blob = detail::decode_embedded_weights();
     if (blob.size() != kParamCount)
         throw std::runtime_error("embedded GNN weights are the wrong size");
@@ -211,9 +217,9 @@ inline void Model::load() {
         throw std::runtime_error("embedded GNN weights not fully consumed");
 }
 
-inline std::vector<float> Model::forward(const std::vector<float>& node_feat,
-                                         const std::vector<float>& adjacency,
-                                         const std::vector<float>& edge_feat,
+std::vector<float> Model::forward(const std::vector<float>& node_feat,
+                                  const std::vector<float>& adjacency,
+                                  const std::vector<float>& edge_feat,
                                          int n) const {
     const size_t nn = (size_t)n * n;
 
@@ -427,6 +433,8 @@ inline std::vector<float> Model::forward(const std::vector<float>& node_feat,
     }
     return logits;
 }
+
+#endif  // GNN_MODEL_IMPL
 
 }  // namespace gnn
 
