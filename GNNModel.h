@@ -84,6 +84,8 @@ private:
 
 #ifdef GNN_MODEL_IMPL
 
+#include "GNNVecMath.h"   // vector expf and erff with the C library's results
+
 // linear() and forward() are also compiled for AVX2 and AVX-512 and the
 // version for the CPU is chosen at run time. Wider vectors only change how
 // many outputs are computed at once: each output still gets the same
@@ -97,11 +99,7 @@ private:
 
 // ── elementwise helpers ─────────────────────────────────────────────────
 
-inline float gelu(float x) {
-    // Exact GELU, matching torch.nn.functional.gelu. The tanh approximation
-    // differs by ~1e-3 and must not be substituted here.
-    return 0.5f * x * (1.0f + std::erf(x * 0.70710678118654752f));
-}
+// GELU: vm::gelu_n (GNNVecMath.h)
 
 inline float leaky_relu(float x) { return x >= 0.0f ? x : kLeaky * x; }
 
@@ -178,21 +176,23 @@ inline void layer_norm(float* x, int n, int dim,
 // Softmax along the second index of a [n, n, heads] score block.
 inline void softmax_dim1(std::vector<float>& s, int n) {
     for (int i = 0; i < n; ++i) {
+        float* row = s.data() + (size_t)i * n * kHeads;
+        float mx[kHeads];
         for (int h = 0; h < kHeads; ++h) {
-            float mx = -3.4e38f;
+            mx[h] = -3.4e38f;
             for (int j = 0; j < n; ++j) {
-                float v = s[((size_t)i * n + j) * kHeads + h];
-                if (v > mx) mx = v;
+                float v = row[(size_t)j * kHeads + h];
+                if (v > mx[h]) mx[h] = v;
             }
+        }
+        // exp(s - mx) for the whole row at once, then each head's sum in order
+        for (size_t t = 0; t < (size_t)n * kHeads; ++t) row[t] -= mx[t % kHeads];
+        vm::exp_n(row, (size_t)n * kHeads);
+        for (int h = 0; h < kHeads; ++h) {
             float sum = 0.0f;
-            for (int j = 0; j < n; ++j) {
-                size_t idx = ((size_t)i * n + j) * kHeads + h;
-                float e = std::exp(s[idx] - mx);
-                s[idx] = e;
-                sum += e;
-            }
+            for (int j = 0; j < n; ++j) sum += row[(size_t)j * kHeads + h];
             const float inv = (sum > 0.0f) ? 1.0f / sum : 0.0f;
-            for (int j = 0; j < n; ++j) s[((size_t)i * n + j) * kHeads + h] *= inv;
+            for (int j = 0; j < n; ++j) row[(size_t)j * kHeads + h] *= inv;
         }
     }
 }
@@ -296,7 +296,7 @@ GNN_CLONES std::vector<float> Model::forward(const std::vector<float>& node_feat
 
     std::vector<float> x((size_t)n * kHidden);
     linear(normed.data(), n, kNodeFeat, proj_w_, proj_b_, x.data());
-    for (float& v : x) v = gelu(v);
+    vm::gelu_n(x.data(), x.size());
 
     // Scratch buffers reused across layers.
     // Row-major edge list: edges holds the flat index i*n+j of every present
@@ -380,17 +380,22 @@ GNN_CLONES std::vector<float> Model::forward(const std::vector<float>& node_feat
                 for (int h = 0; h < kHeads; ++h)
                     escore[(size_t)t * kHeads + h] = s[h];
             }
-            // softmax per head over this row's edges
+            // softmax per head over this row's edges: exp(score - max) for all
+            // heads at once, then each head's sum in order
+            float* es = escore.data() + (size_t)beg * kHeads;
+            const size_t ne = (size_t)(end - beg) * kHeads;
+            float mx[kHeads];
             for (int h = 0; h < kHeads; ++h) {
-                float mx = -3.4e38f;
+                mx[h] = -3.4e38f;
                 for (int t = beg; t < end; ++t)
-                    mx = std::max(mx, escore[(size_t)t * kHeads + h]);
+                    mx[h] = std::max(mx[h], escore[(size_t)t * kHeads + h]);
+            }
+            for (size_t u = 0; u < ne; ++u) es[u] -= mx[u % kHeads];
+            vm::exp_n(es, ne);
+            for (int h = 0; h < kHeads; ++h) {
                 float sum = 0.0f;
-                for (int t = beg; t < end; ++t) {
-                    float e2 = std::exp(escore[(size_t)t * kHeads + h] - mx);
-                    escore[(size_t)t * kHeads + h] = e2;
-                    sum += e2;
-                }
+                for (int t = beg; t < end; ++t)
+                    sum += escore[(size_t)t * kHeads + h];
                 const float inv = (sum > 0.0f) ? 1.0f / sum : 0.0f;
                 const int off = h * kHeadDim;
                 for (int t = beg; t < end; ++t) {
@@ -449,7 +454,7 @@ GNN_CLONES std::vector<float> Model::forward(const std::vector<float>& node_feat
         layer_norm(x.data(), n, kHidden, L.norm1_w, L.norm1_b);
 
         linear(x.data(), n, kHidden, L.ffn0_w, L.ffn0_b, ffn_h.data());
-        for (float& t : ffn_h) t = gelu(t);
+        vm::gelu_n(ffn_h.data(), ffn_h.size());
         linear(ffn_h.data(), n, kHidden * 2, L.ffn3_w, L.ffn3_b, agg.data());
         for (size_t t = 0; t < x.size(); ++t) x[t] += agg[t];
         layer_norm(x.data(), n, kHidden, L.norm2_w, L.norm2_b);
@@ -465,7 +470,7 @@ GNN_CLONES std::vector<float> Model::forward(const std::vector<float>& node_feat
     }
     std::vector<float> h1((size_t)n * kHidden);
     linear(cat.data(), n, kHidden + 2, cls0_w_, cls0_b_, h1.data());
-    for (float& t : h1) t = gelu(t);
+    vm::gelu_n(h1.data(), h1.size());
 
     std::vector<float> logits((size_t)n * kClasses);
     linear(h1.data(), n, kHidden, cls3_w_, cls3_b_, logits.data());
