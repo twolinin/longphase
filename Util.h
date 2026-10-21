@@ -76,12 +76,11 @@ struct Variant{
     allele(allele), 
     type(type){};
     
-    // 12 bytes: reads hold many of these
+    // 8 bytes: reads hold many of these
     int position;
     int16_t quality;     // base quality (0-255), or a negative code for SV / modification / indel
     int8_t allele;
     VariantType type;
-    bool underHomopolymer;
 };
 
 struct ReadVariant{
