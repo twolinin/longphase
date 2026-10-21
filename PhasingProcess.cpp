@@ -1308,10 +1308,11 @@ float GNNModule::calcGCContent(const std::string& s) {
 float GNNModule::calcSTRContext(const std::string& s, int c) {
     if(s.size()<6||c<0||c>=(int)s.size()) return 0;
     int st=std::max(0,c-HP_RADIUS), en=std::min((int)s.size(),c+HP_RADIUS+1);
-    std::string w=s.substr(st,en-st); int best=0;
-    for(int ul=2;ul<=4;++ul) for(int i=0;i+ul<=(int)w.size();++i){
-        std::string u=w.substr(i,ul); if(u.find('N')!=std::string::npos) continue;
-        int cnt=0; for(int j=i;j+ul<=(int)w.size();j+=ul) if(w.substr(j,ul)==u)cnt++;else break;
+    const char* w=s.data()+st; const int wl=en-st; int best=0;
+    // unit w[i, i+ul) without N, repeated back to back from i
+    for(int ul=2;ul<=4;++ul) for(int i=0;i+ul<=wl;++i){
+        if(std::memchr(w+i,'N',ul)) continue;
+        int cnt=0; for(int j=i;j+ul<=wl;j+=ul) if(std::memcmp(w+j,w+i,ul)==0)cnt++;else break;
         if(cnt>=2&&cnt>best)best=cnt;}
     return std::min((float)best/10.0f,1.0f);
 }

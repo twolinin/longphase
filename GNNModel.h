@@ -370,14 +370,15 @@ GNN_CLONES std::vector<float> Model::forward(const std::vector<float>& node_feat
                 const int j = (int)(edges[t] % (size_t)n);
                 const float* xlj = xl.data() + (size_t)j * kHidden;
                 const float* eh  = edge_h.data() + (size_t)t * kHidden;
-                for (int h = 0; h < kHeads; ++h) {
-                    const int off = h * kHeadDim;
-                    float s = 0.0f;
-                    for (int d = 0; d < kHeadDim; ++d)
-                        s += leaky_relu(xri[off + d] + xlj[off + d] + eh[off + d]) *
-                             L.att[off + d];
-                    escore[(size_t)t * kHeads + h] = s;
-                }
+                // the terms, vectorized; then each head's sum over d in order
+                float term[kHidden];
+                for (int d = 0; d < kHidden; ++d)
+                    term[d] = leaky_relu(xri[d] + xlj[d] + eh[d]) * L.att[d];
+                float s[kHeads] = {};
+                for (int d = 0; d < kHeadDim; ++d)
+                    for (int h = 0; h < kHeads; ++h) s[h] += term[h * kHeadDim + d];
+                for (int h = 0; h < kHeads; ++h)
+                    escore[(size_t)t * kHeads + h] = s[h];
             }
             // softmax per head over this row's edges
             for (int h = 0; h < kHeads; ++h) {
