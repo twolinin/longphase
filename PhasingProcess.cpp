@@ -94,16 +94,6 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
     METHParser modFile(params, snpFile, svFile);
 	std::cerr<< difftime(time(NULL), begin) << "s\n";
  
-    // parsing ref fasta 
-    begin = time(NULL);
-    std::cerr<< "reading reference ... ";
-    std::vector<int> last_pos;
-    for(auto chr :snpFile.getChrVec()){
-        last_pos.push_back(snpFile.getLastSNP(chr));
-    }
-    FastaParser fastaParser(params.fastaFile, snpFile.getChrVec(), last_pos, params.numThreads);
-    std::cerr<< difftime(time(NULL), begin) << "s\n";
-
     // get all detected chromosome
     std::vector<std::string> chrName = snpFile.getChrVec();
 
@@ -146,8 +136,8 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
             continue;
         }
 
-	    // fetch chromosome string
-        std::string &chr_reference = fastaParser.chrString.at(*chrIter);
+	    // read this chromosome's reference; it is freed with the chromosome
+        std::string chr_reference = loadChrReference(params.fastaFile, *chrIter, lastSNPpos);
         // create a bam parser object and prepare to fetch varint from each vcf file
 	    BamParser *bamParser = new BamParser((*chrIter), params.bamFile, snpFile, svFile, modFile, chr_reference);
         // use to store variant
@@ -236,7 +226,6 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
 
     if(params.enableGNN){
         // Free the largest phase data before running the GNN.
-        std::map<std::string, std::string>().swap(fastaParser.chrString);
         PhasingResult().swap(mergedPhasingResult);
         ChrPhasingResult().swap(chrPhasingResult);
 

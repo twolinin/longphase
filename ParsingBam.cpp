@@ -41,21 +41,36 @@ FastaParser::FastaParser(std::string fastaFile,
       continue;
     }
 
-    // ref_len is a return value that is length of retrun string
-    int ref_len = 0;
-
-    // read file; faidx_fetch_seq returns a malloc'd buffer owned by us
-    char *seq = faidx_fetch_seq(fai, (*iter).c_str(), 0,
-                                last_pos.at(index) + 5, &ref_len);
-    if (ref_len == 0) {
-      std::cout << "nothing in reference file \n";
-    }
-
     // update map
-    chrString[(*iter)] = seq ? std::string(seq, ref_len) : std::string();
-    free(seq);
+    chrString[(*iter)] = fetchChrReference(fai, *iter, last_pos.at(index));
   }
   fai_destroy(fai);
+}
+
+// The reference of chr up to 5 bases past lastPos (0-based)
+std::string fetchChrReference(faidx_t *fai, const std::string &chr,
+                              int lastPos) {
+  // ref_len is a return value that is length of retrun string
+  int ref_len = 0;
+
+  // read file; faidx_fetch_seq returns a malloc'd buffer owned by us
+  char *seq = faidx_fetch_seq(fai, chr.c_str(), 0, lastPos + 5, &ref_len);
+  if (ref_len == 0) {
+    std::cout << "nothing in reference file \n";
+  }
+
+  std::string ref = seq ? std::string(seq, ref_len) : std::string();
+  free(seq);
+  return ref;
+}
+
+std::string loadChrReference(const std::string &fastaFile,
+                             const std::string &chr, int lastPos) {
+  // a handle of its own, so chromosomes can be read in parallel
+  faidx_t *fai = fai_load(fastaFile.c_str());
+  std::string ref = fetchChrReference(fai, chr, lastPos);
+  fai_destroy(fai);
+  return ref;
 }
 
 FastaParser::~FastaParser() {}

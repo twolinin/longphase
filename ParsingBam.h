@@ -26,6 +26,13 @@ struct ModVariant {
 };
 
 
+// The reference of chr up to 5 bases past lastPos (0-based), as
+// FastaParser reads it. loadChrReference opens the FASTA itself, so
+// several threads can call it at once.
+std::string fetchChrReference(faidx_t *fai, const std::string &chr, int lastPos);
+std::string loadChrReference(const std::string &fastaFile,
+                             const std::string &chr, int lastPos);
+
 class FastaParser {
 private:
   // file name
