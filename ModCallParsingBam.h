@@ -27,8 +27,9 @@ struct MethPosInfo {
   std::string heterstatus;
   int strand; // 0: + , 1: -
   VariantType variantType;
-  std::vector<std::string> modReadVec;
-  std::vector<std::string> nonModReadVec;
+  // reads by their index in MethBamParser's name list
+  std::vector<uint32_t> modReadVec;
+  std::vector<uint32_t> nonModReadVec;
 };
 
 // The ReferenceChromosome struct is used to store information about a reference
@@ -99,6 +100,9 @@ private:
   int refstartpos;
 
   std::map<int, MethPosInfo> *chrMethMap;
+  // names of the reads parsed so far, one after another; read i starts at nameStart[i]
+  std::string readNames;
+  std::vector<size_t> nameStart;
   //<pos, <positive strand cnt, negative strand cnt>>
   std::map<int, std::pair<int, int>> *readStartEndMap;
 

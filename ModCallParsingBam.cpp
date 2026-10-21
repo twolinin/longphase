@@ -173,14 +173,13 @@ void MethBamParser::classifyMethylationBase(
           (*chrMethMap)[methrpos].methreadcnt++;
           (*chrMethMap)[methrpos].variantType = VariantType::MOD;
           (*chrMethMap)[methrpos].strand = (bam_is_rev(&aln) ? 1 : 0);
-          (*chrMethMap)[methrpos].modReadVec.emplace_back(bam_get_qname(&aln));
+          (*chrMethMap)[methrpos].modReadVec.push_back(nameStart.size() - 1);
           tmpReadResult->variantVec.emplace_back(methrpos, 0, 60,
                                                  VariantType::MOD);
         } else if (mods[j].qual <= params->unModThreshold * 255) {
           (*chrMethMap)[methrpos].canonreadcnt++;
           (*chrMethMap)[methrpos].variantType = VariantType::MOD;
-          (*chrMethMap)[methrpos].nonModReadVec.emplace_back(
-              bam_get_qname(&aln));
+          (*chrMethMap)[methrpos].nonModReadVec.push_back(nameStart.size() - 1);
           tmpReadResult->variantVec.emplace_back(methrpos, 1, 60,
                                                  VariantType::MOD);
         } else {
@@ -308,6 +307,9 @@ void MethBamParser::parse_CIGAR(const bam_hdr_t &bamHdr, const bam1_t &aln,
   }
   ModReadVariant *tmpReadResult = new ModReadVariant();
   (*tmpReadResult).read_name = bam_get_qname(&aln);
+  // the current read is the last name in the list
+  nameStart.push_back(readNames.size());
+  readNames += (*tmpReadResult).read_name;
   (*tmpReadResult).reference_start = aln.core.pos;
   (*tmpReadResult).is_reverse = bam_is_rev(&aln);
 
@@ -423,19 +425,25 @@ void MethBamParser::parse_CIGAR(const bam_hdr_t &bamHdr, const bam1_t &aln,
 }
 
 std::string MethBamParser::buildInfoStr(const MethPosInfo &info) const {
+  auto appendName = [this](std::string &s, uint32_t id) {
+    const size_t end = id + 1 < nameStart.size() ? nameStart[id + 1] : readNames.size();
+    s.append(readNames, nameStart[id], end - nameStart[id]);
+  };
   std::string infostr;
   if (info.modReadVec.size() > 0) {
     infostr += "MR=";
-    for (const auto &readName : info.modReadVec) {
-      infostr += readName + ",";
+    for (uint32_t id : info.modReadVec) {
+      appendName(infostr, id);
+      infostr += ",";
     }
     infostr.back() = ';';
   }
 
   if (info.nonModReadVec.size() > 0) {
     infostr += "NR=";
-    for (const auto &readName : info.nonModReadVec) {
-      infostr += readName + ",";
+    for (uint32_t id : info.nonModReadVec) {
+      appendName(infostr, id);
+      infostr += ",";
     }
     infostr.back() = ';';
   }
