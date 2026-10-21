@@ -540,14 +540,15 @@ bool VairiantGraph::isPositionInRange(int position, int start, int end){
 }
 
 //calculate the mismatch rate of the cnv
-void VairiantGraph::calculateCnvMismatchRate(std::vector<ReadVariant>& in_readVariant, Clip &clip){
+void VairiantGraph::calculateCnvMismatchRate(const std::vector<ReadVariant>& in_readVariant, const Clip &clip, ReadCnvMismatch& readMmrate){
     //if the read variant is empty or the cnv is empty, return
     if(in_readVariant.empty() || clip.cnvVec.empty()){
         return;
     }
     size_t cnvIndex = 0;
 
-    for(auto& read : in_readVariant){
+    for(size_t r = 0; r < in_readVariant.size(); r++){
+        const ReadVariant& read = in_readVariant[r];
         //if the read has no variant, continue
         if(read.variantVec.empty()){
             continue;
@@ -571,7 +572,7 @@ void VairiantGraph::calculateCnvMismatchRate(std::vector<ReadVariant>& in_readVa
                 }
                 //if the variant position is in the range of the cnv and the allele is reference, increment the mismatch rate
                 if(isPositionInRange(variant.position, clip.cnvVec[i].first, clip.cnvVec[i].second) && variant.allele == 1){
-                    read.cnv_mmrate_map[clip.cnvVec[i].first]++;
+                    readMmrate[r][clip.cnvVec[i].first]++;
                 }
             }
             i++;
@@ -583,19 +584,23 @@ void VairiantGraph::calculateCnvMismatchRate(std::vector<ReadVariant>& in_readVa
 }
 
 //aggregate the mismatch rate of the cnv
-void VairiantGraph::aggregateCnvReadMismatchRate(const std::vector<ReadVariant>& in_readVariant, const Clip &clip, std::map<int, std::map<int, std::vector<int>>>& cnvReadMmrate) { 
+void VairiantGraph::aggregateCnvReadMismatchRate(const std::vector<ReadVariant>& in_readVariant, const Clip &clip, const ReadCnvMismatch& readMmrate, std::map<int, std::map<int, std::vector<int>>>& cnvReadMmrate) { 
     //if the read variant is empty or the cnv is empty, return
     if(in_readVariant.empty() || clip.cnvVec.empty()){
         return;
     }
 
     size_t cnvIndex = 0;
+    const std::map<int, int> noMmrate;
 
-    for(const auto& read : in_readVariant){
+    for(size_t r = 0; r < in_readVariant.size(); r++){
+        const ReadVariant& read = in_readVariant[r];
         //if the read has no variant, continue
         if(read.variantVec.empty()){
             continue;
         }
+        auto mmIter = readMmrate.find(r);
+        const std::map<int, int>& cnv_mmrate_map = mmIter != readMmrate.end() ? mmIter->second : noMmrate;
 
         int readStart = read.variantVec.front().position;
         int readEnd = read.variantVec.back().position;
@@ -615,8 +620,8 @@ void VairiantGraph::aggregateCnvReadMismatchRate(const std::vector<ReadVariant>&
                     break;
                 }
                 //if the variant position is in the range of the cnv, push the mismatch rate to the vector to the direct position and allele
-                if(isPositionInRange(variant.position, clip.cnvVec[i].first, clip.cnvVec[i].second) && read.cnv_mmrate_map.find(clip.cnvVec[i].first) != read.cnv_mmrate_map.end()){
-                    cnvReadMmrate[variant.position][variant.allele].push_back(read.cnv_mmrate_map.at(clip.cnvVec[i].first));
+                if(isPositionInRange(variant.position, clip.cnvVec[i].first, clip.cnvVec[i].second) && cnv_mmrate_map.find(clip.cnvVec[i].first) != cnv_mmrate_map.end()){
+                    cnvReadMmrate[variant.position][variant.allele].push_back(cnv_mmrate_map.at(clip.cnvVec[i].first));
                 }
             }
             i++;
@@ -799,9 +804,11 @@ void VairiantGraph::filterOverlappingAlignments(std::vector<ReadVariant> &in_rea
 void VairiantGraph::applyCnvFilter(std::vector<ReadVariant> &in_readVariant, Clip &clip){
     CnvStatistics cnvStats;
     //calculate the mismatch rate of the cnv
-    calculateCnvMismatchRate(in_readVariant, clip);
+    ReadCnvMismatch readMmrate;
+    calculateCnvMismatchRate(in_readVariant, clip, readMmrate);
     //aggregate the mismatch rate of the cnv
-    aggregateCnvReadMismatchRate(in_readVariant, clip, cnvStats.cnvReadMmrate);
+    aggregateCnvReadMismatchRate(in_readVariant, clip, readMmrate, cnvStats.cnvReadMmrate);
+    ReadCnvMismatch().swap(readMmrate);
     //calculate the average mismatch rate of the cnv
     calculateAverageMismatchRate(clip, cnvStats.cnvReadMmrate, cnvStats.missRateMap);
     //filter the variants with high mismatch rate

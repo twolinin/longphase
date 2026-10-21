@@ -207,9 +207,12 @@ class VairiantGraph{
             const std::vector<int>& hpResult,
             const PhasedBlocks& phasedBlocks);
 
-        void calculateCnvMismatchRate(std::vector<ReadVariant>& in_readVariant, Clip &clip);
+        // read index -> CNV start -> ALT alleles of the read in that CNV
+        typedef std::unordered_map<size_t, std::map<int, int> > ReadCnvMismatch;
 
-        void aggregateCnvReadMismatchRate(const std::vector<ReadVariant>& in_readVariant, const Clip &clip, std::map<int, std::map<int, std::vector<int>>>& cnvReadMmrate);
+        void calculateCnvMismatchRate(const std::vector<ReadVariant>& in_readVariant, const Clip &clip, ReadCnvMismatch& readMmrate);
+
+        void aggregateCnvReadMismatchRate(const std::vector<ReadVariant>& in_readVariant, const Clip &clip, const ReadCnvMismatch& readMmrate, std::map<int, std::map<int, std::vector<int>>>& cnvReadMmrate);
 
         void calculateAverageMismatchRate(const Clip& clip, const std::map<int, std::map<int, std::vector<int>>>& cnvReadMmrate, std::map<int, double>& missRateMap);
 

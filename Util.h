@@ -87,16 +87,13 @@ struct Variant{
 struct ReadVariant{
     // init function
     ReadVariant(): read_name(""), 
-            mapping_quality(0), 
             reference_start(0){}
             
+    // 64 bytes: phase holds one per alignment with variants
     std::string read_name;
-    int mapping_quality;
+    std::vector<Variant> variantVec;
     int reference_start;
     bool is_reverse;
-    std::map<int, int> cnv_mmrate_map;
-
-    std::vector<Variant> variantVec;
     
     void sort();
 };
