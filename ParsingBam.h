@@ -316,7 +316,8 @@ private:
   // SV map and iter
   std::map<int, std::map<int, bool>> *currentSV;
   std::vector<std::pair<int, int>>::iterator firstSVIter;
-  std::map<std::string, std::vector<std::pair<int, int>>> SV_map;
+  // the chromosome's SVs: (start, length)
+  std::vector<std::pair<int, int>> svList;
   // mod map and iter (the METHParser's map of this chromosome, read in place)
   std::map<int, std::map<std::string, ModVariant>> *currentMod;
   std::map<int, std::map<std::string, ModVariant>> emptyMod;

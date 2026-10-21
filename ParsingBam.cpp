@@ -1455,10 +1455,10 @@ void BamParser::initSvVariants(SVParser &svFile) {
     int start = chrPair.first;
     for (const auto &endPair : chrPair.second) {
       int svlen = endPair.first;
-      SV_map[chrName].emplace_back(start, svlen);
+      svList.emplace_back(start, svlen);
     }
   }
-  firstSVIter = SV_map[chrName].begin();
+  firstSVIter = svList.begin();
 }
 
 void BamParser::initModVariants(METHParser &modFile) {
@@ -1766,7 +1766,7 @@ void BamParser::handleSVVariant(
   tmpReadResult.variantVec.push_back(
       Variant(svPos, allele, -1, VariantType::SV));
   currentSVIter++;
-  if (currentSVIter != SV_map[chrName].end()) {
+  if (currentSVIter != svList.end()) {
     svPos = (*currentSVIter).first - 1;
   } else {
     svPos = INT_MAX;
@@ -1794,7 +1794,7 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln,
     firstVariantIter++;
 
   // Skip structure variants that are to the left of this read
-  while (firstSVIter != SV_map[chrName].end() && (*firstSVIter).first < ref_pos)
+  while (firstSVIter != svList.end() && (*firstSVIter).first < ref_pos)
     firstSVIter++;
 
   // Skip modify that are to the left of this read
@@ -1830,7 +1830,7 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln,
     int modPos = (currentModIter != currentMod->end()) ? (*currentModIter).first
                                                        : INT_MAX;
     int svPos =
-        (currentSVIter != SV_map[chrName].end()) ? (*currentSVIter).first - 1
+        (currentSVIter != svList.end()) ? (*currentSVIter).first - 1
                                                  : INT_MAX;
     int variantPos = (currentVariantIter != currentVariants->end())
                          ? (*currentVariantIter).first
@@ -1854,7 +1854,7 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln,
     // Determine if any variant is included in the current CIGAR operator
     while ((currentModIter != currentMod->end() &&
             modPos < ref_pos + cigar_oplen) ||
-           (currentSVIter != SV_map[chrName].end() &&
+           (currentSVIter != svList.end() &&
             svPos < ref_pos + cigar_oplen) ||
            (currentVariantIter != currentVariants->end() &&
             variantPos < ref_pos + cigar_oplen)) {
@@ -1862,7 +1862,7 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln,
       // modification's position is minimal (or equal, MOD takes priority)
       if ((currentVariantIter == currentVariants->end() ||
            modPos <= variantPos) &&
-          (currentSVIter == SV_map[chrName].end() || modPos <= svPos) &&
+          (currentSVIter == svList.end() || modPos <= svPos) &&
           currentModIter != currentMod->end()) {
 
         handleModVariant(aln, variantPos, currentModIter, modPos, tmpReadResult);
@@ -1871,7 +1871,7 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln,
       else if ((currentVariantIter == currentVariants->end() ||
                 svPos <= variantPos) &&
                (currentModIter == currentMod->end() || svPos < modPos) &&
-               currentSVIter != SV_map[chrName].end()) {
+               currentSVIter != svList.end()) {
         // If this read not contain SV, it means this read is the same as
         // reference genome. default this read the same as ref
 
@@ -1879,7 +1879,7 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln,
       }
 
       // SNP's position is minimal
-      else if ((currentSVIter == SV_map[chrName].end() || variantPos < svPos) &&
+      else if ((currentSVIter == svList.end() || variantPos < svPos) &&
                (currentModIter == currentMod->end() || variantPos < modPos) &&
                currentVariantIter != currentVariants->end()) {
 
