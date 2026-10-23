@@ -82,6 +82,9 @@ struct VariantInfo {
     int   indel_len;      // |len(alt) - len(ref)|
     float hp_len, gc_content, str_context, seq_entropy;
     GnnVariantType vtype = GVT_SNV;
+    // a large deletion whose votes all agree on its phase: GNN correction
+    // does not unphase it (issue #126)
+    bool  keep_phase = false;
     // 5mC only: phase merges a run of consecutive 5mC positions (the two
     // strands of a CpG) into one graph node at the first position of the
     // run. Position of that node when it is another site, otherwise -1.
