@@ -91,6 +91,9 @@ static const struct option longopts[] = {
     { "snpConfidence",        required_argument,  NULL, 'n' },
     { "readConfidence",       required_argument,  NULL, 'm' },
     { "overlapThreshold",     required_argument,  NULL, 'L' },
+    { "sv-window",            required_argument,  NULL, 'w' },
+    { "sv-threshold",         required_argument,  NULL, 'h' },
+    // earlier names, still accepted
     { "svWindow",             required_argument,  NULL, 'w' },
     { "svThreshold",          required_argument,  NULL, 'h' },
     { "disableGNN",           no_argument,        NULL, DISABLE_GNN },
@@ -183,10 +186,12 @@ void PhasingOptions(int argc, char** argv)
         case GNN_WINDOW: arg >> opt::gnnWindow; break;
         case GNN_RESPECT_BRIDGE: opt::gnnRespectBridge=true; break;
         case GNN_NO_SPLIT_BLOCKS: opt::gnnSplitBlocks=false; break;
+        case VERSION: break;
         
         case OPT_HELP:
             std::cout << CORRECT_USAGE_MESSAGE;
             exit(EXIT_SUCCESS);
+        default: die = true; break;
         }
     }
     
@@ -225,6 +230,23 @@ void PhasingOptions(int argc, char** argv)
         die = true;
     }
     
+    if( !opt::bamFile.empty() )
+    {
+        for (const std::string &bamFile : opt::bamFile)
+        {
+            std::ifstream openFile( bamFile.c_str() );
+            if( !openFile.is_open() )
+            {
+                std::cerr<< "File " << bamFile << " not exist.\n\n";
+                die = true;
+            }
+        }
+    }
+    else{
+        std::cerr << SUBPROGRAM ": missing bam file.\n";
+        die = true;
+    }
+
     if( opt::fastaFile != "")
     {
         std::ifstream openFile( opt::fastaFile.c_str() );
@@ -263,7 +285,7 @@ void PhasingOptions(int argc, char** argv)
     if ( opt::mappingQuality < 0 ){
         std::cerr << SUBPROGRAM " invalid mappingQuality. value: " 
                   << opt::mappingQuality 
-                  << "\n please check -m, --mappingQuality=Num\n";
+                  << "\n please check -q, --mappingQuality=Num\n";
         die = true;
     }
     
@@ -277,7 +299,7 @@ void PhasingOptions(int argc, char** argv)
     if ( opt::baseQuality < 0 ){
         std::cerr << SUBPROGRAM " invalid baseQuality. value: "
                   << opt::baseQuality
-                  << "\n please check -m, --mappingQuality=[0~90]\n";
+                  << "\n please check -p, --baseQuality=[0~90]\n";
         die = true;
     }
 
@@ -285,20 +307,6 @@ void PhasingOptions(int argc, char** argv)
         std::cerr << SUBPROGRAM " invalid edgeWeight. value: "
                   << opt::edgeWeight
                   << "\n please check -e, --edgeWeight=[0~1]\n";
-        die = true;
-    }
-
-    if ( opt::baseQuality < 0 ){
-        std::cerr << SUBPROGRAM " invalid baseQuality. value: "
-                  << opt::baseQuality
-                  << "\n please check -m, --mappingQuality=[0~90]\n";
-        die = true;
-    }
-
-    if ( opt::edgeWeight < 0 ){
-        std::cerr << SUBPROGRAM " invalid edgeWeight. value: "
-                  << opt::edgeWeight
-                  << "\n please check -m, --edgeWeight=[0~1]\n";
         die = true;
     }
 

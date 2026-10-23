@@ -282,12 +282,12 @@ phasing arguments:
       -m, --modThreshold=[0~1]      value extracted from MM tag and ML tag.
                                     above the threshold means modification occurred. default: 0.8
       -u, --unModThreshold=[0~1]    value extracted from MM tag and ML tag.
-                                    above the threshold means no modification occurred. default: 0.2
+                                    below the threshold means no modification occurred. default: 0.2
       -e, --heterRatio=[0~1]        modified and unmodified scales.
-                                    a higher threshold means that the two quantities need to be closer. default: 0.7
+                                    a higher threshold means that the two quantities need to be closer. default: 0.6
       -i, --noiseRatio=[0~1]        not being judged as modified and unmodified is noise.
                                     higher threshold means lower noise needs. default: 0.2
-      -a, --connectAdjacent=Num     connect adjacent N METHs. default:6
+      -a, --connectAdjacent=Num     connect adjacent N METHs. default:20
       -c, --connectConfidence=[0~1] determine the confidence of phasing two ASMs.
                                     higher threshold requires greater consistency in the reads. default: 0.9
 ```
