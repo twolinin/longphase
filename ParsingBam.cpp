@@ -1,6 +1,8 @@
 #include "ParsingBam.h"
 
+#include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <cmath>
 #include <iomanip>   // std::fixed / std::setprecision for INFO/PE|H1|H2
 #include <sstream>
@@ -798,6 +800,24 @@ void SnpParser::filterSNP(std::string chr,
   }
 }
 
+// value of an INFO key, matching the whole key between ';'
+static bool getInfoValue(const std::string &info, const std::string &key,
+                         std::string &value) {
+  size_t start = 0;
+  while (start < info.size()) {
+    size_t end = info.find(';', start);
+    if (end == std::string::npos)
+      end = info.size();
+    if (end - start > key.size() && info.compare(start, key.size(), key) == 0 &&
+        info[start + key.size()] == '=') {
+      value = info.substr(start + key.size() + 1, end - start - key.size() - 1);
+      return true;
+    }
+    start = end + 1;
+  }
+  return false;
+}
+
 // SV
 SVParser::SVParser(PhasingParameters &in_params, SnpParser &in_snpFile) {
   params = &in_params;
@@ -812,6 +832,9 @@ SVParser::SVParser(PhasingParameters &in_params, SnpParser &in_snpFile) {
     // .vcf
     unCompressParser(params->svFile);
   }
+
+  for (auto &chrRecords : chrDeletionRecords)
+    std::sort(chrRecords.second.begin(), chrRecords.second.end());
 
   // erase SV pos if this pos appear two or more times
   for (std::map<std::string, std::map<int, bool>>::iterator chrIter =
@@ -868,6 +891,22 @@ void SVParser::parserProcess(std::string &input) {
     filter = true;
   }
 
+  // every deletion record, whatever its genotype and whether phase uses it,
+  // so that a read's split junction is given to the nearest of them
+  // (issue #126)
+  std::string recordSvlen;
+  if (getInfoValue(fields[7], "SVLEN", recordSvlen)) {
+    char *svlenEnd;
+    long long recordLength = std::strtoll(recordSvlen.c_str(), &svlenEnd, 10);
+    std::string recordType;
+    bool recordIsDeletion = getInfoValue(fields[7], "SVTYPE", recordType)
+                                ? recordType == "DEL"
+                                : recordLength < 0;
+    if (svlenEnd != recordSvlen.c_str() && recordIsDeletion &&
+        recordLength != 0 && recordLength > -INT_MAX && recordLength < INT_MAX)
+      chrDeletionRecords[chr].emplace_back(start, (int)std::llabs(recordLength));
+  }
+
   if (filter) {
     return;
   }
@@ -880,6 +919,23 @@ void SVParser::parserProcess(std::string &input) {
     size_t semiPos = info.find(';', svlenPos);
     int svlen = std::stoi(info.substr(svlenPos, semiPos - svlenPos));
   (*chrVariant)[chr][start][svlen] = true;
+
+    // SV type and the reads the SV caller found supporting the SV (issue #126)
+    SVReadSupport &support = chrSVSupport[chr][start];
+    std::string svtype;
+    if (getInfoValue(info, "SVTYPE", svtype))
+      support.isDeletion = (svtype == "DEL");
+    else
+      support.isDeletion = (svlen < 0);
+    std::string rnames;
+    if (getInfoValue(info, "RNAMES", rnames)) {
+      std::istringstream rnamesStream(rnames);
+      std::string readName;
+      while (std::getline(rnamesStream, readName, ','))
+        if (!readName.empty() && readName != ".")
+          support.readNames.insert(readName);
+      support.hasReadNames = !support.readNames.empty();
+    }
   }
 }
 
@@ -892,6 +948,24 @@ std::map<int, std::map<int, bool>> SVParser::getVariants(std::string chrName) {
     targetVariants = (*chrIter).second;
 
   return targetVariants;
+}
+
+const std::map<int, SVReadSupport> *
+SVParser::getReadSupport(const std::string &chrName) const {
+  std::map<std::string, std::map<int, SVReadSupport>>::const_iterator chrIter =
+      chrSVSupport.find(chrName);
+  if (chrIter == chrSVSupport.end())
+    return nullptr;
+  return &(*chrIter).second;
+}
+
+const std::vector<std::pair<int, int>> *
+SVParser::getDeletionRecords(const std::string &chrName) const {
+  std::map<std::string, std::vector<std::pair<int, int>>>::const_iterator
+      chrIter = chrDeletionRecords.find(chrName);
+  if (chrIter == chrDeletionRecords.end())
+    return nullptr;
+  return &(*chrIter).second;
 }
 
 void SVParser::writeResult(PhasingResult &phasingResult,
@@ -1065,6 +1139,8 @@ void BamParser::initSvVariants(SVParser &svFile) {
     }
   }
   firstSVIter = SV_map[chrName].begin();
+  currentSVSupport = svFile.getReadSupport(chrName);
+  currentDeletionRecords = svFile.getDeletionRecords(chrName);
 }
 
 void BamParser::initModVariants(METHParser &modFile) {
@@ -1147,7 +1223,8 @@ void BamParser::processBamFile(const std::string &bamFile, int lastSNPPos,
     }
 
       get_snp(*bamHdr, *aln, readVariantVec, clipCount, ref_string,
-            params.isONT, params.svWindow, params.svThreshold);
+            params.isONT, params.svWindow, params.svThreshold,
+            params.mappingQuality);
   }
   hts_idx_destroy(idx);
   bam_hdr_destroy(bamHdr);
@@ -1304,8 +1381,323 @@ void BamParser::handleModVariant(
   }
 }
 
+// SV evidence from split alignments (issue #126): minimap2 reports a large
+// deletion as a primary and a supplementary alignment (SA tag) rather than as a
+// CIGAR D, so the alignment that reaches the SV ends, clipped, at its breakpoint.
+// Breakpoint tolerance (bp) of the split-alignment junction; the aligner may
+// extend an alignment over microhomology, which is added on top of it.
+static const int SV_JUNCTION_TOLERANCE = 50;
+// largest query overlap of two segments of a split read accepted at a junction
+static const int SV_MAX_QUERY_OVERLAP = 1000;
+// An alignment shows the reference at an SV if it is aligned at least this
+// many bp on both sides of the SV position; such alignments are judged by the
+// CIGAR alone, as before.
+static const int SV_REF_FLANK = 100;
+// a clip longer than this marks a break in the alignment (as in getClip)
+static const int SV_MIN_BREAK_CLIP = 5;
+// a split junction whose breakpoints both lie within this distance of the
+// SV's may be the same deletion called at a slightly different place, and an
+// alignment clipped within this distance (or |SVLEN|) past the SV may be the
+// upstream part of a carrier whose alignment ran on over a repeat
+static const int SV_MAX_JUNCTION_SHIFT = 1000;
+// For a record without RNAMES, a split junction of the same size whose
+// breakpoints both lie within this distance of the SV's is taken as this
+// deletion with imprecise breakpoints, unless another deletion record of that
+// size lies within this distance more of the junction (pairs of deletions too
+// close to tell apart).
+static const int SV_NEAR_JUNCTION = 150;
+
+// Aligned part of an alignment: reference span [refStart, refEnd), the S/H
+// clip at each end, and the query offset just past the last aligned base
+// (in the orientation of the alignment).
+struct SVAlignedSpan {
+  int refStart = 0;
+  int refEnd = 0;
+  int leadClip = 0;
+  int trailClip = 0;
+  int queryEnd = 0;
+};
+
+static SVAlignedSpan getAlignedSpan(const bam1_t &aln) {
+  const uint32_t *cigar = bam_get_cigar(&aln);
+  int n = aln.core.n_cigar;
+  SVAlignedSpan span;
+  span.refStart = static_cast<int>(aln.core.pos);
+  span.refEnd = static_cast<int>(bam_endpos(&aln));
+  int first = 0;
+  while (first < n && (bam_cigar_op(cigar[first]) == BAM_CSOFT_CLIP ||
+                       bam_cigar_op(cigar[first]) == BAM_CHARD_CLIP))
+    span.leadClip += bam_cigar_oplen(cigar[first++]);
+  int last = n - 1;
+  while (last >= first && (bam_cigar_op(cigar[last]) == BAM_CSOFT_CLIP ||
+                           bam_cigar_op(cigar[last]) == BAM_CHARD_CLIP))
+    span.trailClip += bam_cigar_oplen(cigar[last--]);
+  span.queryEnd = span.leadClip;
+  for (int i = first; i <= last; i++) {
+    // M, I, =, X consume the query
+    if (bam_cigar_type(bam_cigar_op(cigar[i])) & 1)
+      span.queryEnd += bam_cigar_oplen(cigar[i]);
+  }
+  return span;
+}
+
+// One SA segment of the read: 0-based reference start and the query interval
+// it aligns (in the orientation of the alignment).
+struct SVSplitSegment {
+  int refStart = 0;
+  int queryStart = 0;
+  int queryEnd = 0;
+};
+
+// SA segments on the same contig and strand as the alignment, with mapping
+// quality >= mappingQuality, that align a later part of the read.
+static std::vector<SVSplitSegment>
+getDownstreamSegments(const bam1_t &aln, const SVAlignedSpan &span,
+                      const std::string &chrName, int mappingQuality) {
+  std::vector<SVSplitSegment> segments;
+  uint8_t *saData = bam_aux_get(&aln, "SA");
+  if (saData == NULL)
+    return segments;
+  const char *sa = bam_aux2Z(saData);
+  if (sa == NULL)
+    return segments;
+  char strand = bam_is_rev(&aln) ? '-' : '+';
+  // SA:Z:(rname,pos,strand,CIGAR,mapQ,NM;)+
+  std::istringstream saStream(sa);
+  std::string entry;
+  while (std::getline(saStream, entry, ';')) {
+    std::vector<std::string> fields;
+    std::istringstream entryStream(entry);
+    std::string field;
+    while (std::getline(entryStream, field, ','))
+      fields.push_back(field);
+    if (fields.size() < 6 || fields[0] != chrName || fields[2].size() != 1 ||
+        fields[2][0] != strand)
+      continue;
+    char *mapqEnd;
+    long mapq = std::strtol(fields[4].c_str(), &mapqEnd, 10);
+    if (mapqEnd == fields[4].c_str() || *mapqEnd != '\0' ||
+        mapq < mappingQuality)
+      continue;
+    char *posEnd;
+    long saPos = std::strtol(fields[1].c_str(), &posEnd, 10);
+    if (posEnd == fields[1].c_str() || *posEnd != '\0' || saPos < 1 ||
+        saPos > INT_MAX)
+      continue;
+    SVSplitSegment segment;
+    segment.refStart = (int)saPos - 1;
+    long long queryStart = 0;
+    long long queryEnd = 0;
+    bool leading = true;
+    bool valid = !fields[3].empty();
+    const char *op = fields[3].c_str();
+    while (valid && *op) {
+      char *opEnd;
+      long len = std::strtol(op, &opEnd, 10);
+      // a BAM CIGAR operation is at most 2^28 - 1 long
+      if (opEnd == op || *opEnd == '\0' || len < 0 || len >= (1L << 28)) {
+        valid = false;
+        break;
+      }
+      char type = *opEnd;
+      if (type == 'S' || type == 'H') {
+        if (leading)
+          queryStart += len;
+      } else {
+        if (leading)
+          queryEnd = queryStart;
+        leading = false;
+        if (type == 'M' || type == 'I' || type == '=' || type == 'X')
+          queryEnd += len;
+      }
+      op = opEnd + 1;
+    }
+    if (!valid || leading || queryEnd > INT_MAX)
+      continue;
+    segment.queryStart = static_cast<int>(queryStart);
+    segment.queryEnd = static_cast<int>(queryEnd);
+    if (segment.queryEnd > span.queryEnd)
+      segments.push_back(segment);
+  }
+  return segments;
+}
+
+// Deleting ref[a, a + length) or ref[b, b + length) leaves the same sequence
+// when the bases between the two starts repeat length bases later, i.e. the
+// two are one deletion placed at different points of a repeat.
+static bool sameDeletion(const std::string &ref, int a, int b, int length) {
+  if (a > b)
+    std::swap(a, b);
+  if (a < 0 || length <= 0 || (size_t)b + (size_t)length > ref.size())
+    return false;
+  for (int i = a; i < b; i++) {
+    if (std::toupper((unsigned char)ref[i]) !=
+        std::toupper((unsigned char)ref[i + length]))
+      return false;
+  }
+  return true;
+}
+
+// Distance from a record position to the left breakpoint of a split junction,
+// which lies anywhere in [junctionStart, junctionEnd] when the two segments of
+// the read share sequence (microhomology or a repeat).
+static long long junctionDistance(long long position, long long junctionStart,
+                                  long long junctionEnd) {
+  if (position < junctionStart)
+    return junctionStart - position;
+  if (position > junctionEnd)
+    return position - junctionEnd;
+  return 0;
+}
+
+// Another deletion record of the SV VCF (deletionRecords: position, |SVLEN|;
+// phased by phase or not), of the same size as a read's split junction, lies
+// closer to the junction than distance: the read carries that deletion rather
+// than a shifted copy of the SV being evaluated.
+static bool otherDeletionFitsJunction(
+    const std::vector<std::pair<int, int>> *deletionRecords, int svStart,
+    long long junctionStart, long long junctionEnd, long long junctionDeletion,
+    long long distance, double svThreshold) {
+  if (deletionRecords == nullptr || distance <= 0)
+    return false;
+  long long low = std::min<long long>(
+      std::max<long long>(junctionStart - distance + 1, INT_MIN), INT_MAX);
+  std::vector<std::pair<int, int>>::const_iterator record = std::lower_bound(
+      deletionRecords->begin(), deletionRecords->end(),
+      std::make_pair((int)low, INT_MIN));
+  for (; record != deletionRecords->end() &&
+         (long long)(*record).first < junctionEnd + distance;
+       record++) {
+    // records at the SV's own position (the SV itself)
+    if ((*record).first == svStart)
+      continue;
+    double size = (*record).second;
+    if (std::fabs(size - (double)junctionDeletion) > svThreshold * size)
+      continue;
+    if (junctionDistance((*record).first, junctionStart, junctionEnd) < distance)
+      return true;
+  }
+  return false;
+}
+
+// Allele of a deletion at VCF POS = svPos + 1 shown by a split alignment that
+// ends, clipped, near the SV:
+//   1  the read continues after the deletion: the next segment starts
+//      |SVLEN| bases further on the reference
+//   0  the read's own split deletion contains the SV position, so the read
+//      shows the reference allele there (overlapping SVs)
+//   2  a junction of the same size near the SV that cannot be told apart from
+//      it: no evidence for either allele
+//   3  a junction of the same size whose breakpoints both lie within
+//      SV_NEAR_JUNCTION of the SV's, with no other deletion record that close:
+//      most likely this deletion with imprecise breakpoints
+//  -1  none of these
+static int splitAlignmentDeletionAllele(
+    const bam1_t &aln, const SVAlignedSpan &span, int svPos, int svLength,
+    bool isDeletion, double svThreshold, int mappingQuality,
+    const std::string &chrName, const std::string &ref_string,
+    const std::vector<std::pair<int, int>> *deletionRecords) {
+  // only the upstream part of a split read, clipped where it ends
+  if (span.trailClip == 0 || span.refStart > svPos || svLength == INT_MIN)
+    return -1;
+  std::vector<SVSplitSegment> segments =
+      getDownstreamSegments(aln, span, chrName, mappingQuality);
+  int pos = svPos + 1;
+  int delLength = std::abs(svLength);
+  bool sameSizeNearby = false;
+  bool nearJunction = false;
+  for (const SVSplitSegment &segment : segments) {
+    long long queryGap = (long long)segment.queryStart - span.queryEnd;
+    long long overlap = std::max(0LL, -queryGap);
+    long long insertion = std::max(0LL, queryGap);
+    // a deletion between two copies of a long repeat gives segments that
+    // share up to one copy of the read; beyond SV_MAX_QUERY_OVERLAP accept
+    // that only for a deletion that is longer than the shared part
+    if (overlap > SV_MAX_QUERY_OVERLAP && (!isDeletion || overlap >= delLength))
+      continue;
+    long long junctionDeletion = (long long)segment.refStart - span.refEnd + overlap;
+    long long leftOffset = (long long)span.refEnd - pos;
+    long long rightOffset = (long long)segment.refStart - ((long long)pos + delLength);
+    bool sameSize = isDeletion && junctionDeletion > 0 &&
+                    insertion <= std::max(SV_JUNCTION_TOLERANCE,
+                                          (int)(svThreshold * delLength)) &&
+                    (double)std::llabs(junctionDeletion - delLength) <=
+                        svThreshold * delLength;
+    // another deletion record of this size lies closer to the junction
+    long long junctionStart = span.refEnd - overlap;
+    long long ownDistance = junctionDistance(pos, junctionStart, span.refEnd);
+    bool otherFitsBetter = sameSize && otherDeletionFitsJunction(
+        deletionRecords, pos, junctionStart, span.refEnd, junctionDeletion,
+        ownDistance, svThreshold);
+    // this segment forms the junction of the deletion
+    if (sameSize && !otherFitsBetter && leftOffset >= -SV_JUNCTION_TOLERANCE &&
+        leftOffset <= overlap + SV_JUNCTION_TOLERANCE &&
+        rightOffset >= -(overlap + SV_JUNCTION_TOLERANCE) &&
+        rightOffset <= SV_JUNCTION_TOLERANCE)
+      return 1;
+    // the same deletion placed elsewhere in a repeat (e.g. a left-aligned
+    // VCF record): its first deleted base (VCF POS, or POS - 1 for callers
+    // that report the first deleted base) gives the same sequence
+    if (sameSize && !otherFitsBetter && junctionDeletion == delLength &&
+        std::llabs(junctionStart - pos) <=
+            std::max(SV_MAX_JUNCTION_SHIFT, delLength) &&
+        (sameDeletion(ref_string, (int)junctionStart, pos, delLength) ||
+         sameDeletion(ref_string, (int)junctionStart, pos - 1, delLength)))
+      return 1;
+    // a junction of the same size that matches one breakpoint, or that is
+    // shifted as a whole (breakpoints in a repeat), may still be this
+    // deletion: it is not evidence for either allele
+    if (sameSize && std::llabs(leftOffset) <= overlap + SV_NEAR_JUNCTION &&
+        std::llabs(rightOffset) <= overlap + SV_NEAR_JUNCTION &&
+        std::llabs(leftOffset) <= SV_MAX_JUNCTION_SHIFT &&
+        std::llabs(rightOffset) <= SV_MAX_JUNCTION_SHIFT &&
+        !otherDeletionFitsJunction(deletionRecords, pos, junctionStart,
+                                   span.refEnd, junctionDeletion,
+                                   ownDistance + SV_NEAR_JUNCTION,
+                                   svThreshold)) {
+      nearJunction = true;
+      continue;
+    }
+    long long tolerance = overlap + SV_JUNCTION_TOLERANCE;
+    if (sameSize && (std::llabs(leftOffset) <= tolerance ||
+                     std::llabs(rightOffset) <= tolerance ||
+                     std::llabs(leftOffset - rightOffset) <= tolerance ||
+                     (std::llabs(leftOffset) <= SV_MAX_JUNCTION_SHIFT &&
+                      std::llabs(rightOffset) <= SV_MAX_JUNCTION_SHIFT)) &&
+        !otherFitsBetter) {
+      sameSizeNearby = true;
+      continue;
+    }
+    // the read's own deletion contains the SV position
+    if (queryGap <= SV_JUNCTION_TOLERANCE &&
+        (long long)segment.refStart - span.refEnd >= 2 * SV_REF_FLANK &&
+        span.refEnd + SV_REF_FLANK <= pos &&
+        pos <= segment.refStart - SV_REF_FLANK)
+      return 0;
+  }
+  return nearJunction ? 3 : sameSizeNearby ? 2 : -1;
+}
+
+// Index of the CIGAR operation that consumes reference position refPos, or -1
+// if the aligned part of the alignment does not reach it.
+static int findReferenceCigarOp(const bam1_t &aln, int refPos) {
+  const uint32_t *cigar = bam_get_cigar(&aln);
+  int pos = static_cast<int>(aln.core.pos);
+  for (int i = 0; i < (int)aln.core.n_cigar; i++) {
+    // M, D, N, =, X consume the reference
+    if (!(bam_cigar_type(bam_cigar_op(cigar[i])) & 2))
+      continue;
+    int len = bam_cigar_oplen(cigar[i]);
+    if (refPos < pos + len)
+      return refPos >= pos ? i : -1;
+    pos += len;
+  }
+  return -1;
+}
+
 void BamParser::handleSVVariant(
     const bam1_t &aln, int cigar_i, int svWindow, double svThreshold,
+    int mappingQuality, const std::string &ref_string,
     std::vector<std::pair<int, int>>::iterator &currentSVIter, int &svPos,
     ReadVariant &tmpReadResult) {
 
@@ -1318,8 +1710,18 @@ void BamParser::handleSVVariant(
   int sv_end = sv_start + std::abs(sv_length);
   double sv_region = sv_end - sv_start + 1;
 
-  for (int j = std::max(cigar_i - svWindow, 0);
-       j < std::min(cigar_i + svWindow, aln_core_n_cigar); j++) {
+  // look for an I/D of the SV size around the CIGAR operation that holds the
+  // SV; when the SV was reached on a clip, use the operation that covers the
+  // SV instead (an insertion op is kept: it is usually the SV itself)
+  int center = cigar_i;
+  if (bam_cigar_op(cigar[cigar_i]) == BAM_CSOFT_CLIP ||
+      bam_cigar_op(cigar[cigar_i]) == BAM_CHARD_CLIP) {
+    int covering = findReferenceCigarOp(aln, svPos);
+    if (covering >= 0)
+      center = covering;
+  }
+  for (int j = std::max(center - svWindow, 0);
+       j < std::min(center + svWindow, aln_core_n_cigar); j++) {
     int op = bam_cigar_op(cigar[j]);
     int oplen = bam_cigar_oplen(cigar[j]);
     if (op == BAM_CINS &&
@@ -1334,9 +1736,58 @@ void BamParser::handleSVVariant(
     }
   }
 
-  // use quality -1 to identify SVs
-  tmpReadResult.variantVec.push_back(
-      Variant(svPos, allele, -1, VariantType::SV));
+  // An alignment that does not reach well past the SV on both sides (one that
+  // ends or starts at the SV, often clipped there, or that reached the SV
+  // only on an S/H operation) does not show the reference allele. Decide it
+  // from its split alignment or from the SV caller's RNAMES, or skip it.
+  bool hasCall = true;
+  if (allele == 0) {
+    SVAlignedSpan span = getAlignedSpan(aln);
+    int pos = svPos + 1;
+    bool spans =
+        span.refStart <= pos - SV_REF_FLANK && span.refEnd >= pos + SV_REF_FLANK;
+    // an alignment that does reach past the SV but is clipped soon after it
+    // may be the upstream part of a carrier whose alignment ran on over a
+    // repeat; it keeps its REF call unless split or RNAMES evidence says ALT
+    bool clippedAfter =
+        span.trailClip > SV_MIN_BREAK_CLIP &&
+        span.refEnd - pos <= std::max<long long>(SV_MAX_JUNCTION_SHIFT,
+                                                 std::llabs((long long)sv_length));
+    if (!spans || clippedAfter) {
+      const SVReadSupport *support = NULL;
+      if (currentSVSupport != nullptr) {
+        std::map<int, SVReadSupport>::const_iterator supportIter =
+            currentSVSupport->find(sv_start);
+        if (supportIter != currentSVSupport->end())
+          support = &(*supportIter).second;
+      }
+      int splitAllele = -1;
+      if (support != NULL)
+        splitAllele = splitAlignmentDeletionAllele(
+            aln, span, svPos, sv_length, support->isDeletion, svThreshold,
+            mappingQuality, chrName, ref_string, currentDeletionRecords);
+      if (support != NULL && support->hasReadNames) {
+        // the SV caller listed the reads that carry the SV (RNAMES): only
+        // those count as ALT; a junction it did not list is no evidence
+        if (span.refStart <= svPos &&
+            support->readNames.count(bam_get_qname(&aln)) != 0)
+          allele = 1;
+        else if (splitAllele == 1 || splitAllele == 2 || splitAllele == 3 ||
+                 (splitAllele == -1 && !spans))
+          hasCall = false;
+      } else if (splitAllele == 1 || splitAllele == 3) {
+        allele = 1;
+      } else if (splitAllele == 2 || (splitAllele == -1 && !spans)) {
+        hasCall = false;
+      }
+    }
+  }
+
+  if (hasCall) {
+    // use quality -1 to identify SVs
+    tmpReadResult.variantVec.push_back(
+        Variant(svPos, allele, -1, VariantType::SV));
+  }
   currentSVIter++;
   if (currentSVIter != SV_map[chrName].end()) {
     svPos = (*currentSVIter).first - 1;
@@ -1348,7 +1799,8 @@ void BamParser::handleSVVariant(
 void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln,
                         std::vector<ReadVariant> &readVariantVec,
                         ClipCount &clipCount, const std::string &ref_string,
-                        bool isONT, int svWindow, double svThreshold) {
+                        bool isONT, int svWindow, double svThreshold,
+                        int mappingQuality) {
 
   ReadVariant tmpReadResult;
   tmpReadResult.read_name = bam_get_qname(&aln);
@@ -1449,7 +1901,8 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln,
         // If this read not contain SV, it means this read is the same as
         // reference genome. default this read the same as ref
 
-        handleSVVariant(aln, i, svWindow, svThreshold, currentSVIter, svPos, tmpReadResult);
+        handleSVVariant(aln, i, svWindow, svThreshold, mappingQuality,
+                        ref_string, currentSVIter, svPos, tmpReadResult);
       }
 
       // SNP's position is minimal
