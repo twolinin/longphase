@@ -110,7 +110,30 @@ static void processChromosome(
     std::cerr<< "(" << chrName << "," << difftime(time(NULL), chrbegin) << "s)";
 }
 
+// jemalloc's mallctl (longphase links jemalloc)
+extern "C" int mallctl(const char *name, void *oldp, size_t *oldlenp,
+                       void *newp, size_t newlen);
+
 ModCallProcess::ModCallProcess(ModCallParameters params){
+
+    // modcall frees large tables chromosome by chromosome; give freed pages
+    // back after 1 s instead of jemalloc's 10 s, so they do not add up to the
+    // peak. This lowers modcall's peak by about a quarter at the same speed.
+    // Phase is left as it is: there it costs system time for little memory.
+    // The default covers the arenas made from now on; the ones in use are set one by one.
+    ssize_t decayMs = 1000;
+    mallctl("arenas.dirty_decay_ms", nullptr, nullptr, &decayMs, sizeof(decayMs));
+    unsigned narenas = 0;
+    size_t len = sizeof(narenas);
+    if (mallctl("arenas.narenas", &narenas, &len, nullptr, 0) == 0) {
+        for (unsigned i = 0; i < narenas; i++) {
+            bool initialized = false;
+            len = sizeof(initialized);
+            std::string arena = "arena." + std::to_string(i);
+            if (mallctl((arena + ".initialized").c_str(), &initialized, &len, nullptr, 0) == 0 && initialized)
+                mallctl((arena + ".dirty_decay_ms").c_str(), nullptr, nullptr, &decayMs, sizeof(decayMs));
+        }
+    }
 
     // load SNP vcf file
     std::time_t begin = time(NULL);
