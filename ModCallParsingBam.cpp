@@ -882,7 +882,8 @@ void MethylationGraph::collectAllModPoints(std::set<int> &strongPoints) {
 void MethylationGraph::collectStrongPoints(std::set<int> &strongPoints,
                                            std::set<int> &weakPoints,
                                            std::vector<int> &prepass) {
-  std::vector<int> hasConnect;
+  // positions that reached a SNP (membership only)
+  std::set<int> hasConnect;
 
   for (auto nodeIter = nodeInfo->begin(); nodeIter != nodeInfo->end();
        ++nodeIter) {
@@ -910,7 +911,7 @@ void MethylationGraph::collectStrongPoints(std::set<int> &strongPoints,
           break;
         }
         if (checkVariantType(searchNodeIter->first) == VariantType::SNP) {
-          hasConnect.push_back(currPos);
+          hasConnect.insert(currPos);
           if (isGoodConnection(tmp, minimumConnection) &&
               strongPoints.count(currPos) == 0) {
             strongPoints.insert(currPos);
@@ -920,8 +921,7 @@ void MethylationGraph::collectStrongPoints(std::set<int> &strongPoints,
         ++searchNodeIter;
         ++searchCount;
       }
-      if (std::find(hasConnect.begin(), hasConnect.end(), currPos) ==
-          hasConnect.end()) {
+      if (hasConnect.count(currPos) == 0) {
         weakPoints.insert(currPos);
       }
     } else if (checkVariantType(currPos) == VariantType::SNP) {
@@ -937,7 +937,7 @@ void MethylationGraph::collectStrongPoints(std::set<int> &strongPoints,
           break;
         }
         if (checkVariantType(searchNodeIter->first) == VariantType::MOD) {
-          hasConnect.push_back(searchNodeIter->first);
+          hasConnect.insert(searchNodeIter->first);
           if (isGoodConnection(tmp, minimumConnection) &&
               strongPoints.count(nextNodeIter->first) == 0) {
             strongPoints.insert(nextNodeIter->first);
@@ -1006,6 +1006,8 @@ void MethylationGraph::iterateWeakPoints(std::set<int> &weakPoints,
                                          std::vector<int> &prepass) {
   std::set<int> weakPoints2;
   std::set<int> addedPositions2;
+  // the positions in prepass, for membership tests
+  std::set<int> inPrepass(prepass.begin(), prepass.end());
 
   // third pass: evaluate connections between weak methylation points
   for (int i = 0; i < params->iterCount; i++) {
@@ -1045,14 +1047,12 @@ void MethylationGraph::iterateWeakPoints(std::set<int> &weakPoints,
           break;
         }
         if (isGoodConnection(tmp, minimumConnection)) {
-          if (std::find(prepass.begin(), prepass.end(), currPos) ==
-              prepass.end()) {
+          if (inPrepass.insert(currPos).second) {
             prepass.push_back(currPos);
             nextWeakPoints.insert(currPos);
             nextAddedPositions.insert(currPos);
           }
-          if (std::find(prepass.begin(), prepass.end(), nextPos) ==
-              prepass.end()) {
+          if (inPrepass.insert(nextPos).second) {
             prepass.push_back(nextPos);
             nextWeakPoints.insert(nextPos);
             nextAddedPositions.insert(nextPos);
