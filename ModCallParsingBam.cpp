@@ -884,8 +884,10 @@ void MethBamParser::exportResult(const std::string &chrName,
     for (const auto &pair : *chrMethMap) {
       std::string line =
           formatMethVcfLine(pair.first, pair.second, chrLen);
+      // a position that is not written (not a CpG call, or not A/C/G/T) does
+      // not end the chromosome
       if (line.empty())
-        return;
+        continue;
       modCallResult << line;
     }
   } else {
