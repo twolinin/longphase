@@ -4,7 +4,9 @@
 
 #include "htslib/sam.h"
 #include "htslib/thread_pool.h"
+#include "htslib/hts_endian.h"
 #include <algorithm>
+#include <climits>
 #include <cmath>
 #include <fstream>
 #include <iostream>
@@ -172,6 +174,250 @@ char PackedReference::at(size_t pos) const {
   return findRun(lowercase, pos) ? char(base - 'A' + 'a') : base;
 }
 
+namespace {
+// complement of a base code (seq_nt16_str order)
+const int seqiRc[16] = {0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15};
+
+// a skip count of one to nine digits
+bool readSkipCount(const char *&cp, long long &value) {
+  const char *start = cp;
+  value = 0;
+  while (*cp >= '0' && *cp <= '9') {
+    value = value * 10 + (*cp - '0');
+    cp++;
+  }
+  return cp > start && cp - start <= 9;
+}
+
+bool isLetter(char c) { return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'); }
+} // namespace
+
+ReadBaseMods::ReadBaseMods()
+    : htsRead(nullptr), htsState(nullptr), nextEvent(0), nLists(0), seqPos(0) {
+  std::fill(havePositions, havePositions + 16, false);
+}
+
+ReadBaseMods::~ReadBaseMods() {
+  if (htsState) {
+    hts_base_mod_state_free(htsState);
+  }
+}
+
+int ReadBaseMods::load(const bam1_t &aln) {
+  htsRead = &aln;
+  events.clear();
+  modBuf.clear();
+  nextEvent = 0;
+  seqPos = 0;
+  std::fill(havePositions, havePositions + 16, false);
+  if (htsState) {
+    hts_base_mod_state_free(htsState);
+    htsState = nullptr;
+  }
+  if (decode(aln)) {
+    return 0;
+  }
+  events.clear();
+  modBuf.clear();
+  htsState = hts_base_mod_state_alloc();
+  return bam_parse_basemod(&aln, htsState);
+}
+
+int ReadBaseMods::next(hts_base_mod *mods, int n_mods, int *pos) {
+  if (htsState) {
+    return bam_next_basemod(htsRead, htsState, mods, n_mods, pos);
+  }
+  if (nextEvent >= events.size()) {
+    // as htslib: the position moves to the end of the read once
+    if (seqPos < htsRead->core.l_qseq) {
+      *pos = seqPos = htsRead->core.l_qseq;
+    }
+    return 0;
+  }
+  const Event &e = events[nextEvent++];
+  for (int i = 0; i < e.n && i < n_mods; i++) {
+    mods[i] = modBuf[e.first + i];
+  }
+  *pos = e.pos;
+  seqPos = e.pos + 1;
+  return e.n;
+}
+
+const std::vector<int> &ReadBaseMods::basePositions(const bam1_t &aln, int base) {
+  std::vector<int> &found = positions[base];
+  if (havePositions[base]) {
+    return found;
+  }
+  havePositions[base] = true;
+  found.clear();
+  const uint8_t *seq = bam_get_seq(&aln);
+  const int len = aln.core.l_qseq;
+  const int nBytes = (len + 1) / 2;
+  const uint64_t ones = 0x1111111111111111ULL;
+  const uint64_t low = 0x0F0F0F0F0F0F0F0FULL;
+  const uint64_t pattern = ones * uint64_t(base);
+  // 16 bases at a time; a base is a 4-bit code, the first one in the high half of a byte
+  for (int byte = 0; byte < nBytes; byte += 8) {
+    uint64_t w = 0;
+    memcpy(&w, seq + byte, size_t(std::min(8, nBytes - byte)));
+    w = ((w & low) << 4) | ((w >> 4) & low); // now 4-bit group k is base 2 * byte + k
+    uint64_t x = w ^ pattern;
+    x |= x >> 1;
+    x |= x >> 2;
+    for (uint64_t m = ~x & ones; m; m &= m - 1) {
+      const int q = 2 * byte + (__builtin_ctzll(m) >> 2);
+      if (q >= len) {
+        break;
+      }
+      found.push_back(q);
+    }
+  }
+  return found;
+}
+
+bool ReadBaseMods::decode(const bam1_t &aln) {
+  nLists = 0;
+  uint8_t *mm = bam_aux_get(&aln, "MM");
+  if (!mm) {
+    mm = bam_aux_get(&aln, "Mm");
+  }
+  if (!mm) {
+    return true; // no modifications
+  }
+  if (mm[0] != 'Z') {
+    return false;
+  }
+  uint8_t *ml = bam_aux_get(&aln, "ML");
+  if (!ml) {
+    ml = bam_aux_get(&aln, "Ml");
+  }
+  if (ml && (ml[0] != 'B' || ml[1] != 'C')) {
+    return false;
+  }
+  const uint8_t *mlEnd = ml ? ml + 6 + le_to_u32(ml + 2) : nullptr;
+  if (ml) {
+    ml += 6;
+  }
+  const bool reverse = bam_is_rev(&aln);
+
+  // [ACGTU][+-][a-zA-Z]+[.?]?(,\d+)*; repeated
+  const char *cp = (const char *)mm + 1;
+  while (*cp) {
+    int base;
+    switch (*cp++) {
+    case 'A': base = 1; break;
+    case 'C': base = 2; break;
+    case 'G': base = 4; break;
+    case 'T':
+    case 'U': base = 8; break;
+    default: return false; // N, or malformed
+    }
+    if (*cp != '+' && *cp != '-') {
+      return false;
+    }
+    const int strand = (*cp++ == '-');
+    const char *codes = cp;
+    while (isLetter(*cp)) {
+      cp++;
+    }
+    const int stride = int(cp - codes);
+    if (stride == 0 || stride > 16 || nLists + stride > 64) {
+      return false; // ChEBI code, or malformed
+    }
+    if (*cp == '.' || *cp == '?') {
+      cp++;
+    }
+    counts.clear();
+    while (*cp == ',') {
+      cp++;
+      long long skip;
+      if (!readSkipCount(cp, skip)) {
+        return false;
+      }
+      counts.push_back(skip);
+    }
+    if (*cp != ';') {
+      return false;
+    }
+    cp++;
+    const long long nCounts = (long long)counts.size();
+    if (ml && ml + nCounts * stride > mlEnd) {
+      return false;
+    }
+
+    // the read gives the bases in reverse complement when reverse is set;
+    // the skip counts go along the original read
+    const std::vector<int> &where = basePositions(aln, reverse ? seqiRc[base] : base);
+    const long long nBases = (long long)where.size();
+    long long total = 0;
+    for (long long skip : counts) {
+      total += skip + 1;
+    }
+    if (total > nBases) {
+      // htslib warns (forward) or fails (reverse)
+      return false;
+    }
+    for (int code = 0; code < stride; code++) {
+      if (nLists == lists.size()) {
+        lists.emplace_back();
+      }
+      ModList &list = lists[nLists++];
+      list.mod.modified_base = codes[code];
+      list.mod.canonical_base = seq_nt16_str[base];
+      list.mod.strand = strand;
+      list.mod.qual = -1;
+      list.pos.clear();
+      list.qual.clear();
+      long long index = -1;
+      if (!reverse) {
+        for (long long k = 0; k < nCounts; k++) {
+          index += counts[k] + 1;
+          list.pos.push_back(where[index]);
+          list.qual.push_back(ml ? ml[code + k * stride] : -1);
+        }
+      } else {
+        // the last count is the leftmost modification
+        index = nBases - total;
+        for (long long k = nCounts - 1; k >= 0; k--) {
+          list.pos.push_back(where[index]);
+          list.qual.push_back(ml ? ml[code + k * stride] : -1);
+          index += counts[k] + 1;
+        }
+      }
+    }
+    if (ml) {
+      ml += nCounts * stride;
+    }
+  }
+
+  // merge by position; at one position, in tag order
+  heads.assign(nLists, 0);
+  while (true) {
+    int at = INT_MAX;
+    for (size_t l = 0; l < nLists; l++) {
+      if (heads[l] < lists[l].pos.size() && lists[l].pos[heads[l]] < at) {
+        at = lists[l].pos[heads[l]];
+      }
+    }
+    if (at == INT_MAX) {
+      break;
+    }
+    Event e = {at, 0, int(modBuf.size())};
+    for (size_t l = 0; l < nLists; l++) {
+      ModList &list = lists[l];
+      if (heads[l] < list.pos.size() && list.pos[heads[l]] == at) {
+        hts_base_mod mod = list.mod;
+        mod.qual = list.qual[heads[l]];
+        modBuf.push_back(mod);
+        e.n++;
+        heads[l]++;
+      }
+    }
+    events.push_back(e);
+  }
+  return true;
+}
+
 MethBamParser::MethBamParser(std::string inputChrName,
                              ModCallParameters &in_params,
                              MethSnpParser &snpMap, const std::string &ref_string)
@@ -279,8 +525,7 @@ bool MethBamParser::extractSnpAllele(
 
 void MethBamParser::classifyMethylationBase(
     int &n, int &pos, hts_base_mod *mods, int querypos, int length,
-    int refpos, const bam1_t &aln, ModReadVariant *tmpReadResult,
-    hts_base_mod_state *mod_state) {
+    int refpos, const bam1_t &aln, ModReadVariant *tmpReadResult) {
   while (true) {
     if (pos > (querypos + length)) {
       break;
@@ -329,14 +574,14 @@ void MethBamParser::classifyMethylationBase(
         info.variantType = VariantType::MOD;
       }
     }
-    n = bam_next_basemod(&aln, mod_state, mods, 5, &pos);
+    n = baseMods.next(mods, 5, &pos);
   }
 }
 
 bool MethBamParser::handleDeletionInHomopolymer(
     std::map<int, SnpVariant>::iterator &currentVariantIter, int ref_pos,
     int length, int querypos, const bam1_t &aln,
-    hts_base_mod_state *mod_state, ModReadVariant *tmpReadResult) {
+    ModReadVariant *tmpReadResult) {
   int del_len = length;
   if (ref_pos + del_len + 1 == currentVariantIter->first) {
     return true;
@@ -357,7 +602,6 @@ bool MethBamParser::handleDeletionInHomopolymer(
   int base_q = 0;
 
   if (querypos + 1 > aln.core.l_qseq) {
-    hts_base_mod_state_free(mod_state);
     return false;
   }
 
@@ -441,10 +685,7 @@ void MethBamParser::parse_CIGAR(const bam_hdr_t &bamHdr, const bam1_t &aln,
                                 std::vector<ModReadVariant> &readVariantVec) {
   // see detail https://github.com/samtools/htslib/blob/develop/sam_mods.c
 
-  // hts_base_mod_state can parse MM, ML and MN tags
-  hts_base_mod_state *mod_state = hts_base_mod_state_alloc();
-  if (bam_parse_basemod(&aln, mod_state) < 0) {
-    hts_base_mod_state_free(mod_state);
+  if (baseMods.load(aln) < 0) {
     return;
   }
   ModReadVariant *tmpReadResult = new ModReadVariant();
@@ -470,10 +711,8 @@ void MethBamParser::parse_CIGAR(const bam_hdr_t &bamHdr, const bam1_t &aln,
 
   hts_base_mod mods[5];
   int pos;
-  // bam_next_basemod can iterate over this cached state.
-  int n = bam_next_basemod(&aln, mod_state, mods, 5, &pos);
+  int n = baseMods.next(mods, 5, &pos);
   if (n <= 0) {
-    hts_base_mod_state_free(mod_state);
     delete tmpReadResult;
     return;
   }
@@ -494,7 +733,6 @@ void MethBamParser::parse_CIGAR(const bam_hdr_t &bamHdr, const bam1_t &aln,
       if (!extractSnpAllele(currentVariantIter, ref_pos, length, querypos,
                             cigaridx, aln_core_n_cigar, cigar, aln,
                             tmpReadResult)) {
-        hts_base_mod_state_free(mod_state);
         delete tmpReadResult;
         return;
       }
@@ -509,7 +747,7 @@ void MethBamParser::parse_CIGAR(const bam_hdr_t &bamHdr, const bam1_t &aln,
 
     if (cigar_op == 0 || cigar_op == 7 || cigar_op == 8) {
       classifyMethylationBase(n, pos, mods, querypos, length, refpos, aln,
-                              tmpReadResult, mod_state);
+                              tmpReadResult);
       querypos += length;
       refpos += length;
       ref_pos += length;
@@ -517,7 +755,7 @@ void MethBamParser::parse_CIGAR(const bam_hdr_t &bamHdr, const bam1_t &aln,
     // 1: insertion to the reference
     else if (cigar_op == 1) {
       while (n > 0 && pos <= (querypos + length)) {
-        n = bam_next_basemod(&aln, mod_state, mods, 5, &pos);
+        n = baseMods.next(mods, 5, &pos);
       }
       querypos += length;
     }
@@ -530,8 +768,7 @@ void MethBamParser::parse_CIGAR(const bam_hdr_t &bamHdr, const bam1_t &aln,
           continue;
         }
         if (!handleDeletionInHomopolymer(currentVariantIter, ref_pos, length,
-                                         querypos, aln, mod_state,
-                                         tmpReadResult)) {
+                                         querypos, aln, tmpReadResult)) {
           delete tmpReadResult;
           return;
         }
@@ -547,7 +784,7 @@ void MethBamParser::parse_CIGAR(const bam_hdr_t &bamHdr, const bam1_t &aln,
     // 4: soft clipping (clipped sequences present in SEQ)
     else if (cigar_op == 4) {
       while (n > 0 && pos <= (querypos + length)) {
-        n = bam_next_basemod(&aln, mod_state, mods, 5, &pos);
+        n = baseMods.next(mods, 5, &pos);
       }
       querypos += length;
     }
@@ -558,8 +795,6 @@ void MethBamParser::parse_CIGAR(const bam_hdr_t &bamHdr, const bam1_t &aln,
       refpos += length;
     }
   }
-
-  hts_base_mod_state_free(mod_state);
 
   updateDepthBoundary(refstart, refpos, bam_is_rev(&aln));
 

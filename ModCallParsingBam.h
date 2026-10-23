@@ -152,6 +152,49 @@ private:
   static const Run *findRun(const std::vector<Run> &runs, size_t pos);
 };
 
+// The base modifications of one read (MM and ML tags) in the order and form
+// bam_next_basemod gives them, decoded in one pass instead of a scan per call.
+// Tags it does not decode itself (ChEBI codes, N as the canonical base, or
+// anything htslib might read differently) are left to htslib.
+class ReadBaseMods {
+public:
+  ReadBaseMods();
+  ~ReadBaseMods();
+  ReadBaseMods(const ReadBaseMods &) = delete;
+  ReadBaseMods &operator=(const ReadBaseMods &) = delete;
+  // as bam_parse_basemod: < 0 when the tags are malformed
+  int load(const bam1_t &aln);
+  // as bam_next_basemod
+  int next(hts_base_mod *mods, int n_mods, int *pos);
+
+private:
+  struct Event {
+    int pos;
+    int n;     // modifications at pos
+    int first; // index in modBuf
+  };
+  struct ModList {
+    hts_base_mod mod;      // qual filled per position
+    std::vector<int> pos;  // left to right
+    std::vector<int> qual;
+  };
+  bool decode(const bam1_t &aln);
+  const std::vector<int> &basePositions(const bam1_t &aln, int base);
+
+  const bam1_t *htsRead;
+  hts_base_mod_state *htsState; // set when the read is left to htslib
+  std::vector<Event> events;
+  std::vector<hts_base_mod> modBuf;
+  size_t nextEvent;
+  std::vector<ModList> lists;
+  size_t nLists;
+  std::vector<long long> counts; // one MM list
+  std::vector<size_t> heads;
+  int seqPos;
+  std::vector<int> positions[16]; // where each base code is in the read
+  bool havePositions[16];
+};
+
 struct MethPosProb {
   MethPosProb(int position, int prob) : position(position), prob(prob) {};
 
@@ -195,6 +238,7 @@ private:
   int refstartpos;
   // what the reads and the output need of the chromosome's reference
   PackedReference reference;
+  ReadBaseMods baseMods;
 
   MethPosTable *chrMethMap;
   // names of the reads parsed so far, one after another; read i starts at nameStart[i]
@@ -212,12 +256,11 @@ private:
       const uint32_t *cigar, const bam1_t &aln, ModReadVariant *tmpReadResult);
   void classifyMethylationBase(int &n, int &pos, hts_base_mod *mods,
                                int querypos, int length, int refpos,
-                               const bam1_t &aln, ModReadVariant *tmpReadResult,
-                               hts_base_mod_state *mod_state);
+                               const bam1_t &aln, ModReadVariant *tmpReadResult);
   bool handleDeletionInHomopolymer(
       std::map<int, SnpVariant>::iterator &currentVariantIter, int ref_pos,
       int length, int querypos, const bam1_t &aln,
-      hts_base_mod_state *mod_state, ModReadVariant *tmpReadResult);
+      ModReadVariant *tmpReadResult);
   void updateDepthBoundary(int refstart, int refpos, bool is_reverse);
   void computeSinglePositionGenotype();
   std::set<int> applyCpGStrandPairGenotype();
