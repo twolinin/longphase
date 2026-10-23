@@ -16,6 +16,8 @@ static MethBamParser* runBamPipeline(
     std::vector<ModReadVariant> &modReadVariantVec)
 {
     MethBamParser *methbamparser = new MethBamParser(chrName, params, snpFile, chrSeq);
+    // the parser keeps what it needs of the reference
+    std::string().swap(chrSeq);
     methbamparser->detectMeth(chrName, chrLen, threadPool, readVariantVec);
 #ifdef VALIDATE_PARSECG_DEPTH
     #pragma omp critical (validate_parsecg_depth_dump)
@@ -86,13 +88,13 @@ static void processChromosome(
     std::vector<int> passPosition;
 
     std::string chrName = chr.name;
-    std::string chrSeq  = chr.sequence;
+    std::string chrSeq = MethFastaParser::fetchSequence(params.fastaFile, chr);
     int chrLen          = chr.length;
 
     MethBamParser *methbamparser = runBamPipeline(chrName, chrSeq, chrLen, params, threadPool, snpFile, readVariantVec, modReadVariantVec);
     runGraphPipeline(chrName, params, modReadVariantVec, passPosition, snpFile);
 
-    methbamparser->exportResult(chrName, chrSeq, chrLen, passPosition, result);
+    methbamparser->exportResult(chrName, chrLen, passPosition, result);
 #ifdef VALIDATE_EXPORT
     #pragma omp critical (validate_export_dump)
     {

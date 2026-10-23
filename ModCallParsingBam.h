@@ -36,12 +36,10 @@ struct MethPosInfo {
 // fasta.
 struct ReferenceChromosome {
   std::string name;
-  std::string sequence;
   int length;
 
-  ReferenceChromosome(const std::string &name, const std::string &sequence,
-                      int length)
-      : name(name), sequence(sequence), length(length) {}
+  ReferenceChromosome(const std::string &name, int length)
+      : name(name), length(length) {}
 };
 
 // FastaParser: to get each chromosome name and lastpos(for chunksize)
@@ -54,6 +52,29 @@ public:
   MethFastaParser(std::string fastaFile,
                   std::vector<ReferenceChromosome> &chrInfo);
   ~MethFastaParser();
+  static std::string fetchSequence(const std::string &fastaFile,
+                                   const ReferenceChromosome &chr);
+};
+
+// A chromosome's reference in about a quarter of the memory: A, C, G and T in
+// 2 bits each, with the lowercase stretches and the runs of any other
+// character listed apart. at() gives back the original character.
+class PackedReference {
+public:
+  explicit PackedReference(const std::string &seq);
+  size_t length() const { return len; }
+  char at(size_t pos) const;
+
+private:
+  struct Run {
+    uint32_t start, end; // [start, end)
+    char c;
+  };
+  size_t len;
+  std::vector<uint8_t> bases;  // 2 bits per position, 0 where the character is in `other`
+  std::vector<Run> lowercase;  // runs of a, c, g, t (c unused)
+  std::vector<Run> other;      // runs of one character that is not A, C, G, T, a, c, g, t
+  static const Run *findRun(const std::vector<Run> &runs, size_t pos);
 };
 
 struct MethPosProb {
@@ -95,9 +116,10 @@ public:
 class MethBamParser {
 private:
   ModCallParameters *params;
-  std::string *refString;
   std::string chrName;
   int refstartpos;
+  // what the reads and the output need of the chromosome's reference
+  PackedReference reference;
 
   std::map<int, MethPosInfo> *chrMethMap;
   // names of the reads parsed so far, one after another; read i starts at nameStart[i]
@@ -129,7 +151,6 @@ private:
                              std::vector<ModReadVariant> &modReadVariantVec);
   std::string buildInfoStr(const MethPosInfo &info) const;
   std::string formatMethVcfLine(int pos, const MethPosInfo &info,
-                                const std::string &chrSequence,
                                 int chrLen) const;
   void parse_CIGAR(const bam_hdr_t &bamHdr, const bam1_t &aln,
                    std::vector<ModReadVariant> &readVariantVec);
@@ -141,7 +162,7 @@ private:
 
 public:
   MethBamParser(std::string inputChrName, ModCallParameters &in_params,
-                MethSnpParser &snpMap, std::string &ref_string);
+                MethSnpParser &snpMap, const std::string &ref_string);
   ~MethBamParser();
   void detectMeth(std::string chrName, int lastSNPPos,
                   htsThreadPool &threadPool,
@@ -149,7 +170,7 @@ public:
   void dumpMethMap(const std::string &chrName, std::ofstream &out) const;
   void dumpReadStartEnd(const std::string &chrName, std::ofstream &out) const;
   void calculateDepth();
-  void exportResult(std::string chrName, std::string chrSquence, int chrLen,
+  void exportResult(const std::string &chrName, int chrLen,
                     std::vector<int> &passPosition,
                     std::ostringstream &modCallResult);
   void judgeMethGenotype(std::string chrName,

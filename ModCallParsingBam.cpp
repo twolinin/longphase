@@ -18,29 +18,86 @@ MethFastaParser::MethFastaParser(std::string fastaFile,
     return;
   }
 
+  // names and lengths only; each chromosome's sequence is read by
+  // fetchSequence when that chromosome is processed
   faidx_t *fai = fai_load(fastaFile.c_str());
   int fai_nseq = faidx_nseq(fai);
-  const char *seqname;
-  int seqlen = 0;
   for (int i = 0; i < fai_nseq; i++) {
-    int ref_len = 0;
-    seqname = faidx_iseq(fai, i);
-    seqlen = faidx_seq_len(fai, seqname);
-    char *seq = faidx_fetch_seq(fai, seqname, 0, seqlen + 1, &ref_len);
-    chrInfo.emplace_back(seqname, seq, seqlen);
-    free(seq);
+    const char *seqname = faidx_iseq(fai, i);
+    chrInfo.emplace_back(seqname, faidx_seq_len(fai, seqname));
   }
   fai_destroy(fai);
 }
 
+std::string MethFastaParser::fetchSequence(const std::string &fastaFile,
+                                           const ReferenceChromosome &chr) {
+  // a reader is not shared between threads
+  FastaReader reader(fastaFile);
+  int ref_len = 0;
+  return reader.fetch(chr.name, 0, chr.length + 1, ref_len, false);
+}
+
 MethFastaParser::~MethFastaParser() {}
+
+PackedReference::PackedReference(const std::string &seq)
+    : len(seq.size()), bases((seq.size() + 3) / 4, 0) {
+  // 0-3: A C G T, 4-7: a c g t, 8: any other character
+  uint8_t kind[256];
+  std::fill(kind, kind + 256, uint8_t(8));
+  const char *upper = "ACGT", *lower = "acgt";
+  for (uint8_t k = 0; k < 4; k++) {
+    kind[uint8_t(upper[k])] = k;
+    kind[uint8_t(lower[k])] = k + 4;
+  }
+  for (size_t i = 0; i < len; i++) {
+    const char c = seq[i];
+    const uint8_t k = kind[uint8_t(c)];
+    if (k < 8) {
+      bases[i >> 2] |= uint8_t((k & 3) << ((i & 3) * 2));
+      if (k >= 4) {
+        if (!lowercase.empty() && lowercase.back().end == i) {
+          lowercase.back().end++;
+        } else {
+          lowercase.push_back({uint32_t(i), uint32_t(i + 1), 0});
+        }
+      }
+    } else if (!other.empty() && other.back().end == i && other.back().c == c) {
+      other.back().end++;
+    } else {
+      other.push_back({uint32_t(i), uint32_t(i + 1), c});
+    }
+  }
+  bases.shrink_to_fit();
+  other.shrink_to_fit();
+  lowercase.shrink_to_fit();
+}
+
+const PackedReference::Run *
+PackedReference::findRun(const std::vector<Run> &runs, size_t pos) {
+  // the last run that starts at or before pos
+  auto it = std::upper_bound(
+      runs.begin(), runs.end(), pos,
+      [](size_t p, const Run &run) { return p < run.start; });
+  if (it == runs.begin()) {
+    return nullptr;
+  }
+  --it;
+  return pos < it->end ? &*it : nullptr;
+}
+
+char PackedReference::at(size_t pos) const {
+  if (const Run *run = findRun(other, pos)) {
+    return run->c;
+  }
+  const char base = "ACGT"[(bases[pos >> 2] >> ((pos & 3) * 2)) & 3];
+  return findRun(lowercase, pos) ? char(base - 'A' + 'a') : base;
+}
 
 MethBamParser::MethBamParser(std::string inputChrName,
                              ModCallParameters &in_params,
-                             MethSnpParser &snpMap, std::string &ref_string)
-    : chrName(inputChrName) {
+                             MethSnpParser &snpMap, const std::string &ref_string)
+    : chrName(inputChrName), reference(ref_string) {
   params = &in_params;
-  refString = &ref_string;
   refstartpos = 0;
   chrMethMap = new std::map<int, MethPosInfo>;
   readStartEndMap = new std::map<int, std::pair<int, int>>;
@@ -160,7 +217,7 @@ void MethBamParser::classifyMethylationBase(
       methrpos = pos - querypos + refpos;
     }
 
-    if (int((*refString).length()) < methrpos) {
+    if (int(reference.length()) < methrpos) {
       break;
     }
 
@@ -206,7 +263,8 @@ bool MethBamParser::handleDeletionInHomopolymer(
     return true;
   }
 
-  if (homopolymerLength(currentVariantIter->first, *refString) < 3) {
+  // homopolymerLength() at the variant, taken when the variants were loaded
+  if (currentVariantIter->second.homopolymer < 3) {
     return true;
   }
 
@@ -377,7 +435,7 @@ void MethBamParser::parse_CIGAR(const bam_hdr_t &bamHdr, const bam1_t &aln,
     }
     // 2: deletion from the reference
     else if (cigar_op == 2) {
-      if (*refString != "") {
+      if (reference.length() != 0) {
         if (currentVariantIter == currentVariants->end()) {
           refpos += length;
           ref_pos += length;
@@ -452,12 +510,17 @@ std::string MethBamParser::buildInfoStr(const MethPosInfo &info) const {
 }
 
 std::string MethBamParser::formatMethVcfLine(
-    int pos, const MethPosInfo &info, const std::string &chrSequence,
-    int chrLen) const {
+    int pos, const MethPosInfo &info, int chrLen) const {
   if (chrLen < pos)
     return "";
 
-  std::string ref = chrSequence.substr(pos, 1);
+  // as std::string::substr(pos, 1) of the reference
+  if (size_t(pos) > reference.length()) {
+    throw std::out_of_range("formatMethVcfLine: position past the reference");
+  }
+  std::string ref = size_t(pos) < reference.length()
+                        ? std::string(1, reference.at(pos))
+                        : std::string();
   if (ref != "A" && ref != "T" && ref != "C" && ref != "G" &&
       ref != "a" && ref != "t" && ref != "c" && ref != "g")
     return "";
@@ -481,14 +544,14 @@ std::string MethBamParser::formatMethVcfLine(
          infostr + "\t" + "GT:MD:UD:DP" + "\t" + samplestr + "\n";
 }
 
-void MethBamParser::exportResult(std::string chrName, std::string chrSquence,
+void MethBamParser::exportResult(const std::string &chrName,
                                  int chrLen, std::vector<int> &passPosition,
                                  std::ostringstream &modCallResult) {
 
   if (params->outputAllMod) {
     for (const auto &pair : *chrMethMap) {
       std::string line =
-          formatMethVcfLine(pair.first, pair.second, chrSquence, chrLen);
+          formatMethVcfLine(pair.first, pair.second, chrLen);
       if (line.empty())
         return;
       modCallResult << line;
@@ -509,7 +572,7 @@ void MethBamParser::exportResult(std::string chrName, std::string chrSquence,
         // output all modified positions or only heterozygous positions
         if (params->outputAllMod || posinfoIter->second.heterstatus == "0/1") {
           std::string line =
-              formatMethVcfLine(pos, posinfoIter->second, chrSquence, chrLen);
+              formatMethVcfLine(pos, posinfoIter->second, chrLen);
           if (line.empty())
             continue;
           modCallResult << line;
@@ -526,7 +589,7 @@ void MethBamParser::exportResult(std::string chrName, std::string chrSquence,
         if (params->outputAllMod ||
             nextPosinfoIter->second.heterstatus == "0/1") {
           std::string line = formatMethVcfLine(
-              nextPos, nextPosinfoIter->second, chrSquence, chrLen);
+              nextPos, nextPosinfoIter->second, chrLen);
           if (line.empty())
             continue;
           modCallResult << line;
@@ -1355,6 +1418,7 @@ MethSnpParser::getVariants_markindel(std::string chrName,
       innerIter->second.is_danger = isDangerIndel(
           innerIter->first, ref, innerIter->second.Ref.length(),
           innerIter->second.Alt.length());
+      innerIter->second.homopolymer = homopolymerLength(innerIter->first, ref);
     }
     targetVariants = chrIter->second;
   }
