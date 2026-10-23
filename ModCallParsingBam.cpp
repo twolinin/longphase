@@ -1086,6 +1086,7 @@ void MethBamParser::filterModReadVariants(
   for (auto &read : readVariantVec) {
     ModReadVariant newRead;
     newRead.read_name = std::move(read.read_name);
+    newRead.reference_start = read.reference_start;
     newRead.is_reverse = read.is_reverse;
 
     for (auto &variant : read.variantVec) {
@@ -1211,11 +1212,24 @@ void MethylationGraph::addEdge(std::vector<ModReadVariant> &in_readVariant,
   buildNodeInfo(in_readVariant);
   int readCount = 0;
   int vectorSize = 0;
+  // Reads come by start, and a read's positions are at least its start - 1
+  // (a reverse-strand CpG call is moved one base back), so the edges of the
+  // positions before that get no more connections: cut their tables to size.
+  int finished = INT_MIN;
   // iter all read
   for (std::vector<ModReadVariant>::iterator readIter = in_readVariant.begin();
        readIter != in_readVariant.end(); readIter++) {
     vectorSize += (*readIter).variantVec.size();
     readCount++;
+    const int readFirst = readIter->reference_start - 1;
+    if (readFirst > finished) {
+      for (auto it = edgeList->lower_bound(finished);
+           it != edgeList->end() && it->first < readFirst; ++it) {
+        it->second->ref->shrinkToFit();
+        it->second->alt->shrinkToFit();
+      }
+      finished = readFirst;
+    }
 
     for (auto variant1Iter = (*readIter).variantVec.begin();
          variant1Iter != (*readIter).variantVec.end(); ++variant1Iter) {

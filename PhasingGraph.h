@@ -88,6 +88,8 @@ class SubEdge{
         ~SubEdge();
         
         void destroy();
+        // drop the spare capacity once no more connections are added
+        void shrinkToFit();
         
         void addSubEdge(int currentQuality, const Variant &connectNode, const std::string &readName, int baseQuality, double edgeWeight);
         std::pair<float,float> BestPair(int targetPos);
@@ -112,7 +114,6 @@ struct VoteResult{
 };
 
 struct VariantEdge{
-    std::string chrName;
     int currPos;
     SubEdge* alt;
     SubEdge* ref;

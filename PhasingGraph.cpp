@@ -71,6 +71,11 @@ void SubEdge::destroy(){
     CountTable().swap(altReadCount);
 }
 
+void SubEdge::shrinkToFit(){
+    refReadCount.shrink_to_fit();
+    altReadCount.shrink_to_fit();
+}
+
 // Count of pos in table, inserted as 0 if absent (as std::map::operator[]). The positions of one
 // read arrive in increasing order, so the search starts at the last position touched.
 float &SubEdge::findOrInsert(CountTable &table, size_t &hint, int pos){
