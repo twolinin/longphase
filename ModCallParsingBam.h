@@ -241,6 +241,17 @@ private:
   ReadBaseMods baseMods;
 
   MethPosTable *chrMethMap;
+  // What exportResult reads once the genotypes are known, when only the
+  // heterozygous positions are written (keepOutputPositions): the positions
+  // the table held, and the record and reference base of the heterozygous ones.
+  struct OutputPosition {
+    int pos;
+    MethPosInfo info;
+    std::string ref;    // as formatMethVcfLine takes it from the reference
+    bool pastReference; // pos is past the end of the reference
+  };
+  std::vector<int> tablePositions;
+  std::vector<OutputPosition> hetPositions;
   // names of the reads parsed so far, one after another; read i starts at nameStart[i]
   std::string readNames;
   std::vector<size_t> nameStart;
@@ -270,6 +281,9 @@ private:
   std::string buildInfoStr(const MethPosInfo &info) const;
   std::string formatMethVcfLine(int pos, const MethPosInfo &info,
                                 int chrLen) const;
+  std::string formatMethVcfLine(int pos, const MethPosInfo &info,
+                                const std::string &ref, int chrLen) const;
+  std::string referenceBase(int pos) const;
   void parse_CIGAR(const bam_hdr_t &bamHdr, const bam1_t &aln,
                    std::vector<ModReadVariant> &readVariantVec);
 
@@ -288,6 +302,9 @@ public:
   void dumpMethMap(const std::string &chrName, std::ofstream &out) const;
   void dumpReadStartEnd(const std::string &chrName, std::ofstream &out) const;
   void calculateDepth();
+  // keep only what exportResult needs, and drop the position table and the
+  // reference (unless every position is written)
+  void keepOutputPositions();
   void exportResult(const std::string &chrName, int chrLen,
                     std::vector<int> &passPosition,
                     std::ostringstream &modCallResult);

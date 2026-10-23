@@ -92,7 +92,9 @@ static void processChromosome(
     int chrLen          = chr.length;
 
     MethBamParser *methbamparser = runBamPipeline(chrName, chrSeq, chrLen, params, threadPool, snpFile, readVariantVec, modReadVariantVec);
-    // the graph and the export use only modReadVariantVec and the parser's position table
+    // the graph and the export use only modReadVariantVec and what the export
+    // needs of the parser's position table
+    methbamparser->keepOutputPositions();
     std::vector<ModReadVariant>().swap(readVariantVec);
     runGraphPipeline(chrName, params, modReadVariantVec, passPosition, snpFile);
     std::vector<ModReadVariant>().swap(modReadVariantVec);

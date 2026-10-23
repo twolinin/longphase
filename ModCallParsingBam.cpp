@@ -833,18 +833,26 @@ std::string MethBamParser::buildInfoStr(const MethPosInfo &info) const {
   return infostr;
 }
 
+// as std::string::substr(pos, 1) of the reference
+std::string MethBamParser::referenceBase(int pos) const {
+  if (size_t(pos) > reference.length()) {
+    throw std::out_of_range("formatMethVcfLine: position past the reference");
+  }
+  return size_t(pos) < reference.length() ? std::string(1, reference.at(pos))
+                                          : std::string();
+}
+
 std::string MethBamParser::formatMethVcfLine(
     int pos, const MethPosInfo &info, int chrLen) const {
   if (chrLen < pos)
     return "";
+  return formatMethVcfLine(pos, info, referenceBase(pos), chrLen);
+}
 
-  // as std::string::substr(pos, 1) of the reference
-  if (size_t(pos) > reference.length()) {
-    throw std::out_of_range("formatMethVcfLine: position past the reference");
-  }
-  std::string ref = size_t(pos) < reference.length()
-                        ? std::string(1, reference.at(pos))
-                        : std::string();
+std::string MethBamParser::formatMethVcfLine(
+    int pos, const MethPosInfo &info, const std::string &ref, int chrLen) const {
+  if (chrLen < pos)
+    return "";
   if (ref != "A" && ref != "T" && ref != "C" && ref != "G" &&
       ref != "a" && ref != "t" && ref != "c" && ref != "g")
     return "";
@@ -881,6 +889,24 @@ void MethBamParser::exportResult(const std::string &chrName,
       modCallResult << line;
     }
   } else {
+    // the table as keepOutputPositions left it: whether it holds a position,
+    // and the heterozygous ones
+    auto held = [this](int p) {
+      return std::binary_search(tablePositions.begin(), tablePositions.end(), p);
+    };
+    auto heterozygous = [this](int p) -> const OutputPosition * {
+      auto it = std::lower_bound(
+          hetPositions.begin(), hetPositions.end(), p,
+          [](const OutputPosition &o, int q) { return o.pos < q; });
+      return (it != hetPositions.end() && it->pos == p) ? &*it : nullptr;
+    };
+    auto line = [chrLen, this](const OutputPosition &o) {
+      if (chrLen < o.pos)
+        return std::string();
+      if (o.pastReference)
+        referenceBase(o.pos); // throws, as the reference lookup did
+      return formatMethVcfLine(o.pos, o.info, o.ref, chrLen);
+    };
     // used to track processed positions, avoid duplicate output
     std::set<int> processedPositions;
     // passPosition is already sorted, no need to sort again
@@ -890,38 +916,48 @@ void MethBamParser::exportResult(const std::string &chrName,
         continue;
       }
 
-      // process position pos
-      auto posinfoIter = chrMethMap->find(pos);
-      if (posinfoIter != chrMethMap->end()) {
-        // output all modified positions or only heterozygous positions
-        if (params->outputAllMod || posinfoIter->second.heterstatus == METH_GT_HET) {
-          std::string line =
-              formatMethVcfLine(pos, posinfoIter->second, chrLen);
-          if (line.empty())
-            continue;
-          modCallResult << line;
-        }
+      // process position pos; only heterozygous positions are written
+      if (const OutputPosition *o = heterozygous(pos)) {
+        std::string text = line(*o);
+        if (text.empty())
+          continue;
+        modCallResult << text;
       }
       processedPositions.insert(pos);
 
       // process position pos+1
       int nextPos = pos + 1;
-      auto nextPosinfoIter = chrMethMap->find(nextPos);
-      if (nextPosinfoIter != chrMethMap->end() &&
-          processedPositions.count(nextPos) == 0) {
-        // output all modified positions or only heterozygous positions
-        if (params->outputAllMod ||
-            nextPosinfoIter->second.heterstatus == METH_GT_HET) {
-          std::string line = formatMethVcfLine(
-              nextPos, nextPosinfoIter->second, chrLen);
-          if (line.empty())
+      if (held(nextPos) && processedPositions.count(nextPos) == 0) {
+        if (const OutputPosition *o = heterozygous(nextPos)) {
+          std::string text = line(*o);
+          if (text.empty())
             continue;
-          modCallResult << line;
+          modCallResult << text;
         }
         processedPositions.insert(nextPos);
       }
     }
   }
+}
+
+void MethBamParser::keepOutputPositions() {
+  if (params->outputAllMod) {
+    return;
+  }
+  for (auto &entry : *chrMethMap) {
+    tablePositions.push_back(entry.first);
+    if (entry.second.heterstatus == METH_GT_HET) {
+      const int pos = entry.first;
+      const bool past = size_t(pos) > reference.length();
+      hetPositions.push_back(
+          {pos, std::move(entry.second), past ? std::string() : referenceBase(pos), past});
+    }
+  }
+  tablePositions.shrink_to_fit();
+  hetPositions.shrink_to_fit();
+  delete chrMethMap;
+  chrMethMap = new MethPosTable;
+  reference = PackedReference(std::string());
 }
 
 void writeResultVCF(
@@ -1047,7 +1083,7 @@ void MethBamParser::filterModReadVariants(
     std::vector<ModReadVariant> &modReadVariantVec) {
   for (auto &read : readVariantVec) {
     ModReadVariant newRead;
-    newRead.read_name = read.read_name;
+    newRead.read_name = std::move(read.read_name);
     newRead.is_reverse = read.is_reverse;
 
     for (auto &variant : read.variantVec) {
@@ -1073,6 +1109,8 @@ void MethBamParser::filterModReadVariants(
         newRead.variantVec.emplace_back(variant);
       }
     }
+    // the read is not needed again
+    std::vector<Variant>().swap(read.variantVec);
     if (!newRead.variantVec.empty()) {
       modReadVariantVec.push_back(newRead);
     }
