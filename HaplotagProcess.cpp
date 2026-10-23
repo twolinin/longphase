@@ -107,21 +107,14 @@ int resolveHaplotypeDirection(char gt0, char gt2)
     return -1;
 }
 
-std::pair<int, int> scoreIndelSupport(bool readHasIndel, int hp1Length, int hp2Length)
+// a read with the indel supports the haplotype carrying it, a read without it the other one
+std::pair<int, int> scoreIndelSupport(bool readHasIndel, bool hp1HasIndel, bool hp2HasIndel)
 {
-    if (readHasIndel) {
-        if (hp1Length != 1 && hp2Length == 1)
-            return std::make_pair(1, 0);
-        if (hp1Length == 1 && hp2Length != 1)
-            return std::make_pair(0, 1);
-    }
-    else {
-        if (hp1Length != 1 && hp2Length == 1)
-            return std::make_pair(0, 1);
-        if (hp1Length == 1 && hp2Length != 1)
-            return std::make_pair(1, 0);
-    }
-    return std::make_pair(0, 0);
+    if (hp1HasIndel == hp2HasIndel)
+        return std::make_pair(0, 0);
+    if (readHasIndel == hp1HasIndel)
+        return std::make_pair(1, 0);
+    return std::make_pair(0, 1);
 }
 
 }
@@ -325,7 +318,7 @@ std::vector<int> HaplotagProcess::collectLastVariantPos() const {
         if (mapIter != chrVariant.end()) {
             auto lastVariantIter = mapIter->second.rbegin();
             if (lastVariantIter != mapIter->second.rend()) {
-                last_pos.push_back(lastVariantIter->second.ps);
+                last_pos.push_back(lastVariantIter->first);
             } else {
                 last_pos.push_back(0);
             }
@@ -667,10 +660,11 @@ void HaplotagProcess::collectMatchOpEvidence(const bam1_t &aln, const std::strin
             // currentVariant is insertion
             else if (refAlleleLen == 1 && altAlleleLen != 1 && cigarIdx + 1 < n_cigar) {
 
-                int hp1Length = (*variantIter).second.HP1.length();
-                int hp2Length = (*variantIter).second.HP2.length();
+                // the haplotype with the longer allele carries the insertion
+                bool hp1HasIndel = (*variantIter).second.HP1.length() != 1;
+                bool hp2HasIndel = (*variantIter).second.HP2.length() != 1;
                 bool readHasIndel = (ref_pos + length - 1 == (*variantIter).first && bam_cigar_op(cigar[cigarIdx+1]) == 1);
-                std::pair<int, int> indelScore = scoreIndelSupport(readHasIndel, hp1Length, hp2Length);
+                std::pair<int, int> indelScore = scoreIndelSupport(readHasIndel, hp1HasIndel, hp2HasIndel);
 
                 hp1Count += indelScore.first;
                 hp2Count += indelScore.second;
@@ -683,10 +677,11 @@ void HaplotagProcess::collectMatchOpEvidence(const bam1_t &aln, const std::strin
             // currentVariant is deletion
             else if (refAlleleLen != 1 && altAlleleLen == 1 && cigarIdx + 1 < n_cigar) {
 
-                int hp1Length = (*variantIter).second.HP1.length();
-                int hp2Length = (*variantIter).second.HP2.length();
+                // the haplotype with the one-base allele carries the deletion
+                bool hp1HasIndel = (*variantIter).second.HP1.length() == 1;
+                bool hp2HasIndel = (*variantIter).second.HP2.length() == 1;
                 bool readHasIndel = (ref_pos + length - 1 == (*variantIter).first && bam_cigar_op(cigar[cigarIdx+1]) == 2);
-                std::pair<int, int> indelScore = scoreIndelSupport(readHasIndel, hp1Length, hp2Length);
+                std::pair<int, int> indelScore = scoreIndelSupport(readHasIndel, hp1HasIndel, hp2HasIndel);
 
                 hp1Count += indelScore.first;
                 hp2Count += indelScore.second;
@@ -725,29 +720,14 @@ void HaplotagProcess::collectDeletionOpEvidence(const bam1_t &aln, const std::st
             int refAlleleLen = (*variantIter).second.Ref.length();
             int altAlleleLen = (*variantIter).second.Alt.length();
 
-            // SNP
-            if (refAlleleLen == 1 && altAlleleLen == 1) {
-                // get the next match
-                char base_chr = seq_nt16_str[bam_seqi(bam_get_seq(&aln), query_pos)];
-                std::string base(1, base_chr);
-
-                if (base == (*variantIter).second.HP1) {
-                    hp1Count++;
-                    variantsHP[(*variantIter).first]=0;
-                }
-                if (base == (*variantIter).second.HP2) {
-                    hp2Count++;
-                    variantsHP[(*variantIter).first]=1;
-                }
-                countPS[(*variantIter).second.ps]++;
-            }
+            // a SNP inside the read's deletion has no base in the read, so it does not vote
 
             // the read deletion contain VCF's deletion
-            else if (refAlleleLen != 1 && altAlleleLen == 1) {
+            if (refAlleleLen != 1 && altAlleleLen == 1) {
 
-                int hp1Length = (*variantIter).second.HP1.length();
-                int hp2Length = (*variantIter).second.HP2.length();
-                std::pair<int, int> indelScore = scoreIndelSupport(true, hp1Length, hp2Length);
+                bool hp1HasIndel = (*variantIter).second.HP1.length() == 1;
+                bool hp2HasIndel = (*variantIter).second.HP2.length() == 1;
+                std::pair<int, int> indelScore = scoreIndelSupport(true, hp1HasIndel, hp2HasIndel);
 
                 hp1Count += indelScore.first;
                 hp2Count += indelScore.second;
