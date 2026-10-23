@@ -5,6 +5,15 @@
 #include "ParsingBam.h"
 #include <cmath>
 
+// A phased variant of the SNP vcf: its alleles, phase set, and the allele on
+// each haplotype ("" unless the GT is 0|1 or 1|0)
+struct TagVariant : SnpVariant
+{
+    int ps = 0;
+    std::string HP1;
+    std::string HP2;
+};
+
 struct HaplotagParameters
 {
     int numThreads;
@@ -48,24 +57,20 @@ class HaplotagProcess
     void resolveRegionScope(const HaplotagParameters &params);
     void tagChromosome(const std::string &chr, const HaplotagParameters &params,
                        samFile *in, samFile *out, bam_hdr_t *bamHdr, hts_idx_t *idx,
-                       bam1_t *aln, const std::string &chr_reference, std::ofstream *tagResult);
+                       bam1_t *aln, bool hasReference, std::ofstream *tagResult);
     void writeUnmappedTail(samFile *in, samFile *out, bam_hdr_t *bamHdr, hts_idx_t *idx);
     void tagRead(HaplotagParameters &params);
     
     std::vector<std::string> chrVec;
     std::map<std::string, int> chrLength;
     
-    // chr, variant position (0-base), allele haplotype
-    std::map<std::string, std::map<int, SnpVariant> > chrVariant;
-    // chr, variant position (0-base), phased set
+    // chr, variant position (0-base), alleles, phased set and haplotype alleles
+    std::map<std::string, std::map<int, TagVariant> > chrVariant;
+    // phased set string, its index (PS of Type=String)
     std::map<std::string, int > psIndex;
-    std::map<std::string, std::map<int, int> > chrVariantPS;
-    
-    std::map<std::string, std::map<int, std::string> > chrVariantHP1;
-    std::map<std::string, std::map<int, std::string> > chrVariantHP2;
 
-    std::map<int, SnpVariant> currentChrVariants;
-    std::map<int, SnpVariant>::iterator firstVariantIter;
+    std::map<int, TagVariant> currentChrVariants;
+    std::map<int, TagVariant>::iterator firstVariantIter;
     // The number of SVs occurring on different haplotypes in a read
     std::map<std::string, std::map<int, int> > readSVHapCount;
 
@@ -83,13 +88,13 @@ class HaplotagProcess
     void collectMatchOpEvidence(const bam1_t &aln, const std::string &chrName,
                                 int ref_pos, int query_pos, int length,
                                 int cigarIdx, int n_cigar, const uint32_t *cigar,
-                                std::map<int, SnpVariant>::iterator &variantIter,
+                                std::map<int, TagVariant>::iterator &variantIter,
                                 std::map<int, int> &variantsHP, std::map<int, int> &countPS,
                                 int &hp1Count, int &hp2Count);
     void collectDeletionOpEvidence(const bam1_t &aln, const std::string &chrName,
                                    int ref_pos, int query_pos, int length,
-                                   const std::string &ref_string,
-                                   std::map<int, SnpVariant>::iterator &variantIter,
+                                   bool hasReference,
+                                   std::map<int, TagVariant>::iterator &variantIter,
                                    std::map<int, int> &variantsHP, std::map<int, int> &countPS,
                                    int &hp1Count, int &hp2Count);
     int decideHaplotype(int hp1Count, int hp2Count, const std::map<int, int> &countPS,
@@ -98,7 +103,7 @@ class HaplotagProcess
                          int hpResult, int hp1Count, int hp2Count,
                          const std::map<int, int> &variantsHP, const std::map<int, int> &countPS,
                          int pqValue, std::ofstream *tagResult);
-    int judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, std::string chrName, double percentageThreshold, std::ofstream *tagResult, int &pqValue, const std::string &ref_string, int svWindow, double svThreshold);
+    int judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, std::string chrName, double percentageThreshold, std::ofstream *tagResult, int &pqValue, bool hasReference, int svWindow, double svThreshold);
     
     int totalAlignment;
     int totalSupplementary;
