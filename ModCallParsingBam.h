@@ -271,12 +271,21 @@ private:
   // By default, a Map in C++ is sorted in increasing order based on its key.
   // position, edge
   std::map<int, VariantEdge *> *edgeList;
-  // record all variant position, include SNP and SV
-  // <position, <readID, VariantType>>
-  std::map<int, std::map<std::string, VariantType>> *nodeInfo;
+  // every variant position, include SNP and SV, sorted by position: the
+  // number of distinct read names that cover it, and the type recorded by the
+  // read whose name sorts first (the last record of that name wins)
+  struct NodeSummary {
+    int readCount;
+    int type;
+  };
+  typedef std::vector<std::pair<int, NodeSummary>> NodeList;
+  NodeList nodeInfo;
+  NodeList::const_iterator findNode(int position) const;
+  int nodeReadCount(int position) const;
   // check the variant type of the position
   int checkVariantType(int position);
   float computeMinConnection(int pos1, int pos2) const;
+  void buildNodeInfo(const std::vector<ModReadVariant> &reads);
   double computeMajorRatio(std::pair<int, int> counts) const;
   bool isGoodConnection(std::pair<int, int> counts, float minConn) const;
   void collectAllModPoints(std::set<int> &strongPoints);

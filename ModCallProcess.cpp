@@ -92,7 +92,10 @@ static void processChromosome(
     int chrLen          = chr.length;
 
     MethBamParser *methbamparser = runBamPipeline(chrName, chrSeq, chrLen, params, threadPool, snpFile, readVariantVec, modReadVariantVec);
+    // the graph and the export use only modReadVariantVec and the parser's position table
+    std::vector<ModReadVariant>().swap(readVariantVec);
     runGraphPipeline(chrName, params, modReadVariantVec, passPosition, snpFile);
+    std::vector<ModReadVariant>().swap(modReadVariantVec);
 
     methbamparser->exportResult(chrName, chrLen, passPosition, result);
 #ifdef VALIDATE_EXPORT
@@ -103,11 +106,6 @@ static void processChromosome(
     }
 #endif
     delete methbamparser;
-
-    readVariantVec.clear();
-    readVariantVec.shrink_to_fit();
-    modReadVariantVec.clear();
-    modReadVariantVec.shrink_to_fit();
 
     std::cerr<< "(" << chrName << "," << difftime(time(NULL), chrbegin) << "s)";
 }

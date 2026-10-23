@@ -923,7 +923,6 @@ void MethBamParser::calculateDepth() {
 
 MethylationGraph::MethylationGraph(ModCallParameters &in_params) {
   params = &in_params;
-  nodeInfo = new std::map<int, std::map<std::string, VariantType>>;
   edgeList = new std::map<int, VariantEdge *>;
   forwardModNode = new std::map<int, ReadBaseMap *>;
   reverseModNode = new std::map<int, ReadBaseMap *>;
@@ -934,46 +933,40 @@ MethylationGraph::~MethylationGraph() {}
 void MethylationGraph::addEdge(std::vector<ModReadVariant> &in_readVariant,
                                std::string chrName) {
   readVariant = &in_readVariant;
+  buildNodeInfo(in_readVariant);
   int readCount = 0;
   int vectorSize = 0;
   // iter all read
   for (std::vector<ModReadVariant>::iterator readIter = in_readVariant.begin();
        readIter != in_readVariant.end(); readIter++) {
-    ModReadVariant tmpRead;
     vectorSize += (*readIter).variantVec.size();
     readCount++;
-
-    for (auto variant : (*readIter).variantVec) {
-      auto nodeIter = nodeInfo->find(variant.position);
-
-      if (nodeIter == nodeInfo->end()) {
-        (*nodeInfo)[variant.position] = std::map<std::string, VariantType>();
-      }
-      (*nodeInfo)[variant.position][(*readIter).read_name] = variant.type;
-    }
 
     for (auto variant1Iter = (*readIter).variantVec.begin();
          variant1Iter != (*readIter).variantVec.end(); ++variant1Iter) {
       auto variant2Iter = std::next(variant1Iter);
       int searchCount = 0;
+      // the edges of variant1, found or created when first needed
+      VariantEdge *edge = nullptr;
       while (variant2Iter != (*readIter).variantVec.end() && searchCount < 50) {
         if (!(variant1Iter->type == VariantType::SNP &&
               variant2Iter->type == VariantType::SNP)) {
 
-          int pos = variant1Iter->position;
-          auto edgeIter = edgeList->find(pos);
-          if (edgeIter == edgeList->end()) {
-            (*edgeList)[pos] = new VariantEdge(pos);
+          if (edge == nullptr) {
+            int pos = variant1Iter->position;
+            auto edgeIter = edgeList->lower_bound(pos);
+            if (edgeIter == edgeList->end() || edgeIter->first != pos) {
+              edgeIter = edgeList->emplace_hint(edgeIter, pos, new VariantEdge(pos));
+            }
+            edge = edgeIter->second;
           }
 
           if (variant1Iter->allele == 0) {
-            (*edgeList)[pos]->ref->addSubEdge(variant1Iter->quality,
-                                              *variant2Iter,
-                                              readIter->read_name, 0, 1);
+            edge->ref->addSubEdge(variant1Iter->quality, *variant2Iter,
+                                  readIter->read_name, 0, 1);
           } else if (variant1Iter->allele == 1) {
-            (*edgeList)[pos]->alt->addSubEdge(variant1Iter->quality,
-                                              *variant2Iter,
-                                              readIter->read_name, 0, 1);
+            edge->alt->addSubEdge(variant1Iter->quality, *variant2Iter,
+                                  readIter->read_name, 0, 1);
           }
         }
         ++searchCount;
@@ -981,6 +974,86 @@ void MethylationGraph::addEdge(std::vector<ModReadVariant> &in_readVariant,
       }
     }
   }
+}
+
+void MethylationGraph::buildNodeInfo(const std::vector<ModReadVariant> &reads) {
+  // rank the read names; equal names share a rank
+  std::vector<uint32_t> order(reads.size());
+  for (uint32_t i = 0; i < order.size(); i++) {
+    order[i] = i;
+  }
+  std::sort(order.begin(), order.end(), [&reads](uint32_t a, uint32_t b) {
+    return reads[a].read_name < reads[b].read_name;
+  });
+  std::vector<uint32_t> nameRank(reads.size());
+  uint32_t rank = 0;
+  for (size_t i = 0; i < order.size(); i++) {
+    if (i > 0 && reads[order[i - 1]].read_name != reads[order[i]].read_name) {
+      rank++;
+    }
+    nameRank[order[i]] = rank;
+  }
+
+  // one record per (read, variant), in the order they were seen
+  struct Record {
+    int position;
+    uint32_t rank;
+    uint64_t seen;
+    int type;
+  };
+  std::vector<Record> records;
+  uint64_t seen = 0;
+  for (size_t r = 0; r < reads.size(); r++) {
+    for (const auto &variant : reads[r].variantVec) {
+      records.push_back({variant.position, nameRank[r], seen++, variant.type});
+    }
+  }
+  std::sort(records.begin(), records.end(),
+            [](const Record &a, const Record &b) {
+              if (a.position != b.position)
+                return a.position < b.position;
+              if (a.rank != b.rank)
+                return a.rank < b.rank;
+              return a.seen < b.seen;
+            });
+
+  nodeInfo.clear();
+  for (size_t i = 0; i < records.size();) {
+    const int position = records[i].position;
+    NodeSummary summary = {0, -1};
+    size_t j = i;
+    while (j < records.size() && records[j].position == position) {
+      // the last record of each name is the one a map keyed by name keeps
+      size_t last = j;
+      while (last + 1 < records.size() &&
+             records[last + 1].position == position &&
+             records[last + 1].rank == records[j].rank) {
+        last++;
+      }
+      if (summary.readCount == 0) {
+        summary.type = records[last].type;
+      }
+      summary.readCount++;
+      j = last + 1;
+    }
+    nodeInfo.emplace_back(position, summary);
+    i = j;
+  }
+}
+
+MethylationGraph::NodeList::const_iterator
+MethylationGraph::findNode(int position) const {
+  auto it = std::lower_bound(
+      nodeInfo.begin(), nodeInfo.end(), position,
+      [](const std::pair<int, NodeSummary> &node, int pos) {
+        return node.first < pos;
+      });
+  return (it != nodeInfo.end() && it->first == position) ? it : nodeInfo.end();
+}
+
+int MethylationGraph::nodeReadCount(int position) const {
+  auto it = findNode(position);
+  return it == nodeInfo.end() ? 0 : it->second.readCount;
 }
 
 void MethylationGraph::connectResults(std::string chrName,
@@ -1005,7 +1078,7 @@ void MethylationGraph::connectResults(std::string chrName,
 }
 
 float MethylationGraph::computeMinConnection(int pos1, int pos2) const {
-  return std::max(((*nodeInfo)[pos1].size() + (*nodeInfo)[pos2].size()) / 4.0,
+  return std::max((size_t(nodeReadCount(pos1)) + size_t(nodeReadCount(pos2))) / 4.0,
                   6.0);
 }
 
@@ -1022,7 +1095,7 @@ bool MethylationGraph::isGoodConnection(std::pair<int, int> counts,
 }
 
 void MethylationGraph::collectAllModPoints(std::set<int> &strongPoints) {
-  for (auto nodeIter = nodeInfo->begin(); nodeIter != nodeInfo->end();
+  for (auto nodeIter = nodeInfo.begin(); nodeIter != nodeInfo.end();
        ++nodeIter) {
     if (checkVariantType(nodeIter->first) == VariantType::MOD) {
       strongPoints.insert(nodeIter->first);
@@ -1036,12 +1109,12 @@ void MethylationGraph::collectStrongPoints(std::set<int> &strongPoints,
   // positions that reached a SNP (membership only)
   std::set<int> hasConnect;
 
-  for (auto nodeIter = nodeInfo->begin(); nodeIter != nodeInfo->end();
+  for (auto nodeIter = nodeInfo.begin(); nodeIter != nodeInfo.end();
        ++nodeIter) {
     int currPos = nodeIter->first;
     auto nextNodeIter = std::next(nodeIter, 1);
     int searchCount = 0;
-    if (nextNodeIter == nodeInfo->end()) {
+    if (nextNodeIter == nodeInfo.end()) {
       break;
     }
 
@@ -1051,7 +1124,7 @@ void MethylationGraph::collectStrongPoints(std::set<int> &strongPoints,
 
     if (checkVariantType(currPos) == VariantType::MOD) {
       auto searchNodeIter = nextNodeIter;
-      while (searchNodeIter != nodeInfo->end() &&
+      while (searchNodeIter != nodeInfo.end() &&
              searchCount < params->connectAdjacent) {
         std::pair<int, int> tmp =
             edgeIter->second->findNumberOfRead(searchNodeIter->first);
@@ -1078,7 +1151,7 @@ void MethylationGraph::collectStrongPoints(std::set<int> &strongPoints,
     } else if (checkVariantType(currPos) == VariantType::SNP) {
       auto searchNodeIter = nextNodeIter;
       prepass.push_back(currPos);
-      while (searchNodeIter != nodeInfo->end()) {
+      while (searchNodeIter != nodeInfo.end()) {
         std::pair<int, int> tmp =
             edgeIter->second->findNumberOfRead(searchNodeIter->first);
         int totalConnectReads = tmp.first + tmp.second;
@@ -1228,7 +1301,7 @@ void MethylationGraph::filterByNeighborConnection(
     int pos = prepass[i];
     bool hasGoodPrevConnection = false;
     bool hasGoodNextConnection = false;
-    if (nodeInfo->find(pos) != nodeInfo->end()) {
+    if (findNode(pos) != nodeInfo.end()) {
       if (checkVariantType(pos) == VariantType::SNP) {
         continue;
       }
@@ -1281,20 +1354,17 @@ void MethylationGraph::filterByNeighborConnection(
 }
 
 int MethylationGraph::checkVariantType(int position) {
-  auto nodeIter = nodeInfo->find(position);
-  if (nodeIter != nodeInfo->end()) {
-    for (const auto &nodeType : nodeIter->second) {
-      if (nodeType.second == VariantType::MOD) {
-        return VariantType::MOD; // Return true if any type is MOD
-      } else if (nodeType.second == VariantType::SNP) {
-        return VariantType::SNP; // Return true if any type is SNP
-      } else if (nodeType.second == VariantType::INDEL) {
-        return VariantType::INDEL; // Return true if any type is INDEL
-      } else if (nodeType.second == VariantType::SV) {
-        return VariantType::SV; // Return true if any type is SV
-      } else {
-        return -1; // Return -1 if no variant type is found
-      }
+  // the type recorded by the read whose name sorts first
+  auto nodeIter = findNode(position);
+  if (nodeIter != nodeInfo.end()) {
+    switch (nodeIter->second.type) {
+    case VariantType::MOD:
+    case VariantType::SNP:
+    case VariantType::INDEL:
+    case VariantType::SV:
+      return nodeIter->second.type;
+    default:
+      return -1; // Return -1 if no variant type is found
     }
   }
   return -1; // Return -1 if the position is not in the nodeInfo
@@ -1308,6 +1378,7 @@ void MethylationGraph::destroy() {
     edgeIter->second->alt->destroy();
     delete edgeIter->second->ref;
     delete edgeIter->second->alt;
+    delete edgeIter->second;
   }
 
   for (auto nodeIter = forwardModNode->begin();
@@ -1320,7 +1391,7 @@ void MethylationGraph::destroy() {
     delete nodeIter->second;
   }
 
-  delete nodeInfo;
+  NodeList().swap(nodeInfo);
   delete edgeList;
 }
 
