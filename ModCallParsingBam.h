@@ -14,22 +14,97 @@
 #include <htslib/thread_pool.h>
 #include <htslib/vcf.h>
 #include <htslib/vcfutils.h>
+#include <deque>
+#include <type_traits>
+
+// genotype of a methylation position; "" until it is judged
+enum MethGenotype : uint8_t { METH_GT_NONE, METH_GT_HET, METH_GT_HOM_MOD, METH_GT_HOM_UNMOD };
+const char *methGenotypeString(uint8_t gt);
 
 struct MethPosInfo {
   MethPosInfo()
       : methreadcnt(0), noisereadcnt(0), canonreadcnt(0), depth(0),
-        heterstatus(""), strand(-1), variantType(VariantType::MOD) {}
+        heterstatus(METH_GT_NONE), strand(-1), variantType(VariantType::MOD) {}
 
   int methreadcnt;
   int noisereadcnt;
   int canonreadcnt;
   int depth;
-  std::string heterstatus;
-  int strand; // 0: + , 1: -
+  uint8_t heterstatus; // MethGenotype
+  int8_t strand; // 0: + , 1: -
   VariantType variantType;
-  // reads by their index in MethBamParser's name list
-  std::vector<uint32_t> modReadVec;
-  std::vector<uint32_t> nonModReadVec;
+  // reads in the order they were seen, by their index in MethBamParser's name
+  // list: index << 1 for a modified call, index << 1 | 1 for an unmodified one
+  std::vector<uint32_t> readCalls;
+};
+
+// The methylation positions of a chromosome by position, as a std::map<int,
+// MethPosInfo> would hold them, in blocks of 1024 bases that are sorted
+// arrays. Reads come in order of their start, so the positions are mostly
+// added at the end of a block, and the blocks behind the reads can be
+// trimmed to their size (shrinkBefore).
+class MethPosTable {
+public:
+  typedef std::pair<int, MethPosInfo> value_type;
+
+private:
+  typedef std::vector<value_type> Block;
+  static const int blockShift = 10;
+  // blocks[i] holds the positions p with p >> blockShift == firstBlock + i
+  std::deque<Block> blocks;
+  long firstBlock = 0;
+  // blocks before this index have been trimmed
+  size_t trimmed = 0;
+
+  static long blockOf(int pos) { return long(pos) >> blockShift; }
+  Block *blockFor(int pos);
+  const Block *blockFor(int pos) const {
+    return const_cast<MethPosTable *>(this)->blockFor(pos);
+  }
+
+public:
+  template <bool Const> class Iter {
+    typedef typename std::conditional<Const, const MethPosTable, MethPosTable>::type Table;
+    Table *table;
+    size_t block, index;
+    void skipEmpty() {
+      while (block < table->blocks.size() && index >= table->blocks[block].size()) {
+        block++;
+        index = 0;
+      }
+    }
+
+  public:
+    typedef typename std::conditional<Const, const value_type, value_type>::type Value;
+    Iter(Table *t, size_t b, size_t i) : table(t), block(b), index(i) { skipEmpty(); }
+    Value &operator*() const { return table->blocks[block][index]; }
+    Value *operator->() const { return &table->blocks[block][index]; }
+    Iter &operator++() {
+      index++;
+      skipEmpty();
+      return *this;
+    }
+    Iter operator++(int) {
+      Iter old = *this;
+      ++*this;
+      return old;
+    }
+    bool operator==(const Iter &o) const { return block == o.block && index == o.index; }
+    bool operator!=(const Iter &o) const { return !(*this == o); }
+  };
+  typedef Iter<false> iterator;
+  typedef Iter<true> const_iterator;
+
+  iterator begin() { return iterator(this, 0, 0); }
+  iterator end() { return iterator(this, blocks.size(), 0); }
+  const_iterator begin() const { return const_iterator(this, 0, 0); }
+  const_iterator end() const { return const_iterator(this, blocks.size(), 0); }
+  iterator find(int pos);
+  const_iterator find(int pos) const;
+  // the entry at pos, added if absent (as std::map::operator[])
+  MethPosInfo &operator[](int pos);
+  // trims the blocks that lie wholly before pos
+  void shrinkBefore(int pos);
 };
 
 // The ReferenceChromosome struct is used to store information about a reference
@@ -121,7 +196,7 @@ private:
   // what the reads and the output need of the chromosome's reference
   PackedReference reference;
 
-  std::map<int, MethPosInfo> *chrMethMap;
+  MethPosTable *chrMethMap;
   // names of the reads parsed so far, one after another; read i starts at nameStart[i]
   std::string readNames;
   std::vector<size_t> nameStart;
