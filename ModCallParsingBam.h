@@ -14,7 +14,11 @@
 #include <htslib/thread_pool.h>
 #include <htslib/vcf.h>
 #include <htslib/vcfutils.h>
+#include <atomic>
 #include <deque>
+#include <fstream>
+#include <functional>
+#include <mutex>
 #include <type_traits>
 
 // genotype of a methylation position; "" until it is judged
@@ -307,16 +311,51 @@ public:
   void keepOutputPositions();
   void exportResult(const std::string &chrName, int chrLen,
                     std::vector<int> &passPosition,
-                    std::ostringstream &modCallResult);
+                    const std::function<void(const std::string &)> &write);
   void judgeMethGenotype(std::string chrName,
                          std::vector<ModReadVariant> &readVariantVec,
                          std::vector<ModReadVariant> &modReadVariantVec);
   void dumpMethGenoMap(const std::string &chrName, std::ofstream &out) const;
 };
 
-void writeResultVCF(ModCallParameters &params,
-                    std::vector<ReferenceChromosome> &chrInfo,
-                    std::map<std::string, std::ostringstream> &chrResult);
+// The modcall VCF, with the chromosomes' records in the order of the reference
+// while the chromosomes are called by several threads: a chromosome's records
+// go to the file once every chromosome before it is written, and are held
+// deflated until then (--all writes every position, and its records deflate
+// to about a fifteenth).
+class ModCallVcfWriter {
+public:
+  ModCallVcfWriter(ModCallParameters &params,
+                   const std::vector<ReferenceChromosome> &chrInfo);
+  ModCallVcfWriter(const ModCallVcfWriter &) = delete;
+  ModCallVcfWriter &operator=(const ModCallVcfWriter &) = delete;
+  // records of chromosome i (its index in chrInfo), from one thread at a time
+  void append(size_t i, const std::string &records);
+  // after the last records of chromosome i
+  void finish(size_t i);
+
+private:
+  struct Chunk {
+    std::string deflated;
+    size_t size;
+  };
+  struct Chromosome {
+    std::string pending;     // not yet written or held
+    std::vector<Chunk> held; // until the chromosomes before are written
+    bool finished = false;
+  };
+  static const size_t chunkSize = 4 << 20;
+  std::vector<char> vcfBuffer;
+  std::ofstream vcf;
+  std::vector<Chromosome> chromosomes;
+  std::mutex mutex;
+  // the chromosomes before it are written, and it writes straight to the file;
+  // moved by finish, with the mutex locked
+  std::atomic<size_t> front{0};
+  void flush(size_t i);
+  // with the mutex locked
+  void writeHeld(Chromosome &c);
+};
 
 class MethylationGraph {
 private:

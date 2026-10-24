@@ -9,10 +9,12 @@
 #include <climits>
 #include <cmath>
 #include <fstream>
+#include <future>
 #include <iostream>
 #include <sstream>
 #include <string.h>
 #include <typeinfo>
+#include <zlib.h>
 
 MethFastaParser::MethFastaParser(std::string fastaFile,
                                  std::vector<ReferenceChromosome> &chrInfo) {
@@ -878,7 +880,7 @@ std::string MethBamParser::formatMethVcfLine(
 
 void MethBamParser::exportResult(const std::string &chrName,
                                  int chrLen, std::vector<int> &passPosition,
-                                 std::ostringstream &modCallResult) {
+                                 const std::function<void(const std::string &)> &write) {
 
   if (params->outputAllMod) {
     for (const auto &pair : *chrMethMap) {
@@ -888,7 +890,7 @@ void MethBamParser::exportResult(const std::string &chrName,
       // not end the chromosome
       if (line.empty())
         continue;
-      modCallResult << line;
+      write(line);
     }
   } else {
     // the table as keepOutputPositions left it: whether it holds a position,
@@ -923,7 +925,7 @@ void MethBamParser::exportResult(const std::string &chrName,
         std::string text = line(*o);
         if (text.empty())
           continue;
-        modCallResult << text;
+        write(text);
       }
       processedPositions.insert(pos);
 
@@ -934,7 +936,7 @@ void MethBamParser::exportResult(const std::string &chrName,
           std::string text = line(*o);
           if (text.empty())
             continue;
-          modCallResult << text;
+          write(text);
         }
         processedPositions.insert(nextPos);
       }
@@ -962,44 +964,122 @@ void MethBamParser::keepOutputPositions() {
   reference = PackedReference(std::string());
 }
 
-void writeResultVCF(
-    ModCallParameters &params, std::vector<ReferenceChromosome> &chrInfo,
-    std::map<std::string, std::ostringstream> &chrModCallResult) {
-
-  std::ofstream modCallResultVcf(params.resultPrefix + ".vcf",
-                                 std::ios_base::out | std::ios_base::trunc);
-  if (!modCallResultVcf.is_open()) {
+ModCallVcfWriter::ModCallVcfWriter(
+    ModCallParameters &params, const std::vector<ReferenceChromosome> &chrInfo)
+    : vcfBuffer(chunkSize), chromosomes(chrInfo.size()) {
+  // records come a line at a time; write them in large pieces
+  vcf.rdbuf()->pubsetbuf(vcfBuffer.data(), vcfBuffer.size());
+  vcf.open(params.resultPrefix + ".vcf", std::ios_base::out | std::ios_base::trunc);
+  if (!vcf.is_open()) {
     std::cerr << "Fail to open output file :\n";
-  } else {
-    // set vcf header
-    modCallResultVcf << "##fileformat=VCFv4.2\n";
-    modCallResultVcf
-        << "##INFO=<ID=RS,Number=.,Type=String,Description=\"Read Strand\">\n";
-    modCallResultVcf << "##INFO=<ID=MR,Number=.,Type=String,Description=\"Read "
-                        "Name of Modified position\">\n";
-    modCallResultVcf << "##INFO=<ID=NR,Number=.,Type=String,Description=\"Read "
-                        "Name of nonModified position\">\n";
-    modCallResultVcf
-        << "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n";
-    modCallResultVcf << "##FORMAT=<ID=MD,Number=1,Type=Integer,Description="
-                        "\"Modified Depth\">\n";
-    modCallResultVcf << "##FORMAT=<ID=UD,Number=1,Type=Integer,Description="
-                        "\"Unmodified Depth\">\n";
-    modCallResultVcf << "##FORMAT=<ID=DP,Number=1,Type=Integer,Description="
-                        "\"Read Depth\">\n";
-    for (const auto &chrIter : chrInfo) {
-      modCallResultVcf << "##contig=<ID=" << chrIter.name
-                       << ",length=" << chrIter.length << ">\n";
-    }
-    modCallResultVcf << "##longphaseVersion=" << params.version << "\n";
-    modCallResultVcf << "##commandline=\"" << params.command << "\"\n";
-    modCallResultVcf
-        << "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSAMPLE\n";
+    return;
+  }
+  // set vcf header
+  vcf << "##fileformat=VCFv4.2\n";
+  vcf << "##INFO=<ID=RS,Number=.,Type=String,Description=\"Read Strand\">\n";
+  vcf << "##INFO=<ID=MR,Number=.,Type=String,Description=\"Read "
+         "Name of Modified position\">\n";
+  vcf << "##INFO=<ID=NR,Number=.,Type=String,Description=\"Read "
+         "Name of nonModified position\">\n";
+  vcf << "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n";
+  vcf << "##FORMAT=<ID=MD,Number=1,Type=Integer,Description="
+         "\"Modified Depth\">\n";
+  vcf << "##FORMAT=<ID=UD,Number=1,Type=Integer,Description="
+         "\"Unmodified Depth\">\n";
+  vcf << "##FORMAT=<ID=DP,Number=1,Type=Integer,Description="
+         "\"Read Depth\">\n";
+  for (const auto &chrIter : chrInfo) {
+    vcf << "##contig=<ID=" << chrIter.name << ",length=" << chrIter.length
+        << ">\n";
+  }
+  vcf << "##longphaseVersion=" << params.version << "\n";
+  vcf << "##commandline=\"" << params.command << "\"\n";
+  vcf << "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSAMPLE\n";
+}
 
-    // set vcf body
-    for (const auto &chrIter : chrInfo) {
-      modCallResultVcf << chrModCallResult[chrIter.name].str();
+void ModCallVcfWriter::append(size_t i, const std::string &records) {
+  Chromosome &c = chromosomes[i];
+  // only finish(i) moves the front past i, so until then nothing else writes
+  if (front.load(std::memory_order_acquire) == i) {
+    if (!c.pending.empty())
+      flush(i);
+    vcf.write(records.data(), records.size());
+    return;
+  }
+  c.pending += records;
+  if (c.pending.size() >= chunkSize)
+    flush(i);
+}
+
+void ModCallVcfWriter::flush(size_t i) {
+  Chromosome &c = chromosomes[i];
+  if (c.pending.empty())
+    return;
+  if (front.load(std::memory_order_acquire) == i) {
+    vcf.write(c.pending.data(), c.pending.size());
+    c.pending.clear();
+    return;
+  }
+  Chunk chunk;
+  chunk.size = c.pending.size();
+  uLongf deflatedSize = compressBound(chunk.size);
+  chunk.deflated.resize(deflatedSize);
+  if (compress2(reinterpret_cast<Bytef *>(&chunk.deflated[0]), &deflatedSize,
+                reinterpret_cast<const Bytef *>(c.pending.data()), chunk.size,
+                1) != Z_OK) {
+    throw std::runtime_error("modcall: cannot deflate the output");
+  }
+  chunk.deflated.resize(deflatedSize);
+  chunk.deflated.shrink_to_fit();
+  {
+    std::lock_guard<std::mutex> lock(mutex);
+    if (front == i) {
+      // the chromosomes before were written meanwhile, and what this one held
+      vcf.write(c.pending.data(), c.pending.size());
+    } else {
+      c.held.push_back(std::move(chunk));
     }
+  }
+  c.pending.clear();
+}
+
+static std::string inflateChunk(const std::string &deflated, size_t size) {
+  std::string text(size, '\0');
+  uLongf inflatedSize = size;
+  if (uncompress(reinterpret_cast<Bytef *>(&text[0]), &inflatedSize,
+                 reinterpret_cast<const Bytef *>(deflated.data()),
+                 deflated.size()) != Z_OK ||
+      inflatedSize != size) {
+    throw std::runtime_error("modcall: cannot inflate the output");
+  }
+  return text;
+}
+
+void ModCallVcfWriter::writeHeld(Chromosome &c) {
+  // inflate the next chunk while one is written
+  std::future<std::string> next;
+  for (size_t k = 0; k < c.held.size(); k++) {
+    std::string text = k == 0 ? inflateChunk(c.held[k].deflated, c.held[k].size)
+                              : next.get();
+    if (k + 1 < c.held.size())
+      next = std::async(std::launch::async, inflateChunk,
+                        std::cref(c.held[k + 1].deflated), c.held[k + 1].size);
+    vcf.write(text.data(), text.size());
+  }
+  std::vector<Chunk>().swap(c.held);
+}
+
+void ModCallVcfWriter::finish(size_t i) {
+  flush(i);
+  std::string().swap(chromosomes[i].pending);
+  std::lock_guard<std::mutex> lock(mutex);
+  chromosomes[i].finished = true;
+  for (size_t f = front; f < chromosomes.size() && chromosomes[f].finished;) {
+    f++;
+    // what the next one held goes first, then it writes straight to the file
+    if (f < chromosomes.size())
+      writeHeld(chromosomes[f]);
+    front.store(f, std::memory_order_release);
   }
 }
 

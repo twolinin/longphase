@@ -79,7 +79,8 @@ static void processChromosome(
     ModCallParameters &params,
     htsThreadPool &threadPool,
     MethSnpParser &snpFile,
-    std::ostringstream &result)
+    ModCallVcfWriter &vcf,
+    size_t chrIndex)
 {
     std::time_t chrbegin = time(NULL);
 
@@ -99,7 +100,17 @@ static void processChromosome(
     runGraphPipeline(chrName, params, modReadVariantVec, passPosition, snpFile);
     std::vector<ModReadVariant>().swap(modReadVariantVec);
 
-    methbamparser->exportResult(chrName, chrLen, passPosition, result);
+#ifdef VALIDATE_EXPORT
+    std::ostringstream result;
+#endif
+    methbamparser->exportResult(chrName, chrLen, passPosition,
+                                [&](const std::string &records) {
+        vcf.append(chrIndex, records);
+#ifdef VALIDATE_EXPORT
+        result << records;
+#endif
+    });
+    vcf.finish(chrIndex);
 #ifdef VALIDATE_EXPORT
     #pragma omp critical (validate_export_dump)
     {
@@ -150,11 +161,8 @@ ModCallProcess::ModCallProcess(ModCallParameters params){
     MethFastaParser MethFastaParser(params.fastaFile, chrInfo);
     std::cerr<< difftime(time(NULL), begin) << "s\n";
 
-    // record all ModCall result; pre-populate to avoid race conditions in parallel region
-    std::map<std::string,std::ostringstream> chrModCallResult;
-    for (auto chrIter = chrInfo.begin(); chrIter != chrInfo.end(); chrIter++) {
-        chrModCallResult[chrIter->name] = std::ostringstream();
-    }
+    // the chromosomes are written as they are called, in the reference's order
+    ModCallVcfWriter vcf(params, chrInfo);
 
     htsThreadPool threadPool = {NULL, 0};
     if (!(threadPool.pool = hts_tpool_init(params.numThreads))) {
@@ -163,16 +171,11 @@ ModCallProcess::ModCallProcess(ModCallParameters params){
 
     begin = time(NULL);
     #pragma omp parallel for schedule(dynamic) num_threads(params.numThreads)
-    for(auto chrIter = chrInfo.begin(); chrIter != chrInfo.end(); ++chrIter) {
-        processChromosome(*chrIter, params, threadPool, snpFile, chrModCallResult[chrIter->name]);
+    for(size_t i = 0; i < chrInfo.size(); ++i) {
+        processChromosome(chrInfo[i], params, threadPool, snpFile, vcf, i);
     }
     hts_tpool_destroy(threadPool.pool);
     std::cerr<< "\nmodcall total:  " << difftime(time(NULL), begin) << "s\n";
-
-    begin = time(NULL);
-    std::cerr<<"write vcf " << " ... ";
-    writeResultVCF(params, chrInfo, chrModCallResult);
-    std::cerr<< difftime(time(NULL), begin) << "s\n";
 }
 
 ModCallProcess::~ModCallProcess(){
