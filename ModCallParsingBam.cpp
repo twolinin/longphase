@@ -527,7 +527,8 @@ void MethBamParser::classifyMethylationBase(
     int &n, int &pos, hts_base_mod *mods, int querypos, int length,
     int refpos, const bam1_t &aln, ModReadVariant *tmpReadResult) {
   while (true) {
-    if (pos > (querypos + length)) {
+    // query positions [querypos, querypos + length) belong to this operation
+    if (pos >= querypos + length) {
       break;
     }
     if (n <= 0) {
@@ -546,7 +547,7 @@ void MethBamParser::classifyMethylationBase(
     }
 
     for (int j = 0; j < n && j < 5; j++) {
-      if (mods[j].modified_base != 109 || pos > (querypos + length)) {
+      if (mods[j].modified_base != 109) {
         continue;
       }
       auto it = chrMethMap->find(methrpos);
@@ -754,7 +755,7 @@ void MethBamParser::parse_CIGAR(const bam_hdr_t &bamHdr, const bam1_t &aln,
     }
     // 1: insertion to the reference
     else if (cigar_op == 1) {
-      while (n > 0 && pos <= (querypos + length)) {
+      while (n > 0 && pos < querypos + length) {
         n = baseMods.next(mods, 5, &pos);
       }
       querypos += length;
@@ -783,16 +784,15 @@ void MethBamParser::parse_CIGAR(const bam_hdr_t &bamHdr, const bam1_t &aln,
     }
     // 4: soft clipping (clipped sequences present in SEQ)
     else if (cigar_op == 4) {
-      while (n > 0 && pos <= (querypos + length)) {
+      while (n > 0 && pos < querypos + length) {
         n = baseMods.next(mods, 5, &pos);
       }
       querypos += length;
     }
     // 5: hard clipping (clipped sequences NOT present in SEQ)
     // 6: padding (silent deletion from padded reference)
+    // (consume neither the query nor the reference)
     else if (cigar_op == 5 || cigar_op == 6) {
-      // do nothing
-      refpos += length;
     }
   }
 
