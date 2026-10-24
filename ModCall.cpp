@@ -24,18 +24,18 @@ static const char *CORRECT_USAGE_MESSAGE =
 "      -m, --modThreshold=[0~1]      value extracted from MM tag and ML tag. \n"
 "                                    above the threshold means modification occurred. default: 0.8\n"
 "      -u, --unModThreshold=[0~1]    value extracted from MM tag and ML tag. \n"
-"                                    above the threshold means no modification occurred. default: 0.2\n"
+"                                    below the threshold means no modification occurred. default: 0.2\n"
 "      -e, --heterRatio=[0~1]        modified and unmodified scales. \n"
-"                                    a higher threshold means that the two quantities need to be closer. default: 0.7\n"
+"                                    a higher threshold means that the two quantities need to be closer. default: 0.6\n"
 "      -i, --noiseRatio=[0~1]        not being judged as modified and unmodified is noise.\n"
 "                                    higher threshold means lower noise needs. default: 0.2\n"
-"      -a, --connectAdjacent=Num     connect adjacent N METHs. default:6\n"
+"      -a, --connectAdjacent=Num     connect adjacent N METHs. default:20\n"
 "      -c, --connectConfidence=[0~1] determine the confidence of phasing two ASMs.\n"
 "                                    higher threshold requires greater consistency in the reads. default: 0.9\n"
 
 "\n";
 
-static const char* shortopts = "s:o:t:r:b:m:u:e:i:";
+static const char* shortopts = "s:o:t:r:b:m:u:e:i:a:c:";
 
 enum { OPT_HELP = 1, ALL_MOD };
 
@@ -46,7 +46,9 @@ static const struct option longopts[] = {
     { "snp-file",          required_argument,  NULL, 's' },
     { "out-prefix",        required_argument,  NULL, 'o' },
     { "threads",           required_argument,  NULL, 't' },
-	{ "methylbamfile",     required_argument,  NULL, 'b' },
+    { "bam-file",          required_argument,  NULL, 'b' },
+    // earlier name, still accepted
+    { "methylbamfile",     required_argument,  NULL, 'b' },
     { "modThreshold",      required_argument,  NULL, 'm' },
     { "unModThreshold",    required_argument,  NULL, 'u' },
     { "heterRatio",        required_argument,  NULL, 'e' },
@@ -106,6 +108,7 @@ void ModCallOptions(int argc, char** argv)
         case OPT_HELP:
             std::cout << CORRECT_USAGE_MESSAGE;
             exit(EXIT_SUCCESS);
+        default: die = true; break;
         }
     }
     
@@ -143,7 +146,7 @@ void ModCallOptions(int argc, char** argv)
         }
     }
     else{
-        std::cerr << SUBPROGRAM ": missing methylBamFile file.\n";
+        std::cerr << SUBPROGRAM ": missing bam file.\n";
         die = true;
     }
     
@@ -162,6 +165,13 @@ void ModCallOptions(int argc, char** argv)
     }  
     
     
+    if ( opt::numThreads < 1 ){
+        std::cerr << SUBPROGRAM " invalid threads. value: "
+                  << opt::numThreads
+                  << "\n please check -t, --threads=Num\n";
+        die = true;
+    }
+
     if( opt::modThreshold < opt::unModThreshold ){
         std::cerr << "error: modThreshold is lower than unModThreshold. Please Check -m and -u\n";
         std::cerr << "modThreshold: " << opt::modThreshold << "\n";

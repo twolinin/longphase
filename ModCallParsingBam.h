@@ -14,33 +14,111 @@
 #include <htslib/thread_pool.h>
 #include <htslib/vcf.h>
 #include <htslib/vcfutils.h>
+#include <atomic>
+#include <deque>
+#include <fstream>
+#include <functional>
+#include <mutex>
+#include <type_traits>
+
+// genotype of a methylation position; "" until it is judged
+enum MethGenotype : uint8_t { METH_GT_NONE, METH_GT_HET, METH_GT_HOM_MOD, METH_GT_HOM_UNMOD };
+const char *methGenotypeString(uint8_t gt);
 
 struct MethPosInfo {
   MethPosInfo()
       : methreadcnt(0), noisereadcnt(0), canonreadcnt(0), depth(0),
-        heterstatus(""), strand(-1), variantType(VariantType::MOD) {}
+        heterstatus(METH_GT_NONE), strand(-1), variantType(VariantType::MOD) {}
 
   int methreadcnt;
   int noisereadcnt;
   int canonreadcnt;
   int depth;
-  std::string heterstatus;
-  int strand; // 0: + , 1: -
+  uint8_t heterstatus; // MethGenotype
+  int8_t strand; // 0: + , 1: -
   VariantType variantType;
-  std::vector<std::string> modReadVec;
-  std::vector<std::string> nonModReadVec;
+  // reads in the order they were seen, by their index in MethBamParser's name
+  // list: index << 1 for a modified call, index << 1 | 1 for an unmodified one
+  std::vector<uint32_t> readCalls;
+};
+
+// The methylation positions of a chromosome by position, as a std::map<int,
+// MethPosInfo> would hold them, in blocks of 1024 bases that are sorted
+// arrays. Reads come in order of their start, so the positions are mostly
+// added at the end of a block, and the blocks behind the reads can be
+// trimmed to their size (shrinkBefore).
+class MethPosTable {
+public:
+  typedef std::pair<int, MethPosInfo> value_type;
+
+private:
+  typedef std::vector<value_type> Block;
+  static const int blockShift = 10;
+  // blocks[i] holds the positions p with p >> blockShift == firstBlock + i
+  std::deque<Block> blocks;
+  long firstBlock = 0;
+  // blocks before this index have been trimmed
+  size_t trimmed = 0;
+
+  static long blockOf(int pos) { return long(pos) >> blockShift; }
+  Block *blockFor(int pos);
+  const Block *blockFor(int pos) const {
+    return const_cast<MethPosTable *>(this)->blockFor(pos);
+  }
+
+public:
+  template <bool Const> class Iter {
+    typedef typename std::conditional<Const, const MethPosTable, MethPosTable>::type Table;
+    Table *table;
+    size_t block, index;
+    void skipEmpty() {
+      while (block < table->blocks.size() && index >= table->blocks[block].size()) {
+        block++;
+        index = 0;
+      }
+    }
+
+  public:
+    typedef typename std::conditional<Const, const value_type, value_type>::type Value;
+    Iter(Table *t, size_t b, size_t i) : table(t), block(b), index(i) { skipEmpty(); }
+    Value &operator*() const { return table->blocks[block][index]; }
+    Value *operator->() const { return &table->blocks[block][index]; }
+    Iter &operator++() {
+      index++;
+      skipEmpty();
+      return *this;
+    }
+    Iter operator++(int) {
+      Iter old = *this;
+      ++*this;
+      return old;
+    }
+    bool operator==(const Iter &o) const { return block == o.block && index == o.index; }
+    bool operator!=(const Iter &o) const { return !(*this == o); }
+  };
+  typedef Iter<false> iterator;
+  typedef Iter<true> const_iterator;
+
+  iterator begin() { return iterator(this, 0, 0); }
+  iterator end() { return iterator(this, blocks.size(), 0); }
+  const_iterator begin() const { return const_iterator(this, 0, 0); }
+  const_iterator end() const { return const_iterator(this, blocks.size(), 0); }
+  iterator find(int pos);
+  const_iterator find(int pos) const;
+  // the entry at pos, added if absent (as std::map::operator[])
+  MethPosInfo &operator[](int pos);
+  // trims the blocks that lie wholly before pos
+  void shrinkBefore(int pos);
 };
 
 // The ReferenceChromosome struct is used to store information about a reference
 // fasta.
 struct ReferenceChromosome {
   std::string name;
-  std::string sequence;
   int length;
 
-  ReferenceChromosome(const std::string &name, const std::string &sequence,
-                      int length)
-      : name(name), sequence(sequence), length(length) {}
+  ReferenceChromosome(const std::string &name, int length)
+      : name(name), length(length) {}
 };
 
 // FastaParser: to get each chromosome name and lastpos(for chunksize)
@@ -53,6 +131,72 @@ public:
   MethFastaParser(std::string fastaFile,
                   std::vector<ReferenceChromosome> &chrInfo);
   ~MethFastaParser();
+  static std::string fetchSequence(const std::string &fastaFile,
+                                   const ReferenceChromosome &chr);
+};
+
+// A chromosome's reference in about a quarter of the memory: A, C, G and T in
+// 2 bits each, with the lowercase stretches and the runs of any other
+// character listed apart. at() gives back the original character.
+class PackedReference {
+public:
+  explicit PackedReference(const std::string &seq);
+  size_t length() const { return len; }
+  char at(size_t pos) const;
+
+private:
+  struct Run {
+    uint32_t start, end; // [start, end)
+    char c;
+  };
+  size_t len;
+  std::vector<uint8_t> bases;  // 2 bits per position, 0 where the character is in `other`
+  std::vector<Run> lowercase;  // runs of a, c, g, t (c unused)
+  std::vector<Run> other;      // runs of one character that is not A, C, G, T, a, c, g, t
+  static const Run *findRun(const std::vector<Run> &runs, size_t pos);
+};
+
+// The base modifications of one read (MM and ML tags) in the order and form
+// bam_next_basemod gives them, decoded in one pass instead of a scan per call.
+// Tags it does not decode itself (ChEBI codes, N as the canonical base, or
+// anything htslib might read differently) are left to htslib.
+class ReadBaseMods {
+public:
+  ReadBaseMods();
+  ~ReadBaseMods();
+  ReadBaseMods(const ReadBaseMods &) = delete;
+  ReadBaseMods &operator=(const ReadBaseMods &) = delete;
+  // as bam_parse_basemod: < 0 when the tags are malformed
+  int load(const bam1_t &aln);
+  // as bam_next_basemod
+  int next(hts_base_mod *mods, int n_mods, int *pos);
+
+private:
+  struct Event {
+    int pos;
+    int n;     // modifications at pos
+    int first; // index in modBuf
+  };
+  struct ModList {
+    hts_base_mod mod;      // qual filled per position
+    std::vector<int> pos;  // left to right
+    std::vector<int> qual;
+  };
+  bool decode(const bam1_t &aln);
+  const std::vector<int> &basePositions(const bam1_t &aln, int base);
+
+  const bam1_t *htsRead;
+  hts_base_mod_state *htsState; // set when the read is left to htslib
+  std::vector<Event> events;
+  std::vector<hts_base_mod> modBuf;
+  size_t nextEvent;
+  std::vector<ModList> lists;
+  size_t nLists;
+  std::vector<long long> counts; // one MM list
+  std::vector<size_t> heads;
+  int seqPos;
+  std::vector<int> positions[16]; // where each base code is in the read
+  bool havePositions[16];
 };
 
 struct MethPosProb {
@@ -76,7 +220,7 @@ private:
 
   bool loadSNPVCF();
   void parserProcess(std::string &input);
-  void writeDataLine(const std::string &input, std::ofstream &resultVcf,
+  void writeDataLine(const std::string &input, std::ostream &resultVcf,
                      PhasingResult &phasingResult);
 
 public:
@@ -94,11 +238,27 @@ public:
 class MethBamParser {
 private:
   ModCallParameters *params;
-  std::string *refString;
   std::string chrName;
   int refstartpos;
+  // what the reads and the output need of the chromosome's reference
+  PackedReference reference;
+  ReadBaseMods baseMods;
 
-  std::map<int, MethPosInfo> *chrMethMap;
+  MethPosTable *chrMethMap;
+  // What exportResult reads once the genotypes are known, when only the
+  // heterozygous positions are written (keepOutputPositions): the positions
+  // the table held, and the record and reference base of the heterozygous ones.
+  struct OutputPosition {
+    int pos;
+    MethPosInfo info;
+    std::string ref;    // as formatMethVcfLine takes it from the reference
+    bool pastReference; // pos is past the end of the reference
+  };
+  std::vector<int> tablePositions;
+  std::vector<OutputPosition> hetPositions;
+  // names of the reads parsed so far, one after another; read i starts at nameStart[i]
+  std::string readNames;
+  std::vector<size_t> nameStart;
   //<pos, <positive strand cnt, negative strand cnt>>
   std::map<int, std::pair<int, int>> *readStartEndMap;
 
@@ -108,27 +268,28 @@ private:
   bool extractSnpAllele(
       std::map<int, SnpVariant>::iterator &currentVariantIter, int ref_pos,
       int length, int querypos, int cigaridx, int aln_core_n_cigar,
-      const uint32_t *cigar, const bam1_t &aln, ReadVariant *tmpReadResult);
+      const uint32_t *cigar, const bam1_t &aln, ModReadVariant *tmpReadResult);
   void classifyMethylationBase(int &n, int &pos, hts_base_mod *mods,
                                int querypos, int length, int refpos,
-                               const bam1_t &aln, ReadVariant *tmpReadResult,
-                               hts_base_mod_state *mod_state);
+                               const bam1_t &aln, ModReadVariant *tmpReadResult);
   bool handleDeletionInHomopolymer(
       std::map<int, SnpVariant>::iterator &currentVariantIter, int ref_pos,
       int length, int querypos, const bam1_t &aln,
-      hts_base_mod_state *mod_state, ReadVariant *tmpReadResult);
+      ModReadVariant *tmpReadResult);
   void updateDepthBoundary(int refstart, int refpos, bool is_reverse);
   void computeSinglePositionGenotype();
   std::set<int> applyCpGStrandPairGenotype();
   void filterModReadVariants(const std::set<int> &positionPairs,
-                             std::vector<ReadVariant> &readVariantVec,
-                             std::vector<ReadVariant> &modReadVariantVec);
+                             std::vector<ModReadVariant> &readVariantVec,
+                             std::vector<ModReadVariant> &modReadVariantVec);
   std::string buildInfoStr(const MethPosInfo &info) const;
   std::string formatMethVcfLine(int pos, const MethPosInfo &info,
-                                const std::string &chrSequence,
                                 int chrLen) const;
+  std::string formatMethVcfLine(int pos, const MethPosInfo &info,
+                                const std::string &ref, int chrLen) const;
+  std::string referenceBase(int pos) const;
   void parse_CIGAR(const bam_hdr_t &bamHdr, const bam1_t &aln,
-                   std::vector<ReadVariant> &readVariantVec);
+                   std::vector<ModReadVariant> &readVariantVec);
 
   // record methylation position and probability from methylation tag
   void getmeth(AlignmentMethExtend &align);
@@ -137,31 +298,69 @@ private:
 
 public:
   MethBamParser(std::string inputChrName, ModCallParameters &in_params,
-                MethSnpParser &snpMap, std::string &ref_string);
+                MethSnpParser &snpMap, const std::string &ref_string);
   ~MethBamParser();
   void detectMeth(std::string chrName, int lastSNPPos,
                   htsThreadPool &threadPool,
-                  std::vector<ReadVariant> &readVariantVec);
+                  std::vector<ModReadVariant> &readVariantVec);
   void dumpMethMap(const std::string &chrName, std::ofstream &out) const;
   void dumpReadStartEnd(const std::string &chrName, std::ofstream &out) const;
   void calculateDepth();
-  void exportResult(std::string chrName, std::string chrSquence, int chrLen,
+  // keep only what exportResult needs, and drop the position table and the
+  // reference (unless every position is written)
+  void keepOutputPositions();
+  void exportResult(const std::string &chrName, int chrLen,
                     std::vector<int> &passPosition,
-                    std::ostringstream &modCallResult);
+                    const std::function<void(const std::string &)> &write);
   void judgeMethGenotype(std::string chrName,
-                         std::vector<ReadVariant> &readVariantVec,
-                         std::vector<ReadVariant> &modReadVariantVec);
+                         std::vector<ModReadVariant> &readVariantVec,
+                         std::vector<ModReadVariant> &modReadVariantVec);
   void dumpMethGenoMap(const std::string &chrName, std::ofstream &out) const;
 };
 
-void writeResultVCF(ModCallParameters &params,
-                    std::vector<ReferenceChromosome> &chrInfo,
-                    std::map<std::string, std::ostringstream> &chrResult);
+// The modcall VCF, with the chromosomes' records in the order of the reference
+// while the chromosomes are called by several threads: a chromosome's records
+// go to the file once every chromosome before it is written, and are held
+// deflated until then (--all writes every position, and its records deflate
+// to about a fifteenth).
+class ModCallVcfWriter {
+public:
+  ModCallVcfWriter(ModCallParameters &params,
+                   const std::vector<ReferenceChromosome> &chrInfo);
+  ModCallVcfWriter(const ModCallVcfWriter &) = delete;
+  ModCallVcfWriter &operator=(const ModCallVcfWriter &) = delete;
+  // records of chromosome i (its index in chrInfo), from one thread at a time
+  void append(size_t i, const std::string &records);
+  // after the last records of chromosome i
+  void finish(size_t i);
+
+private:
+  struct Chunk {
+    std::string deflated;
+    size_t size;
+  };
+  struct Chromosome {
+    std::string pending;     // not yet written or held
+    std::vector<Chunk> held; // until the chromosomes before are written
+    bool finished = false;
+  };
+  static const size_t chunkSize = 4 << 20;
+  std::vector<char> vcfBuffer;
+  std::ofstream vcf;
+  std::vector<Chromosome> chromosomes;
+  std::mutex mutex;
+  // the chromosomes before it are written, and it writes straight to the file;
+  // moved by finish, with the mutex locked
+  std::atomic<size_t> front{0};
+  void flush(size_t i);
+  // with the mutex locked
+  void writeHeld(Chromosome &c);
+};
 
 class MethylationGraph {
 private:
   ModCallParameters *params;
-  std::vector<ReadVariant> *readVariant;
+  std::vector<ModReadVariant> *readVariant;
 
   // modifications
   // position, quality
@@ -171,12 +370,21 @@ private:
   // By default, a Map in C++ is sorted in increasing order based on its key.
   // position, edge
   std::map<int, VariantEdge *> *edgeList;
-  // record all variant position, include SNP and SV
-  // <position, <readID, VariantType>>
-  std::map<int, std::map<std::string, VariantType>> *nodeInfo;
+  // every variant position, include SNP and SV, sorted by position: the
+  // number of distinct read names that cover it, and the type recorded by the
+  // read whose name sorts first (the last record of that name wins)
+  struct NodeSummary {
+    int readCount;
+    int type;
+  };
+  typedef std::vector<std::pair<int, NodeSummary>> NodeList;
+  NodeList nodeInfo;
+  NodeList::const_iterator findNode(int position) const;
+  int nodeReadCount(int position) const;
   // check the variant type of the position
   int checkVariantType(int position);
   float computeMinConnection(int pos1, int pos2) const;
+  void buildNodeInfo(const std::vector<ModReadVariant> &reads);
   double computeMajorRatio(std::pair<int, int> counts) const;
   bool isGoodConnection(std::pair<int, int> counts, float minConn) const;
   void collectAllModPoints(std::set<int> &strongPoints);
@@ -198,7 +406,7 @@ public:
   MethylationGraph(ModCallParameters &params);
   ~MethylationGraph();
 
-  void addEdge(std::vector<ReadVariant> &in_readVariant, std::string chrName);
+  void addEdge(std::vector<ModReadVariant> &in_readVariant, std::string chrName);
   void connectResults(std::string chrName, std::vector<int> &passPosition,
                       bool hasValidSnpData = true);
   void destroy();

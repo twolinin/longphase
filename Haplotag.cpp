@@ -51,6 +51,9 @@ static const struct option longopts[] = {
     { "threads",              required_argument,  NULL, 't' },
     { "qualityThreshold",     required_argument,  NULL, 'q' },
     { "percentageThreshold",  required_argument,  NULL, 'p' },
+    { "sv-window",            required_argument,  NULL, 'w' },
+    { "sv-threshold",         required_argument,  NULL, 'h' },
+    // earlier names, still accepted
     { "svWindow",             required_argument,  NULL, 'w' },
     { "svThreshold",          required_argument,  NULL, 'h' },
     { "region",               required_argument,  NULL, REGION },
@@ -173,7 +176,7 @@ void HaplotagOptions(int argc, char** argv)
     
     if( opt::fastaFile != "")
     {
-        std::ifstream openFile( opt::snpFile.c_str() );
+        std::ifstream openFile( opt::fastaFile.c_str() );
         if( !openFile.is_open() )
         {
             std::cerr<< "File " << opt::fastaFile << " not exist.\n\n";
