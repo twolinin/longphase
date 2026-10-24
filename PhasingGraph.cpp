@@ -315,6 +315,11 @@ void VairiantGraph::scanVariantsAndBuildBlocks(std::vector<int>& hpResult, Phase
     hpResult.assign(n, 0);
     int blockStart = -1;
     int lastConnectPos = -1;
+    // Unless --sv-join-blocks: a variant whose votes all come from SVs starts
+    // a new block, so an SV is never the only link between two blocks. SVs
+    // still vote inside a block and are phased in it.
+    std::vector<char> nonSvVote(params->svJoinBlocks ? 0 : n, 0);
+    int lastConnectPosNonSv = -1;
 
     for(int curr = 0; curr + 1 < n; curr++ ){
         int next = curr + 1;
@@ -358,8 +363,10 @@ void VairiantGraph::scanVariantsAndBuildBlocks(std::vector<int>& hpResult, Phase
             hasEntropy[curr] = 1;
         }
 
-        if(h1 == h2){
-            if(currPos < lastConnectPos){
+        bool onlySvVotes = !params->svJoinBlocks && h1 != h2 && !nonSvVote[curr] &&
+                           currPos >= lastConnectPosNonSv;
+        if(h1 == h2 || onlySvVotes){
+            if(currPos < lastConnectPos && !onlySvVotes){
                 continue;
             }
 
@@ -398,6 +405,11 @@ void VairiantGraph::scanVariantsAndBuildBlocks(std::vector<int>& hpResult, Phase
                     vote,
                     hpCountMap2,
                     hpCountMap3);
+                // variant type 1: SV
+                if(!params->svJoinBlocks && variantType[curr] != 1){
+                    nonSvVote[next] = 1;
+                    lastConnectPosNonSv = variantPositions[next];
+                }
 
                 if(params->generateDot){
                     appendDotEdges(outDotResult, currPos, bestEdgePair,

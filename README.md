@@ -141,7 +141,10 @@ phasing graph arguments:
                                           two combinations are similar. default:0.7
    -L, --overlapThreshold=[0~1]           filtering different alignments of the same read if there is overlap. default:0.2
    -w, --sv-window=NUM                    window size for evaluating surrounding CIGAR operations. default:20
-   -h, --sv-threshold=[0~1]               relative difference threshold for read to support a SV. default:0.10
+   -h, --sv-threshold=[0~1]               relative difference threshold for read to support a SV.
+                                          default: 0.20 (--ont), 0.10 (--pb)
+   --sv-join-blocks                       let an SV be the only link between two phase blocks (longer
+                                          blocks, more wrong joins). default: False
 
 haplotag read correction arguments:
    -m, --readConfidence=[0.5~1]           The confidence of a read being assigned to any haplotype. default:0.65

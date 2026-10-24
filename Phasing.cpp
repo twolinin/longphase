@@ -41,7 +41,10 @@ static const char *CORRECT_USAGE_MESSAGE =
 "                                          two combinations are similar. default:0.7\n"
 "   -L, --overlapThreshold=[0~1]           filtering different alignments of the same read if there is overlap. default:0.2\n"
 "   -w, --sv-window=NUM                    window size for evaluating surrounding CIGAR operations. default:20\n"
-"   -h, --sv-threshold=[0~1]               relative difference threshold for read to support a SV. default:0.10\n\n"
+"   -h, --sv-threshold=[0~1]               relative difference threshold for read to support a SV.\n"
+"                                          default: 0.20 (--ont), 0.10 (--pb)\n"
+"   --sv-join-blocks                       let an SV be the only link between two phase blocks (longer\n"
+"                                          blocks, more wrong joins). default: False\n\n"
 
 "haplotag read correction arguments:\n"
 "   -m, --readConfidence=[0.5~1]           The confidence of a read being assigned to any haplotype. default:0.65\n"
@@ -63,7 +66,7 @@ static const char* shortopts = "s:b:o:t:r:d:1:a:q:x:p:e:n:m:L:w:h:";
 
 enum { OPT_HELP = 1 , DOT_FILE, SV_FILE, MOD_FILE, IS_ONT, IS_PB, PHASE_INDEL, INDEL_QUALITY, VERSION,
        DISABLE_GNN, GNN_BREAK_THRESHOLD, GNN_PE_THRESHOLD, GNN_WINDOW, GNN_RESPECT_BRIDGE, GNN_NO_SPLIT_BLOCKS,
-       SAMPLE};
+       SAMPLE, SV_JOIN_BLOCKS};
 
 static const struct option longopts[] = { 
     { "help",                 no_argument,        NULL, OPT_HELP },
@@ -93,6 +96,7 @@ static const struct option longopts[] = {
     { "overlapThreshold",     required_argument,  NULL, 'L' },
     { "sv-window",            required_argument,  NULL, 'w' },
     { "sv-threshold",         required_argument,  NULL, 'h' },
+    { "sv-join-blocks",       no_argument,        NULL, SV_JOIN_BLOCKS },
     // earlier names, still accepted
     { "svWindow",             required_argument,  NULL, 'w' },
     { "svThreshold",          required_argument,  NULL, 'h' },
@@ -132,6 +136,9 @@ namespace opt
     static double overlapThreshold = 0.2;
     static int svWindow = 20;
     static double svThreshold = 0.1;
+    // set from the platform (--ont 0.2, --pb 0.1) unless -h is given
+    static bool svThresholdGiven = false;
+    static bool svJoinBlocks = false;
     static bool enableGNN = true;
     static float gnnBreakThreshold = 0.35f;
     static float gnnPeThreshold = 0.80f;
@@ -165,7 +172,7 @@ void PhasingOptions(int argc, char** argv)
         case 'n': arg >> opt::snpConfidence; break;
         case 'm': arg >> opt::readConfidence; break;
         case 'w': arg >> opt::svWindow; break;
-        case 'h': arg >> opt::svThreshold; break;
+        case 'h': arg >> opt::svThreshold; opt::svThresholdGiven = true; break;
         case 'L': arg >> opt::overlapThreshold; break;
         case 'b': {
             std::string bamFile;
@@ -180,6 +187,7 @@ void PhasingOptions(int argc, char** argv)
         case DOT_FILE: opt::generateDot=true; break;
         case IS_ONT: opt::isONT=true; break;
         case IS_PB: opt::isPB=true; break;
+        case SV_JOIN_BLOCKS: opt::svJoinBlocks=true; break;
         case DISABLE_GNN: opt::enableGNN=false; break;
         case GNN_BREAK_THRESHOLD: arg >> opt::gnnBreakThreshold; break;
         case GNN_PE_THRESHOLD: arg >> opt::gnnPeThreshold; break;
@@ -338,6 +346,10 @@ void PhasingOptions(int argc, char** argv)
         die = true;
     }
 
+    if( !opt::svThresholdGiven ){
+        opt::svThreshold = opt::isONT ? 0.2 : 0.1;
+    }
+
     if( opt::svFile != ""){
         if ( opt::svWindow < 0 ){
             std::cerr << SUBPROGRAM " invalid svWindow. value: " 
@@ -422,6 +434,7 @@ int PhasingMain(int argc, char** argv, std::string in_version)
     
     ecParams.svWindow=opt::svWindow;
     ecParams.svThreshold=opt::svThreshold;
+    ecParams.svJoinBlocks=opt::svJoinBlocks;
 
     ecParams.enableGNN=opt::enableGNN;
     ecParams.gnnBreakThreshold=opt::gnnBreakThreshold;

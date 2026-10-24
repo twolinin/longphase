@@ -69,6 +69,7 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
     if (!params.svFile.empty()) {
         std::cerr<< "SV Windowsize      : " << params.svWindow << "\n";
         std::cerr<< "SV Threshold       : " << params.svThreshold << "\n";
+        std::cerr<< "SV Join Blocks     : " << ( params.svJoinBlocks ? "True" : "False" ) << "\n";
     }
     std::cerr<< "Use GNN            : " << ( params.enableGNN ? "True" : "False" ) << "\n";
     if (params.enableGNN) {

@@ -46,6 +46,8 @@ struct PhasingParameters
 
     int svWindow;
     double svThreshold; 
+    // an SV may be the only link between two blocks (--sv-join-blocks)
+    bool svJoinBlocks;
 
     // GNN stage of phasing (off with --disableGNN)
     bool enableGNN;
