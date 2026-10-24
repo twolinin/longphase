@@ -27,6 +27,9 @@ constexpr int HP_RADIUS     = 15;
 constexpr int GC_RADIUS     = 50;
 constexpr int NEIGH_RADIUS  = 500;
 constexpr int MAX_NODES     = 256;
+// deletions at least this long keep their phase in GNN correction when every
+// vote agrees on it (issue #126)
+constexpr long long GNN_KEEP_SV_LENGTH = 10000;
 
 PhasingProcess::PhasingProcess(PhasingParameters params)
 {
@@ -144,14 +147,17 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
         // it. One chromosome's reference is held at a time.
         // (a mutex, not omp critical: waiting threads sleep instead of spinning)
         bool hasReference;
+        SVDeletionRepeats deletionRepeats;
         {
             std::lock_guard<std::mutex> lock(referenceMutex);
             std::string chr_reference = loadChrReference(params.fastaFile, *chrIter, lastSNPpos);
             snpFile.markChrVariants(*chrIter, chr_reference);
+            deletionRepeats.build(svFile.getVariants(*chrIter), chr_reference);
             hasReference = !chr_reference.empty();
         }
         // create a bam parser object and prepare to fetch varint from each vcf file
 	    BamParser *bamParser = new BamParser((*chrIter), params.bamFile, snpFile, svFile, modFile);
+        bamParser->setDeletionRepeats(std::move(deletionRepeats));
         // use to store variant
         std::vector<ReadVariant> readVariantVec;
         // use to store clip count
@@ -895,6 +901,7 @@ void GNNModule::processChromosome(const std::string& chrom, int tidx,
     for (int i=0;i<n_var;++i) {
         float rel = std::abs((float)(wvars[i]->pos - center_pos) / max_offset);
         if (rel > center_thr) continue;
+        if (wvars[i]->keep_phase) continue;
         int n1=i*2, n2=i*2+1;
         float p_err = (op[n1*2+1]+op[n2*2+1])/2.0f;
         bool br = bridge[kv[i]] != 0;
@@ -1326,6 +1333,29 @@ void GNNModule::parseSecondaryVCF(const std::string& path, GnnVariantType vtype)
         int32_t* ps = nullptr; int np = 0;
         if (bcf_get_format_int32(hdr, rec, "PS", &ps, &np) > 0) { vi.ps = ps[0]; free(ps); }
         vi.hp_len = vi.gc_content = vi.str_context = vi.seq_entropy = 0;
+        // GNN correction unphased large deletions although every vote agreed
+        // on their phase (PE 0); such deletions keep the phase written by
+        // phasing (issue #126). As in SVParser, SVTYPE decides the type, or
+        // the sign of SVLEN when SVTYPE is missing.
+        float* svPe = nullptr; int nSvPe = 0;
+        if (vtype == GVT_SV && vi.h1 + vi.h2 > 0.0f &&
+            bcf_get_info_float(hdr, rec, "PE", &svPe, &nSvPe) > 0 && svPe[0] <= 0.0f) {
+            long long svLength = (long long)rec->rlen - 1;
+            bool deletion = false;
+            int32_t* svlen = nullptr; int nsvlen = 0;
+            if (bcf_get_info_int32(hdr, rec, "SVLEN", &svlen, &nsvlen) > 0 &&
+                svlen[0] != bcf_int32_missing) {
+                svLength = std::max(svLength, std::llabs((long long)svlen[0]));
+                deletion = svlen[0] < 0;
+            }
+            free(svlen);
+            char* svtype = nullptr; int nsvtype = 0;
+            if (bcf_get_info_string(hdr, rec, "SVTYPE", &svtype, &nsvtype) > 0)
+                deletion = std::strcmp(svtype, "DEL") == 0;
+            free(svtype);
+            vi.keep_phase = deletion && svLength >= GNN_KEEP_SV_LENGTH;
+        }
+        free(svPe);
     },
         [&](size_t i, bcf_hdr_t*, bcf1_t*) {
         if (!het[i]) return;

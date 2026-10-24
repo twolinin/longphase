@@ -575,8 +575,11 @@ void VairiantGraph::calculateCnvMismatchRate(const std::vector<ReadVariant>& in_
                 if(variant.position > clip.cnvVec[i].second){
                     break;
                 }
-                //if the variant position is in the range of the cnv and the allele is reference, increment the mismatch rate
-                if(isPositionInRange(variant.position, clip.cnvVec[i].first, clip.cnvVec[i].second) && variant.allele == 1){
+                //if the variant position is in the range of the cnv and the allele is reference, increment the mismatch rate.
+                //SV alleles (quality -1) are not mismatches: the clips of an SV's own
+                //split alignments make the CNV interval at the SV (issue #126)
+                if(isPositionInRange(variant.position, clip.cnvVec[i].first, clip.cnvVec[i].second) && variant.allele == 1 &&
+                   variant.quality != -1){
                     readMmrate[r][clip.cnvVec[i].first]++;
                 }
             }
@@ -705,8 +708,12 @@ void VairiantGraph::filterHighMismatchVariants(std::vector<ReadVariant>& in_read
                 //if the variant position is in the range of the cnv, check the miss rate
                 if(isPositionInRange(variantIter->position, clip.cnvVec[i].first, clip.cnvVec[i].second)){
                     auto missIter = missRateMap.find(variantIter->position);
-                    //if the miss rate is greater than 0.7, erase the variant
-                    if(missIter != missRateMap.end() && missIter->second >= 0.7){
+                    //if the miss rate is greater than 0.7, erase the variant.
+                    //SV alleles (quality -1) are kept: the clips of an SV's own
+                    //split alignments end a CNV interval at the SV, and its
+                    //carriers count the SV itself as a mismatch (issue #126)
+                    if(missIter != missRateMap.end() && missIter->second >= 0.7 &&
+                       variantIter->quality != -1){
                         shouldErase = true;
                         variantIter = read.variantVec.erase(variantIter);
                         break;

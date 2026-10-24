@@ -13,6 +13,7 @@
 #include <htslib/vcfutils.h>
 #include <functional>
 #include <memory>
+#include <unordered_set>
 #include <zlib.h>
 
 struct SnpVariant {
@@ -218,6 +219,48 @@ public:
   void filterSNP(std::string chr, std::vector<ReadVariant> &readVariantVec);
 };
 
+// Read support of an SV taken from the SV VCF, used next to the CIGAR to decide
+// which reads carry the SV (issue #126).
+struct SVReadSupport {
+  // from SVTYPE, or from the sign of SVLEN when SVTYPE is absent
+  bool isDeletion = false;
+  // INFO/RNAMES (e.g. Sniffles2 --output-rnames): reads supporting the SV
+  bool hasReadNames = false;
+  std::unordered_set<std::string> readNames;
+};
+
+// For each deletion of the SV VCF, how far its start can move in a repeat of
+// the reference without changing the sequence left by the deletion (issue
+// #126 compares a read's split junction with it). Worked out while the
+// chromosome's reference is held, since phase frees it before the reads.
+class SVDeletionRepeats {
+public:
+  // the deletions among svs (position, SVLEN; as SVParser::getVariants gives
+  // them), anchored at their position and at the base before it
+  void build(const std::map<int, std::map<int, bool>> &svs,
+             const std::string &ref);
+  // as deleting ref[a, a + length) and ref[b, b + length) leaving the same
+  // sequence, for b and length given to build (b the position or the base
+  // before it) and |a - b| <= max(maxShift, length) + 1
+  bool sameDeletion(int a, int b, int length) const;
+  // the largest shift of a deletion start that is asked about
+  static const int maxShift = 1000;
+
+private:
+  struct Anchor {
+    int pos;
+    int length;
+    // the deletion at any start in [low, high] leaves the same sequence
+    int low;
+    int high;
+    bool operator<(const Anchor &o) const {
+      return pos != o.pos ? pos < o.pos : length < o.length;
+    }
+  };
+  std::vector<Anchor> anchors;
+  size_t refLength = 0;
+};
+
 class SVParser : public BaseVairantParser {
 
 private:
@@ -227,6 +270,11 @@ private:
   std::map<std::string, std::map<int, std::map<int, bool>>> *chrVariant;
   // chr, variant position (0-base)
   std::map<std::string, std::map<int, bool>> posDuplicate;
+  // chr, variant position (1-base, same key as chrVariant), read support
+  std::map<std::string, std::map<int, SVReadSupport>> chrSVSupport;
+  // chr, (position (1-base), |SVLEN|) of every deletion record of the SV VCF,
+  // whatever its genotype and whether phase uses it, sorted
+  std::map<std::string, std::vector<std::pair<int, int>>> chrDeletionRecords;
 
   // override input parser
   void parserProcess(std::string &input);
@@ -241,6 +289,12 @@ public:
   ~SVParser();
 
   std::map<int, std::map<int, bool>> getVariants(std::string chrName);
+  // read support of the SVs on chrName; nullptr if there is none
+  const std::map<int, SVReadSupport> *
+  getReadSupport(const std::string &chrName) const;
+  // deletion records on chrName (see chrDeletionRecords); nullptr if none
+  const std::vector<std::pair<int, int>> *
+  getDeletionRecords(const std::string &chrName) const;
 
   void writeResult(PhasingResult &phasingResult, const std::string &outPrefix);
 
@@ -318,6 +372,12 @@ private:
   std::vector<std::pair<int, int>>::iterator firstSVIter;
   // the chromosome's SVs: (start, length)
   std::vector<std::pair<int, int>> svList;
+  // read support of the SVs on this chromosome (owned by SVParser)
+  const std::map<int, SVReadSupport> *currentSVSupport = nullptr;
+  // deletion records on this chromosome (owned by SVParser)
+  const std::vector<std::pair<int, int>> *currentDeletionRecords = nullptr;
+  // repeats around the chromosome's SV deletions (made from the reference)
+  SVDeletionRepeats deletionRepeats;
   // mod map and iter (the METHParser's map of this chromosome, read in place)
   std::map<int, std::map<std::string, ModVariant>> *currentMod;
   std::map<int, std::map<std::string, ModVariant>> emptyMod;
@@ -344,12 +404,13 @@ private:
       int &modPos, ReadVariant &tmpReadResult);
   void handleSVVariant(
       const bam1_t &aln, int cigar_i, int svWindow, double svThreshold,
+      int mappingQuality,
       std::vector<std::pair<int, int>>::iterator &currentSVIter, int &svPos,
       ReadVariant &tmpReadResult);
   void get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln,
                std::vector<ReadVariant> &readVariantVec, ClipCount &clipCount,
                bool hasReference, bool isONT, int svWindow,
-               double svThreshold);
+               double svThreshold, int mappingQuality);
   void getClip(int pos, int clipFrontBack, int len, ClipCount &clipCount);
   bool isValidAlignment(const bam1_t &aln, int mappingQuality);
   void processBamFile(const std::string &bamFile, int lastSNPPos,
@@ -361,6 +422,11 @@ public:
   BamParser(std::string chrName, std::vector<std::string> inputBamFileVec,
             SnpParser &snpMap, SVParser &svFile, METHParser &modFile);
   ~BamParser();
+  // repeats around the chromosome's SV deletions, made while the reference
+  // was held (see SVDeletionRepeats)
+  void setDeletionRepeats(SVDeletionRepeats repeats) {
+    deletionRepeats = std::move(repeats);
+  }
 
   void direct_detect_alleles(int lastSNPPos, htsThreadPool &threadPool,
                              PhasingParameters params,
