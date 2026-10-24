@@ -129,7 +129,7 @@ optional arguments:
 
 parse alignment arguments:
    -q, --mappingQuality=Num               filter alignment if mapping quality is lower than threshold. default:1
-   -x, --mismatchRate=Num                 mark reads as false if mismatchRate of them are higher than threshold. default:3
+   -x, --mismatchRate=Num                 no longer used; accepted for compatibility.
 
 phasing graph arguments:
    -p, --baseQuality=[0~90]               change edge's weight to --edgeWeight if base quality is lower than the threshold. default:12
@@ -153,7 +153,7 @@ haplotag read correction arguments:
 GNN arguments:
    --disableGNN                           phase without the GNN model. default: False
    --gnnBreakThreshold=[0~1]              unphase a variant when its GNN error probability exceeds
-                                          this value. default:0.30
+                                          this value. default:0.35
    --gnnPeThreshold=[0~1]                 phasing entropy at which a variant is checked by the GNN. default:0.80
    --gnnWindow=[1~63]                     variants on each side of a checked variant given to the GNN. default:20
    --gnnRespectBridge                     do not unphase bridge variants. default: False
