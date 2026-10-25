@@ -1,4 +1,5 @@
 #include "HaplotagProcess.h"
+#include <htslib/bgzf.h>
 
 namespace {
 
@@ -22,7 +23,9 @@ VariantInputKind classifyVariantInput(const std::string &variantFile)
 template <typename Callback>
 void readGzLines(const std::string &variantFile, Callback callback)
 {
-    gzFile file = gzopen(variantFile.c_str(), "rb");
+    // htslib's BGZF reader inflates with libdeflate, several times faster than
+    // zlib's gzread; it also reads plain gzip and uncompressed files.
+    BGZF* file = bgzf_open(variantFile.c_str(), "r");
     if(!file){
         std::cerr<< "Fail to open vcf: " << variantFile << "\n";
         return;
@@ -51,11 +54,10 @@ void readGzLines(const std::string &variantFile, Callback callback)
             len = buffer_size - (offset - buffer);
         }
 
-        len = gzread(file, offset, len);
+        len = (int)bgzf_read(file, offset, len);
         if (len == 0) break;    
         if (len <  0){ 
-            int err;
-            fprintf (stderr, "Error: %s.\n", gzerror(file, &err));
+            fprintf (stderr, "Error: failed to read %s.\n", variantFile.c_str());
             exit(EXIT_FAILURE);
         }
 
@@ -69,7 +71,7 @@ void readGzLines(const std::string &variantFile, Callback callback)
         // any trailing data in [eol, end) now is a partial line
         offset = std::copy(cur, end, buffer);
     }
-    gzclose (file);
+    bgzf_close(file);
     free(buffer);
 }
 
@@ -105,21 +107,14 @@ int resolveHaplotypeDirection(char gt0, char gt2)
     return -1;
 }
 
-std::pair<int, int> scoreIndelSupport(bool readHasIndel, int hp1Length, int hp2Length)
+// a read with the indel supports the haplotype carrying it, a read without it the other one
+std::pair<int, int> scoreIndelSupport(bool readHasIndel, bool hp1HasIndel, bool hp2HasIndel)
 {
-    if (readHasIndel) {
-        if (hp1Length != 1 && hp2Length == 1)
-            return std::make_pair(1, 0);
-        if (hp1Length == 1 && hp2Length != 1)
-            return std::make_pair(0, 1);
-    }
-    else {
-        if (hp1Length != 1 && hp2Length == 1)
-            return std::make_pair(0, 1);
-        if (hp1Length == 1 && hp2Length != 1)
-            return std::make_pair(1, 0);
-    }
-    return std::make_pair(0, 0);
+    if (hp1HasIndel == hp2HasIndel)
+        return std::make_pair(0, 0);
+    if (readHasIndel == hp1HasIndel)
+        return std::make_pair(1, 0);
+    return std::make_pair(0, 1);
 }
 
 }
@@ -253,26 +248,28 @@ void HaplotagProcess::processSnpRecord(const std::vector<std::string> &fields, i
     tmp.Ref = fields[3];
     tmp.Alt = fields[4];
 
-    chrVariant[chr][pos] = tmp;
+    // a repeated position keeps its haplotype alleles unless this GT sets them
+    TagVariant &variant = chrVariant[chr][pos];
+    static_cast<SnpVariant &>(variant) = tmp;
 
     if (integerPS) {
-        chrVariantPS[chr][pos] = std::stoi(psValue);
+        variant.ps = std::stoi(psValue);
     }
     else {
         std::map<std::string, int>::iterator psIter = psIndex.find(psValue);
         if (psIter == psIndex.end()) {
             psIndex[psValue] = psIndex.size();
         }
-        chrVariantPS[chr][pos] = psIndex[psValue];
+        variant.ps = psIndex[psValue];
     }
 
     if (haploDir == 1) {
-        chrVariantHP1[chr][pos] = fields[3];
-        chrVariantHP2[chr][pos] = fields[4];
+        variant.HP1 = fields[3];
+        variant.HP2 = fields[4];
     }
     else if (haploDir == 0) {
-        chrVariantHP1[chr][pos] = fields[4];
-        chrVariantHP2[chr][pos] = fields[3];
+        variant.HP1 = fields[4];
+        variant.HP2 = fields[3];
     }
 }
 
@@ -317,11 +314,11 @@ void HaplotagProcess::processModRecord(const std::vector<std::string> &fields, i
 std::vector<int> HaplotagProcess::collectLastVariantPos() const {
     std::vector<int> last_pos;
     for (auto chr : chrVec) {
-        auto mapIter = chrVariantPS.find(chr);
-        if (mapIter != chrVariantPS.end()) {
+        auto mapIter = chrVariant.find(chr);
+        if (mapIter != chrVariant.end()) {
             auto lastVariantIter = mapIter->second.rbegin();
             if (lastVariantIter != mapIter->second.rend()) {
-                last_pos.push_back(lastVariantIter->second);
+                last_pos.push_back(lastVariantIter->first);
             } else {
                 last_pos.push_back(0);
             }
@@ -372,14 +369,14 @@ void HaplotagProcess::tagChromosome(const std::string &chr,
                                     samFile *in, samFile *out,
                                     bam_hdr_t *bamHdr, hts_idx_t *idx,
                                     bam1_t *aln,
-                                    const std::string &chr_reference,
+                                    bool hasReference,
                                     std::ofstream *tagResult) {
     std::time_t begin = time(NULL);
     std::cerr<<"chr: " << chr << " ... " ;
 
     currentChrVariants = chrVariant[chr];
     firstVariantIter = currentChrVariants.begin();
-    std::map<int, SnpVariant>::reverse_iterator last = currentChrVariants.rbegin();
+    std::map<int, TagVariant>::reverse_iterator last = currentChrVariants.rbegin();
 
     currentchrRegions = chrRegions[chr];
     firstSVIter = currentchrRegions.begin();
@@ -419,14 +416,14 @@ void HaplotagProcess::tagChromosome(const std::string &chr,
             }
 
             int pqValue = 0;
-            int haplotype = judgeHaplotype(*bamHdr, *aln, chr, params.percentageThreshold, tagResult, pqValue, chr_reference, params.svWindow, params.svThreshold);
+            int haplotype = judgeHaplotype(*bamHdr, *aln, chr, params.percentageThreshold, tagResult, pqValue, hasReference, params.svWindow, params.svThreshold);
 
             initFlag(aln, "HP");
             initFlag(aln, "PS");
             initFlag(aln, "PQ");
 
             if (haplotype != 0){
-                int psValue = chrVariantPS[chr][(*firstVariantIter).first];
+                int psValue = (*firstVariantIter).second.ps;
                 bam_aux_append(aln, "HP", 'i', sizeof(haplotype), (uint8_t*) &haplotype);
                 bam_aux_append(aln, "PS", 'i', sizeof(psValue), (uint8_t*) &psValue);
                 bam_aux_append(aln, "PQ", 'i', sizeof(pqValue), (uint8_t*) &pqValue);
@@ -533,8 +530,21 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
 
     std::vector<int> last_pos = collectLastVariantPos();
 
-    // reference fasta parser
-    FastaParser fastaParser(params.fastaFile, chrVec, last_pos, params.numThreads);
+    // homopolymerLength() of each variant from its chromosome's reference (read
+    // up to 5 bases past last_pos), one chromosome at a time; the deletion
+    // evidence of tagging needs nothing else from the reference
+    std::vector<bool> hasReference(chrVec.size());
+    for (size_t i = 0; i < chrVec.size(); i++) {
+        std::string reference = loadChrReference(params.fastaFile, chrVec[i], last_pos[i]);
+        hasReference[i] = !reference.empty();
+        auto chrIter = chrVariant.find(chrVec[i]);
+        if (hasReference[i] && chrIter != chrVariant.end()) {
+            // only looked up for a variant in a read's deletion, never below 0
+            for (auto &variant : chrIter->second)
+                if (variant.first >= 0)
+                    variant.second.homopolymer = homopolymerLength(variant.first, reference);
+        }
+    }
 
     std::ofstream *tagResult = initLogFile(params);
     // init data structure and get core n
@@ -550,9 +560,9 @@ void HaplotagProcess::tagRead(HaplotagParameters &params){
     bam1_t *aln = bam_init1();
 
     // loop all chromosome
-    for(auto chr : chrVec ){
-        tagChromosome(chr, params, in, out, bamHdr, idx, aln,
-                      fastaParser.chrString.at(chr), tagResult);
+    for (size_t i = 0; i < chrVec.size(); i++) {
+        tagChromosome(chrVec[i], params, in, out, bamHdr, idx, aln,
+                      hasReference[i], tagResult);
     }
 
     // Unmapped reads have no coordinate, so they belong only to a
@@ -615,7 +625,7 @@ void HaplotagProcess::collectSVWindowEvidence(const bam1_t &aln, int cigarIdx, i
 void HaplotagProcess::collectMatchOpEvidence(const bam1_t &aln, const std::string &chrName,
                                              int ref_pos, int query_pos, int length,
                                              int cigarIdx, int n_cigar, const uint32_t *cigar,
-                                             std::map<int, SnpVariant>::iterator &variantIter,
+                                             std::map<int, TagVariant>::iterator &variantIter,
                                              std::map<int, int> &variantsHP, std::map<int, int> &countPS,
                                              int &hp1Count, int &hp2Count)
 {
@@ -635,35 +645,26 @@ void HaplotagProcess::collectMatchOpEvidence(const bam1_t &aln, const std::strin
                 // Detected that the base of the read is either REF or ALT.
                 if ((base == (*variantIter).second.Ref) || (base == (*variantIter).second.Alt)) {
 
-                    std::map<int, int>::iterator posPSiter = chrVariantPS[chrName].find((*variantIter).first);
-
-                    if (posPSiter == chrVariantPS[chrName].end()) {
-                        std::cerr << (*variantIter).first << "\t"
-                                  << (*variantIter).second.Ref << "\t"
-                                  << (*variantIter).second.Alt << "\n";
-                        exit(EXIT_SUCCESS);
+                    if (base == (*variantIter).second.HP1) {
+                        hp1Count++;
+                        variantsHP[(*variantIter).first]=0;
                     }
-                    else {
-                        if (base == chrVariantHP1[chrName][(*variantIter).first]) {
-                            hp1Count++;
-                            variantsHP[(*variantIter).first]=0;
-                        }
-                        if (base == chrVariantHP2[chrName][(*variantIter).first]) {
-                            hp2Count++;
-                            variantsHP[(*variantIter).first]=1;
-                        }
-                        countPS[chrVariantPS[chrName][(*variantIter).first]]++;
+                    if (base == (*variantIter).second.HP2) {
+                        hp2Count++;
+                        variantsHP[(*variantIter).first]=1;
                     }
+                    countPS[(*variantIter).second.ps]++;
 
                 }
             }
             // currentVariant is insertion
             else if (refAlleleLen == 1 && altAlleleLen != 1 && cigarIdx + 1 < n_cigar) {
 
-                int hp1Length = chrVariantHP1[chrName][(*variantIter).first].length();
-                int hp2Length = chrVariantHP2[chrName][(*variantIter).first].length();
+                // the haplotype with the longer allele carries the insertion
+                bool hp1HasIndel = (*variantIter).second.HP1.length() != 1;
+                bool hp2HasIndel = (*variantIter).second.HP2.length() != 1;
                 bool readHasIndel = (ref_pos + length - 1 == (*variantIter).first && bam_cigar_op(cigar[cigarIdx+1]) == 1);
-                std::pair<int, int> indelScore = scoreIndelSupport(readHasIndel, hp1Length, hp2Length);
+                std::pair<int, int> indelScore = scoreIndelSupport(readHasIndel, hp1HasIndel, hp2HasIndel);
 
                 hp1Count += indelScore.first;
                 hp2Count += indelScore.second;
@@ -671,15 +672,16 @@ void HaplotagProcess::collectMatchOpEvidence(const bam1_t &aln, const std::strin
                     variantsHP[(*variantIter).first]=0;
                 if (indelScore.second > 0)
                     variantsHP[(*variantIter).first]=1;
-                countPS[chrVariantPS[chrName][(*variantIter).first]]++;
+                countPS[(*variantIter).second.ps]++;
             }
             // currentVariant is deletion
             else if (refAlleleLen != 1 && altAlleleLen == 1 && cigarIdx + 1 < n_cigar) {
 
-                int hp1Length = chrVariantHP1[chrName][(*variantIter).first].length();
-                int hp2Length = chrVariantHP2[chrName][(*variantIter).first].length();
+                // the haplotype with the one-base allele carries the deletion
+                bool hp1HasIndel = (*variantIter).second.HP1.length() == 1;
+                bool hp2HasIndel = (*variantIter).second.HP2.length() == 1;
                 bool readHasIndel = (ref_pos + length - 1 == (*variantIter).first && bam_cigar_op(cigar[cigarIdx+1]) == 2);
-                std::pair<int, int> indelScore = scoreIndelSupport(readHasIndel, hp1Length, hp2Length);
+                std::pair<int, int> indelScore = scoreIndelSupport(readHasIndel, hp1HasIndel, hp2HasIndel);
 
                 hp1Count += indelScore.first;
                 hp2Count += indelScore.second;
@@ -687,7 +689,7 @@ void HaplotagProcess::collectMatchOpEvidence(const bam1_t &aln, const std::strin
                     variantsHP[(*variantIter).first]=0;
                 if (indelScore.second > 0)
                     variantsHP[(*variantIter).first]=1;
-                countPS[chrVariantPS[chrName][(*variantIter).first]]++;
+                countPS[(*variantIter).second.ps]++;
             }
 
         }
@@ -697,12 +699,12 @@ void HaplotagProcess::collectMatchOpEvidence(const bam1_t &aln, const std::strin
 
 void HaplotagProcess::collectDeletionOpEvidence(const bam1_t &aln, const std::string &chrName,
                                                 int ref_pos, int query_pos, int length,
-                                                const std::string &ref_string,
-                                                std::map<int, SnpVariant>::iterator &variantIter,
+                                                bool hasReference,
+                                                std::map<int, TagVariant>::iterator &variantIter,
                                                 std::map<int, int> &variantsHP, std::map<int, int> &countPS,
                                                 int &hp1Count, int &hp2Count)
 {
-    if (ref_string == "")
+    if (!hasReference)
         return;
 
     int del_len = length;
@@ -713,34 +715,19 @@ void HaplotagProcess::collectDeletionOpEvidence(const bam1_t &aln, const std::st
     }
     else if ((*variantIter).first >= ref_pos && (*variantIter).first < ref_pos + del_len) {
         // check variant in homopolymer
-        if (homopolymerLength((*variantIter).first, ref_string) >= 3) {
+        if ((*variantIter).second.homopolymer >= 3) {
 
             int refAlleleLen = (*variantIter).second.Ref.length();
             int altAlleleLen = (*variantIter).second.Alt.length();
 
-            // SNP
-            if (refAlleleLen == 1 && altAlleleLen == 1) {
-                // get the next match
-                char base_chr = seq_nt16_str[bam_seqi(bam_get_seq(&aln), query_pos)];
-                std::string base(1, base_chr);
-
-                if (base == chrVariantHP1[chrName][(*variantIter).first]) {
-                    hp1Count++;
-                    variantsHP[(*variantIter).first]=0;
-                }
-                if (base == chrVariantHP2[chrName][(*variantIter).first]) {
-                    hp2Count++;
-                    variantsHP[(*variantIter).first]=1;
-                }
-                countPS[chrVariantPS[chrName][(*variantIter).first]]++;
-            }
+            // a SNP inside the read's deletion has no base in the read, so it does not vote
 
             // the read deletion contain VCF's deletion
-            else if (refAlleleLen != 1 && altAlleleLen == 1) {
+            if (refAlleleLen != 1 && altAlleleLen == 1) {
 
-                int hp1Length = chrVariantHP1[chrName][(*variantIter).first].length();
-                int hp2Length = chrVariantHP2[chrName][(*variantIter).first].length();
-                std::pair<int, int> indelScore = scoreIndelSupport(true, hp1Length, hp2Length);
+                bool hp1HasIndel = (*variantIter).second.HP1.length() == 1;
+                bool hp2HasIndel = (*variantIter).second.HP2.length() == 1;
+                std::pair<int, int> indelScore = scoreIndelSupport(true, hp1HasIndel, hp2HasIndel);
 
                 hp1Count += indelScore.first;
                 hp2Count += indelScore.second;
@@ -748,7 +735,7 @@ void HaplotagProcess::collectDeletionOpEvidence(const bam1_t &aln, const std::st
                     variantsHP[(*variantIter).first]=0;
                 if (indelScore.second > 0)
                     variantsHP[(*variantIter).first]=1;
-                countPS[chrVariantPS[chrName][(*variantIter).first]]++;
+                countPS[(*variantIter).second.ps]++;
             }
         }
     }
@@ -854,7 +841,7 @@ void HaplotagProcess::writeReadLogRow(const bam_hdr_t &bamHdr, const bam1_t &aln
     (*tagResult)<< "\n";
 }
 
-int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, std::string chrName, double percentageThreshold, std::ofstream *tagResult, int &pqValue, const std::string &ref_string, int svWindow, double svThreshold){
+int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, std::string chrName, double percentageThreshold, std::ofstream *tagResult, int &pqValue, bool hasReference, int svWindow, double svThreshold){
 
     int hp1Count = 0;
     int hp2Count = 0;
@@ -882,7 +869,7 @@ int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, 
     // position relative to read
     int query_pos = 0;
     // set variant start for current alignment
-    std::map<int, SnpVariant>::iterator currentVariantIter = firstVariantIter;
+    std::map<int, TagVariant>::iterator currentVariantIter = firstVariantIter;
     // set first SV start for current alignment
     std::vector<std::tuple<int, int, int> >::iterator currentchrRegionIter = firstSVIter;
 
@@ -921,8 +908,10 @@ int HaplotagProcess::judgeHaplotype(const  bam_hdr_t &bamHdr,const bam1_t &aln, 
         }
             // 2: deletion from the reference
         else if( cigar_op == 2 ){
-            collectDeletionOpEvidence(aln, chrName, ref_pos, query_pos, length, ref_string,
-                                      currentVariantIter, variantsHP, countPS, hp1Count, hp2Count);
+            // no variant left on this chromosome (end() must not be dereferenced)
+            if( currentVariantIter != currentChrVariants.end() )
+                collectDeletionOpEvidence(aln, chrName, ref_pos, query_pos, length, hasReference,
+                                          currentVariantIter, variantsHP, countPS, hp1Count, hp2Count);
             ref_pos += length;
         }
             // 3: skipped region from the reference

@@ -2,6 +2,7 @@
 #define UTIL_H
 
 #include <string>
+#include <cstdint>
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -14,6 +15,11 @@
 #include <omp.h>
 #include <numeric> 
 #include <set>
+#include <functional>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <htslib/vcf.h>
 
 struct PhasingElement{
     // i.e. 0|1  or   1|0
@@ -58,7 +64,7 @@ void setPhasingNumThreads(const int& defaultChrThreads,const int& availableThrea
  */
 void setModcallNumThreads(const int& availableThreads,  int& chrNumThreads, int& bamParserNumThreads);
 
-enum VariantType{
+enum VariantType : int8_t {
     MOD = 0,
     SNP = 1,
     INDEL = 2,
@@ -69,36 +75,41 @@ enum VariantType{
 struct Variant{
     Variant(int position, int allele, int quality, VariantType type):
     position(position), 
-    allele(allele), 
     quality(quality),
+    allele(allele), 
     type(type){};
     
+    // 8 bytes: reads hold many of these
     int position;
-    int allele;
-    int quality;
+    int16_t quality;     // base quality (0-255), or a negative code for SV / modification / indel
+    int8_t allele;
     VariantType type;
-    bool underHomopolymer;
 };
 
 struct ReadVariant{
     // init function
-    ReadVariant(): read_name(""), 
-            mapping_quality(0), 
-            source_id(""), 
-            sample_id(""), 
-            reference_start(0), 
-            BX_tag(""){}
+    ReadVariant(): reference_start(0), read_id(0){}
+            
+    // 40 bytes: phase holds one per alignment with variants
+    std::vector<Variant> variantVec;
+    int reference_start;
+    // the rank of the read name among the chromosome's read names, so that
+    // alignments of one read have the same id and ids sort as the names do
+    uint32_t read_id;
+    bool is_reverse;
+    
+    void sort();
+};
+
+// modcall's read record, which keeps the read name
+struct ModReadVariant{
+    ModReadVariant(): read_name(""), 
+            reference_start(0){}
             
     std::string read_name;
-    int mapping_quality;
-    std::string source_id;
-    std::string sample_id;
-    int reference_start;
-    std::string BX_tag;
-    bool is_reverse;
-    std::map<int, int> cnv_mmrate_map;
-
     std::vector<Variant> variantVec;
+    int reference_start;
+    bool is_reverse;
     
     void sort();
 };
@@ -126,5 +137,40 @@ int homopolymerLength(int snp_pos, const std::string &ref_string);
 
 template <typename T>
 double calculateMean(const std::vector<T>& data);
+
+// Threads that run a job, fn(t) for t = 0 .. n-1 (0 on the calling thread),
+// each time run() is called, and sleep in between (OpenMP threads would spin
+// while the caller reads and writes the batches).
+class BatchThreads {
+public:
+    explicit BatchThreads(int n);
+    ~BatchThreads();
+    int size() const { return n_; }
+    void run(const std::function<void(int)>& fn);
+private:
+    int n_;
+    std::vector<std::thread> threads_;
+    std::mutex m_;
+    std::condition_variable cv_, doneCv_;
+    const std::function<void(int)>* job_ = nullptr;
+    uint64_t gen_ = 0;
+    int pending_ = 0;
+    bool stop_ = false;
+};
+
+// readVcfRecords reads the records of fp as a bcf_read loop does: in file
+// order, up to the first one that does not parse. They are read in batches;
+// each batch is parsed on up to `threads` threads, each with its own copy of
+// the header (parsing adds contigs and tags missing from the header to it),
+// and work(i, hdr, rec) is called there for the i-th record of the batch.
+// Then done(i, hdr, rec) is called for the records in file order. work may
+// only write data of record i. setup(h, original), if given, is called for
+// the header and each copy before any record is parsed (copies are made
+// first, from the header as it is).
+typedef std::function<void(size_t, bcf_hdr_t*, bcf1_t*)> VcfRecordFn;
+void readVcfRecords(htsFile* fp, bcf_hdr_t* hdr, int threads, size_t batch,
+                    const VcfRecordFn& work, const VcfRecordFn& done,
+                    const std::function<void(bcf_hdr_t*, bool)>& setup =
+                        std::function<void(bcf_hdr_t*, bool)>());
 
 #endif

@@ -1,10 +1,19 @@
 #include "ParsingBam.h"
+#include <htslib/bgzf.h>
+#include <fcntl.h>
+#include <unistd.h>
 
+#include <cctype>
 #include <cstdio>
+#include <cerrno>
+#include <climits>
+#include <cstdlib>
 #include <cmath>
 #include <iomanip>   // std::fixed / std::setprecision for INFO/PE|H1|H2
 #include <sstream>
 #include <string.h>
+#include <cstring>
+#include <algorithm>
 
 // vcf parser modify from
 // http://wresch.github.io/2014/11/18/process-vcf-file-with-htslib.html
@@ -38,21 +47,202 @@ FastaParser::FastaParser(std::string fastaFile,
       continue;
     }
 
-    // ref_len is a return value that is length of retrun string
-    int ref_len = 0;
-
-    // read file; faidx_fetch_seq returns a malloc'd buffer owned by us
-    char *seq = faidx_fetch_seq(fai, (*iter).c_str(), 0,
-                                last_pos.at(index) + 5, &ref_len);
-    if (ref_len == 0) {
-      std::cout << "nothing in reference file \n";
-    }
-
     // update map
-    chrString[(*iter)] = seq ? std::string(seq, ref_len) : std::string();
-    free(seq);
+    chrString[(*iter)] = fetchChrReference(fai, *iter, last_pos.at(index));
   }
   fai_destroy(fai);
+}
+
+// The reference of chr up to 5 bases past lastPos (0-based)
+std::string fetchChrReference(faidx_t *fai, const std::string &chr,
+                              int lastPos) {
+  // ref_len is a return value that is length of retrun string
+  int ref_len = 0;
+
+  // read file; faidx_fetch_seq returns a malloc'd buffer owned by us
+  char *seq = faidx_fetch_seq(fai, chr.c_str(), 0, lastPos + 5, &ref_len);
+  if (ref_len == 0) {
+    std::cout << "nothing in reference file \n";
+  }
+
+  std::string ref = seq ? std::string(seq, ref_len) : std::string();
+  free(seq);
+  return ref;
+}
+
+std::string loadChrReference(const std::string &fastaFile,
+                             const std::string &chr, int lastPos) {
+  // a reader of its own, so chromosomes can be read in parallel
+  FastaReader reader(fastaFile);
+  int ref_len = 0;
+  std::string ref = reader.fetch(chr, 0, lastPos + 5, ref_len, false);
+  if (ref_len == 0) {
+    std::cout << "nothing in reference file \n";
+  }
+  return ref;
+}
+
+FastaReader::FastaReader(const std::string &fastaFile)
+    : fai(fai_load(fastaFile.c_str())) {
+  if (!fai)
+    return;
+  int f = open(fastaFile.c_str(), O_RDONLY);
+  if (f < 0)
+    return;
+  // not gzip / BGZF compressed
+  unsigned char magic[2] = {0, 0};
+  if (pread(f, magic, 2, 0) == 2 && magic[0] == 0x1f && magic[1] == 0x8b) {
+    close(f);
+    return;
+  }
+  // the .fai fai_load read: name, length, offset, line bases, line width
+  std::ifstream in(fastaFile + ".fai");
+  std::string line;
+  while (in && std::getline(in, line)) {
+    std::vector<std::string> col;
+    size_t b = 0;
+    while (true) {
+      size_t e = line.find('\t', b);
+      col.push_back(line.substr(b, e == std::string::npos ? std::string::npos : e - b));
+      if (e == std::string::npos)
+        break;
+      b = e + 1;
+    }
+    if (col.size() < 5) {
+      index.clear();
+      break;
+    }
+    Entry e;
+    char *stop;
+    e.len = strtoll(col[1].c_str(), &stop, 10);
+    e.offset = strtoll(col[2].c_str(), &stop, 10);
+    e.lineBases = (int)strtol(col[3].c_str(), &stop, 10);
+    e.lineWidth = (int)strtol(col[4].c_str(), &stop, 10);
+    if (e.len <= 0 || e.offset < 0 || e.lineBases <= 0 ||
+        e.lineWidth < e.lineBases)
+      e.irregular = true;
+    index[col[0]] = e;
+  }
+  if (index.empty()) {
+    close(f);
+    return;
+  }
+  fd = f;
+}
+
+FastaReader::~FastaReader() {
+  if (fd >= 0)
+    close(fd);
+  if (fai)
+    fai_destroy(fai);
+}
+
+namespace {
+// isgraph in the C locale, which htslib uses to skip line ends
+inline bool isBase(unsigned char c) { return c >= 0x21 && c <= 0x7e; }
+
+// Append the bases in [p, end) to out, up to need of them in all. col is the
+// column of p in its line, B bases then W - B line-end characters per line.
+// False if a line is not laid out that way.
+bool appendBases(const char *&p, const char *end, int64_t &col, int64_t B,
+                 int64_t W, size_t need, std::string &out) {
+  while (p < end && out.size() < need) {
+    if (col < B) {
+      size_t k = std::min<size_t>(std::min<int64_t>(B - col, end - p),
+                                  need - out.size());
+      bool ok = true;
+      for (size_t i = 0; i < k; i++)
+        ok &= isBase((unsigned char)p[i]);
+      if (!ok)
+        return false;
+      out.append(p, k);
+      p += k;
+      col += k;
+    } else {
+      if (isBase((unsigned char)*p))
+        return false;
+      p++;
+      if (++col == W)
+        col = 0;
+    }
+  }
+  return true;
+}
+} // namespace
+
+bool FastaReader::readSeq(const Entry &e, int64_t beg, int64_t end,
+                          std::string &out, bool cache) {
+  out.clear();
+  const int64_t B = e.lineBases, W = e.lineWidth;
+  const size_t need = end - beg + 1;
+  // file offsets of the first and the last base
+  const int64_t first = e.offset + beg / B * W + beg % B;
+  const int64_t last = e.offset + end / B * W + end % B;
+  int64_t col = beg % B;
+  if (cache) {
+    if (rawStart < 0 || first < rawStart ||
+        last >= rawStart + (int64_t)raw.size()) {
+      // at least 1 MB from the first base
+      raw.resize(std::max<int64_t>(last - first + 1, 1 << 20));
+      ssize_t got = pread(fd, raw.data(), raw.size(), first);
+      if (got < last - first + 1) {
+        rawStart = -1;
+        return false;
+      }
+      raw.resize(got);
+      rawStart = first;
+    }
+    const char *p = raw.data() + (first - rawStart);
+    return appendBases(p, raw.data() + raw.size(), col, B, W, need, out) &&
+           out.size() == need;
+  }
+  out.reserve(need);
+  std::vector<char> buf(1 << 22);
+  int64_t off = first;
+  while (out.size() < need) {
+    ssize_t got = pread(fd, buf.data(),
+                        std::min<int64_t>(buf.size(), last - off + 1), off);
+    if (got <= 0)
+      return false;
+    off += got;
+    const char *p = buf.data();
+    if (!appendBases(p, buf.data() + got, col, B, W, need, out))
+      return false;
+  }
+  return true;
+}
+
+std::string FastaReader::fetch(const std::string &chr, int beg, int end,
+                               int &len, bool cache) {
+  auto it = fd >= 0 ? index.find(chr) : index.end();
+  if (it != index.end() && !it->second.irregular) {
+    const Entry &e = it->second;
+    // positions as faidx_fetch_seq adjusts them
+    int64_t b = beg, en = end;
+    if (en < b)
+      b = en;
+    if (b < 0)
+      b = 0;
+    else if (e.len <= b)
+      b = e.len - 1;
+    if (en < 0)
+      en = 0;
+    else if (e.len <= en)
+      en = e.len - 1;
+    if (en >= b) {
+      std::string seq;
+      if (readSeq(e, b, en, seq, cache)) {
+        len = (int)seq.size();
+        return seq;
+      }
+      // not as the .fai describes: htslib from now on
+      it->second.irregular = true;
+    }
+  }
+  char *seq = faidx_fetch_seq(fai, chr.c_str(), beg, end, &len);
+  std::string out = seq ? std::string(seq, len) : std::string();
+  free(seq);
+  return out;
 }
 
 FastaParser::~FastaParser() {}
@@ -60,7 +250,9 @@ FastaParser::~FastaParser() {}
 void BaseVairantParser::readGzLines(
     const std::string &variantFile,
     std::function<void(const std::string &)> callback) {
-  gzFile file = gzopen(variantFile.c_str(), "rb");
+  // htslib's BGZF reader inflates with libdeflate, several times faster than
+  // zlib's gzread; it also reads plain gzip and uncompressed files.
+  BGZF *file = bgzf_open(variantFile.c_str(), "r");
   if (!file) {
     std::cout << "Fail to open vcf: " << variantFile << "\n";
     return;
@@ -91,12 +283,11 @@ void BaseVairantParser::readGzLines(
       len = buffer_size - (offset - buffer);
     }
 
-    len = gzread(file, offset, len);
+    len = (int)bgzf_read(file, offset, len);
     if (len == 0)
       break;
     if (len < 0) {
-      int err;
-      fprintf(stderr, "Error: %s.\n", gzerror(file, &err));
+      fprintf(stderr, "Error: failed to read %s.\n", variantFile.c_str());
       exit(EXIT_FAILURE);
     }
 
@@ -109,7 +300,7 @@ void BaseVairantParser::readGzLines(
     // any trailing data in [eol, end) now is a partial line
     offset = std::copy(cur, end, buffer);
   }
-  gzclose(file);
+  bgzf_close(file);
   free(buffer);
 }
 
@@ -149,6 +340,7 @@ void BaseVairantParser::compressInput(std::string variantFile,
   readGzLines(variantFile, [&](const std::string &line) {
     writeLine(const_cast<std::string &>(line), ps_def, resultVcf, phasingResult);
   });
+  finishWriting(resultVcf, phasingResult);
 }
 
 void BaseVairantParser::unCompressInput(std::string variantFile,
@@ -170,6 +362,7 @@ void BaseVairantParser::unCompressInput(std::string variantFile,
         writeLine(input, ps_def, resultVcf, phasingResult);
       }
     }
+    finishWriting(resultVcf, phasingResult);
   }
 }
 
@@ -183,9 +376,9 @@ void BaseVairantParser::dispatchWriteResult(const std::string &inputFile,
 }
 
 void BaseVairantParser::writeLine(std::string &input, bool &ps_def,
-                                  std::ofstream &resultVcf,
+                                  std::ostream &resultVcf,
                                   PhasingResult &phasingResult) {
-  if (input.substr(0, 2) == "##") {
+  if (input.compare(0, 2, "##") == 0) {
     // Drop PE/H1/H2 declarations carried over from an input that was
     // already phased by LongPhase; writePeInfoHeaders() emits the current
     // ones, so re-phasing never produces duplicate ##INFO lines.
@@ -195,14 +388,14 @@ void BaseVairantParser::writeLine(std::string &input, bool &ps_def,
       return;
     writeMetaHeader(input, ps_def, resultVcf);
   }
-  else if (input.substr(0, 6) == "#CHROM" || input.substr(0, 6) == "#chrom")
+  else if (input.compare(0, 6, "#CHROM") == 0 || input.compare(0, 6, "#chrom") == 0)
     writeColumnHeader(input, ps_def, resultVcf);
   else
     writeDataLine(input, resultVcf, phasingResult);
 }
 
 void BaseVairantParser::writeMetaHeader(const std::string &input, bool &ps_def,
-                                        std::ofstream &resultVcf) {
+                                        std::ostream &resultVcf) {
   if (input.substr(0, 16) == "##FORMAT=<ID=PS,")
     ps_def = true;
   resultVcf << input << "\n";
@@ -210,7 +403,7 @@ void BaseVairantParser::writeMetaHeader(const std::string &input, bool &ps_def,
 
 void BaseVairantParser::writeColumnHeader(const std::string &input,
                                           bool &ps_def,
-                                          std::ofstream &resultVcf) {
+                                          std::ostream &resultVcf) {
   if (commandLine == false) {
     if (ps_def == false) {
       resultVcf << "##FORMAT=<ID=PS,Number=1,Type=Integer,Description="
@@ -228,7 +421,7 @@ void BaseVairantParser::writeColumnHeader(const std::string &input,
   resultVcf << input << "\n";
 }
 
-void BaseVairantParser::writePeInfoHeaders(std::ofstream &resultVcf) {
+void BaseVairantParser::writePeInfoHeaders(std::ostream &resultVcf) {
   // Idempotent: writes the three ##INFO lines the first time we're
   // called, then never again for this parser instance. Every parser
   // (SNP, SV, MOD) shares this via inheritance.
@@ -240,11 +433,59 @@ void BaseVairantParser::writePeInfoHeaders(std::ofstream &resultVcf) {
 }
 
 namespace {
+// Split at whitespace like reading strings with operator>> in the C locale
+void splitWhitespace(const std::string &line, std::vector<std::string> &fields) {
+  size_t n = 0;
+  size_t i = 0, len = line.size();
+  while (true) {
+    while (i < len && std::isspace((unsigned char)line[i]))
+      i++;
+    if (i >= len)
+      break;
+    size_t b = i;
+    while (i < len && !std::isspace((unsigned char)line[i]))
+      i++;
+    if (n == fields.size())
+      fields.emplace_back();
+    fields[n++].assign(line, b, i - b);
+  }
+  fields.resize(n);
+}
+
+// The first field of a line, as splitWhitespace splits it
+std::string firstField(const std::string &line) {
+  size_t b = 0;
+  while (b < line.size() && std::isspace((unsigned char)line[b]))
+    b++;
+  size_t e = b;
+  while (e < line.size() && !std::isspace((unsigned char)line[e]))
+    e++;
+  return line.substr(b, e - b);
+}
+} // namespace
+
+void BaseVairantParser::writeFields(std::ostream &resultVcf) {
+  lineOut.clear();
+  for (size_t i = 0; i < lineFields.size(); i++) {
+    if (i != 0)
+      lineOut += '\t';
+    lineOut += lineFields[i];
+  }
+  lineOut += '\n';
+  resultVcf.write(lineOut.data(), lineOut.size());
+}
+
+namespace {
 // Remove existing PE=, H1= and H2= entries from an INFO field, e.g. when
 // re-phasing a VCF that LongPhase already annotated. Keys are matched
 // exactly, so fields such as H1x= are kept. An emptied field becomes ".".
 void removePeHapFromInfoField(std::string &infoField) {
   if (infoField == ".")
+    return;
+  // nothing to remove unless one of the keys occurs
+  if (infoField.find("PE") == std::string::npos &&
+      infoField.find("H1") == std::string::npos &&
+      infoField.find("H2") == std::string::npos)
     return;
   std::string kept;
   bool removed = false;
@@ -277,19 +518,19 @@ void removePeHapFromInfoField(std::string &infoField) {
 void appendPeHapInfoToInfoField(std::string &infoField,
                                 const PhasingElement &pe) {
   removePeHapFromInfoField(infoField);
-  std::ostringstream buf;
-  buf << std::fixed << std::setprecision(3);
-  buf << "PE=" << pe.entropy
-      << ";H1=" << pe.h1
-      << ";H2=" << pe.h2;
+  // same text as an ostream with std::fixed and setprecision(3)
+  char buf[128];
+  snprintf(buf, sizeof(buf), "PE=%.3f;H1=%.3f;H2=%.3f", (double)pe.entropy,
+           (double)pe.h1, (double)pe.h2);
   // modcall ends INFO with ';', so drop trailing separators to avoid
   // writing an empty entry (";;PE=...")
   while (!infoField.empty() && infoField.back() == ';')
     infoField.pop_back();
   if (infoField.empty() || infoField == ".") {
-    infoField = buf.str();
+    infoField = buf;
   } else {
-    infoField += ";" + buf.str();
+    infoField += ';';
+    infoField += buf;
   }
 }
 } // namespace
@@ -299,6 +540,36 @@ void appendPeHapInfoToInfoField(std::string &infoField,
 // none), so phasing one sample leaves the others unchanged.
 static void setSamplePs(std::vector<std::string> &fields, size_t sampleCol,
                         const std::string &value) {
+  // Usual case: FORMAT has no PS key. Then only column sampleCol changes:
+  // it is padded with "." to the FORMAT length and gets value appended.
+  bool hasPs = false;
+  size_t formatKeys = 1;
+  {
+    const std::string &f = fields[8];
+    size_t b = 0;
+    while (true) {
+      size_t e = f.find(':', b);
+      size_t len = (e == std::string::npos ? f.size() : e) - b;
+      if (len == 2 && f[b] == 'P' && f[b + 1] == 'S')
+        hasPs = true;
+      if (e == std::string::npos)
+        break;
+      formatKeys++;
+      b = e + 1;
+    }
+  }
+  if (!hasPs && !value.empty()) {
+    fields[8] += ":PS";
+    if (sampleCol < fields.size()) {
+      std::string &v = fields[sampleCol];
+      size_t n = std::count(v.begin(), v.end(), ':') + 1;
+      for (; n < formatKeys; n++)
+        v += ":.";
+      v += ':';
+      v += value;
+    }
+    return;
+  }
   auto split = [](const std::string &s) {
     std::vector<std::string> v;
     size_t b = 0;
@@ -346,6 +617,10 @@ static void setSamplePs(std::vector<std::string> &fields, size_t sampleCol,
     fields[c] = join(v);
   }
 }
+
+// readVcfRecords for the SNP VCF: records per batch, and threads
+static const size_t kVcfReadBatch = 1024;
+static const int kVcfReadThreads = 8;
 
 static bool isHetGt(const int *gt) {
   return (gt[0] == 2 && gt[1] == 4) || // 0/1
@@ -421,95 +696,112 @@ SnpParser::SnpParser(PhasingParameters &in_params) {
   // column of this sample in the VCF text, used when writing the result
   sampleCol = 9 + sampleIdx;
   // limit the VCF data to this sample
-  int is_file = bcf_hdr_set_samples(hdr, sampleName.c_str(), 0);
-  if (is_file != 0) {
-    std::cout << "error or a positive integer if the list contains samples not "
-                 "present in the VCF header\n";
-  }
+  auto limitSamples = [&](bcf_hdr_t *h, bool original) {
+    int is_file = bcf_hdr_set_samples(h, sampleName.c_str(), 0);
+    if (original && is_file != 0) {
+      std::cout << "error or a positive integer if the list contains samples not "
+                   "present in the VCF header\n";
+    }
+  };
 
-  // struct for storing each record
-  bcf1_t *rec = bcf_init();
-  int ngt_arr = 0;
-  int ngt = 0;
-  int *gt = NULL;
-
-  // loop vcf line
-  while (bcf_read(inf, hdr, rec) == 0) {
-    // snp
-    if (bcf_is_snp(rec)) {
-      ngt = bcf_get_format_int32(hdr, rec, "GT", &gt, &ngt_arr);
-
-      if (ngt < 0) {
-        std::cerr << "pos " << rec->pos << " missing GT value" << "\n";
-        exit(1);
+  // What a record gives: examineSnpRecord reads one record (on any thread),
+  // useSnpRecord records the variants in file order.
+  struct SnpRecord {
+    bool readGt;     // GT was read: SNP records, and others with --indels
+    int ngt, gt0, gt1;
+    bool snp;
+    std::string chr, ref, alt;
+    int pos;
+    float qual;
+    bool multiAllelic;
+    bool noAlt;
+  };
+  auto examine = [&](bcf_hdr_t *h, bcf1_t *rec, SnpRecord &r) {
+    r.snp = bcf_is_snp(rec);
+    r.readGt = r.snp || params->phaseIndel;
+    if (!r.readGt)
+      return;
+    int *gt = NULL, ngt_arr = 0;
+    r.ngt = bcf_get_format_int32(h, rec, "GT", &gt, &ngt_arr);
+    r.pos = rec->pos;
+    if (r.ngt >= 1) r.gt0 = gt[0];
+    if (r.ngt >= 2) r.gt1 = gt[1];
+    free(gt);
+    if (r.ngt < 0)
+      return;
+    r.chr = bcf_hdr_id2name(h, rec->rid);
+    r.qual = rec->qual;
+    // a record without ALT allele is not used
+    r.noAlt = rec->n_allele < 2;
+    if (r.noAlt)
+      return;
+    r.ref = rec->d.allele[0];
+    r.alt = rec->d.allele[1];
+    // prevent the MAVs calling error which makes the GT=0/1: another ALT
+    // allele follows (the last allele ends with two NULs)
+    r.multiAllelic = rec->d.allele[1][r.alt.size() + 1] != '\0';
+  };
+  // The GT values were read into one buffer, reused from record to record:
+  // with a single GT value, isHetGt read the second one left there.
+  int gtBuf[2] = {0, 0};
+  auto use = [&](const SnpRecord &r) {
+    if (!r.readGt)
+      return;
+    if (r.ngt < 0) {
+      std::cerr << "pos " << r.pos << " missing GT value" << "\n";
+      exit(1);
+    }
+    if (r.ngt >= 1) gtBuf[0] = r.gt0;
+    if (r.ngt >= 2) gtBuf[1] = r.gt1;
+    // just phase hetero SNP
+    if (!isHetGt(gtBuf) || r.noAlt)
+      return;
+    // position is 0-base
+    int variantPos = r.pos;
+    if (!r.snp) {
+      // indel
+      float qual = r.qual;
+      if (std::isnan(qual)) {
+        qual = 0.0;
       }
-
-      // just phase hetero SNP
-      if (isHetGt(gt)) {
-
-        // get chromosome string
-        std::string chr = seqnames[rec->rid];
-        // position is 0-base
-        int variantPos = rec->pos;
-        // get r alleles
-        SnpVariant tmp;
-        tmp.Ref = rec->d.allele[0];
-        tmp.Alt = rec->d.allele[1];
-
-        // prevent the MAVs calling error which makes the GT=0/1
-        if (rec->d.allele[1][2] != '\0') {
-          continue;
+      if (params->indelQuality > 0 && qual < params->indelQuality) {
+        if (removedIndelsLog.is_open()) {
+          removedIndelsLog << r.chr << "\t" << (variantPos + 1) << "\t"
+                           << r.ref << "\t" << r.alt << "\t"
+                           << (std::isnan(r.qual) ? "." : std::to_string(r.qual))
+                           << "\n";
         }
-
-        // record
-        (*chrVariant)[chr][variantPos] = tmp;
+        // Record the position of filtered indels (0-based)
+        filteredIndelPositions[r.chr].insert(variantPos);
+        return;
       }
     }
-    // indel
-    else if (params->phaseIndel) {
-      ngt = bcf_get_format_int32(hdr, rec, "GT", &gt, &ngt_arr);
+    if (r.multiAllelic)
+      return;
+    // record
+    SnpVariant &tmp = (*chrVariant)[r.chr][variantPos];
+    tmp = SnpVariant();
+    tmp.Ref = r.ref;
+    tmp.Alt = r.alt;
+  };
 
-      if (ngt < 0) {
-        std::cerr << "pos " << rec->pos << " missing GT value" << "\n";
-        exit(1);
-      }
-
-      if (isHetGt(gt)) {
-
-        // get chromosome string
-        std::string chr = seqnames[rec->rid];
-        // position is 0-base
-        int variantPos = rec->pos;
-        // get r alleles
-        SnpVariant tmp;
-        tmp.Ref = rec->d.allele[0];
-        tmp.Alt = rec->d.allele[1];
-
-        float qual = rec->qual;
-        if (std::isnan(qual)) {
-          qual = 0.0;
-        }
-        if (params->indelQuality > 0 && qual < params->indelQuality) {
-          if (removedIndelsLog.is_open()) {
-            removedIndelsLog << chr << "\t" << (variantPos + 1) << "\t"
-                             << tmp.Ref << "\t" << tmp.Alt << "\t"
-                             << (std::isnan(rec->qual) ? "." : std::to_string(rec->qual))
-                             << "\n";
-          }
-          // Record the position of filtered indels (0-based)
-          filteredIndelPositions[chr].insert(variantPos);
-          continue;
-        }
-
-        // prevent the MAVs calling error which makes the GT=0/1
-        if (rec->d.allele[1][tmp.Alt.size() + 1] != '\0') {
-          continue;
-        }
-
-        // record
-        (*chrVariant)[chr][variantPos] = tmp;
-      }
+  if (inf->format.format == vcf) {
+    // VCF text: parsed on several threads, used in file order
+    std::vector<SnpRecord> got(kVcfReadBatch);
+    readVcfRecords(inf, hdr, std::min(params->numThreads, kVcfReadThreads),
+                   kVcfReadBatch,
+                   [&](size_t i, bcf_hdr_t *h, bcf1_t *rec) { examine(h, rec, got[i]); },
+                   [&](size_t i, bcf_hdr_t *, bcf1_t *) { use(got[i]); },
+                   limitSamples);
+  } else {
+    limitSamples(hdr, true);
+    bcf1_t *rec = bcf_init();
+    SnpRecord r;
+    while (bcf_read(inf, hdr, rec) == 0) {
+      examine(hdr, rec, r);
+      use(r);
     }
+    bcf_destroy(rec);
   }
 }
 
@@ -531,25 +823,27 @@ std::map<int, SnpVariant> SnpParser::getVariants(std::string chrName) {
   return targetVariants;
 }
 
-std::map<int, SnpVariant>
-SnpParser::getVariants_markindel(std::string chrName, const std::string &ref) {
-  std::map<int, SnpVariant> targetVariants;
+void SnpParser::markChrVariants(const std::string &chrName,
+                                const std::string &ref) {
   std::map<std::string, std::map<int, SnpVariant>>::iterator chrIter =
       chrVariant->find(chrName);
-
-  // Mark the indel which lies in the tandem repeat
-  if (chrIter != chrVariant->end()) {
-    for (auto innerIter = chrIter->second.begin();
-         innerIter != chrIter->second.end(); innerIter++) {
-      innerIter->second.is_danger = isDangerIndel(
-          innerIter->first, ref, innerIter->second.Ref.length(),
-          innerIter->second.Alt.length());
-    }
-
-    targetVariants = (*chrIter).second;
+  if (chrIter == chrVariant->end())
+    return;
+  for (auto innerIter = chrIter->second.begin();
+       innerIter != chrIter->second.end(); innerIter++) {
+    // Mark the indel which lies in the tandem repeat
+    innerIter->second.is_danger = isDangerIndel(
+        innerIter->first, ref, innerIter->second.Ref.length(),
+        innerIter->second.Alt.length());
+    innerIter->second.homopolymer =
+        homopolymerLength(innerIter->first, ref);
   }
+}
 
-  return targetVariants;
+std::map<int, SnpVariant> *SnpParser::chrVariants(const std::string &chrName) {
+  std::map<std::string, std::map<int, SnpVariant>>::iterator chrIter =
+      chrVariant->find(chrName);
+  return chrIter == chrVariant->end() ? nullptr : &chrIter->second;
 }
 
 std::vector<std::string> SnpParser::getChrVec() { return chrName; }
@@ -570,16 +864,76 @@ int SnpParser::getLastSNP(std::string chrName) {
   return (*lastVariantIter).first;
 }
 
+// VCF data lines per batch, and threads; reading and writing the lines on
+// one thread limit the gain from more threads
+static const size_t kWriteBatch = 1024;
+static const int kWriteThreads = 8;
+
 void SnpParser::writeResult(PhasingResult &phasingResult,
                             const std::string &outPrefix) {
+  writeChrs.clear();
+  pendingCount = 0;
+  const int threads = std::max(1, std::min(params->numThreads, kWriteThreads));
+  writeThreads.reset(new BatchThreads(threads));
+  threadFields.assign(threads, std::vector<std::string>());
   dispatchWriteResult(params->snpFile, outPrefix + ".vcf",
                       phasingResult);
+  writeThreads.reset();
+  writeChrs.clear();
+  std::vector<std::string>().swap(pendingLines);
+  std::vector<const WriteChr *>().swap(pendingChr);
+  std::vector<std::string>().swap(pendingOut);
+  std::vector<std::vector<std::string>>().swap(threadFields);
+}
+
+void SnpParser::writeLine(std::string &input, bool &ps_def,
+                          std::ostream &resultVcf,
+                          PhasingResult &phasingResult) {
+  // the lines BaseVairantParser::writeLine passes to writeDataLine
+  if (input.compare(0, 2, "##") != 0 && input.compare(0, 6, "#CHROM") != 0 &&
+      input.compare(0, 6, "#chrom") != 0) {
+    if (pendingCount == pendingLines.size())
+      pendingLines.emplace_back();
+    pendingLines[pendingCount++].swap(input);
+    if (pendingCount == kWriteBatch)
+      flushDataLines(resultVcf, phasingResult);
+    return;
+  }
+  flushDataLines(resultVcf, phasingResult);
+  BaseVairantParser::writeLine(input, ps_def, resultVcf, phasingResult);
+}
+
+void SnpParser::finishWriting(std::ostream &resultVcf,
+                              PhasingResult &phasingResult) {
+  flushDataLines(resultVcf, phasingResult);
+}
+
+void SnpParser::flushDataLines(std::ostream &resultVcf,
+                               PhasingResult &phasingResult) {
+  const size_t n = pendingCount;
+  if (n == 0)
+    return;
+  // the chromosome lookups are built here, in order; the threads only read them
+  pendingChr.resize(n);
+  for (size_t i = 0; i < n; i++)
+    pendingChr[i] = &writeChrLookup(firstField(pendingLines[i]), phasingResult);
+  if (pendingOut.size() < n)
+    pendingOut.resize(n);
+  const int threads = writeThreads->size();
+  writeThreads->run([&](int t) {
+    for (size_t i = n * t / threads; i < n * (t + 1) / threads; i++)
+      formatDataLine(pendingLines[i], *pendingChr[i], threadFields[t],
+                     pendingOut[i]);
+  });
+  for (size_t i = 0; i < n; i++)
+    resultVcf.write(pendingOut[i].data(), pendingOut[i].size());
+  pendingCount = 0;
 }
 
 void SnpParser::parserProcess(std::string &input) {}
 
 void SnpParser::writeMetaHeader(const std::string &input, bool &ps_def,
-                               std::ofstream &resultVcf) {
+                               std::ostream &resultVcf) {
   if (input.substr(0, 16) == "##FORMAT=<ID=PS,") {
     ps_def = true;
   }
@@ -600,12 +954,61 @@ void SnpParser::writeMetaHeader(const std::string &input, bool &ps_def,
 }
 
 
+
+// The lookups of chr for writing its lines, built once per chromosome. The
+// phased positions are the PhasingResult keys chr + "_" + std::to_string(pos).
+const SnpParser::WriteChr &
+SnpParser::writeChrLookup(const std::string &chr, PhasingResult &phasingResult) {
+  auto cached = writeChrs.find(chr);
+  if (cached != writeChrs.end())
+    return cached->second;
+  static const std::map<int, SnpVariant> noVariants;
+  WriteChr w;
+  auto variantIter = chrVariant->find(chr);
+  w.variants = variantIter != chrVariant->end() ? &variantIter->second : &noVariants;
+  w.filtered = nullptr;
+  auto filteredIter = filteredIndelPositions.find(chr);
+  if (filteredIter != filteredIndelPositions.end())
+    w.filtered = &filteredIter->second;
+
+  const std::string prefix = chr + "_";
+  for (auto it = phasingResult.lower_bound(prefix);
+       it != phasingResult.end() &&
+       it->first.compare(0, prefix.size(), prefix) == 0;
+       ++it) {
+    // keep only keys whose rest is a position as std::to_string writes it
+    const char *rest = it->first.c_str() + prefix.size();
+    char *stop = nullptr;
+    errno = 0;
+    long pos = strtol(rest, &stop, 10);
+    if (errno != 0 || *stop != '\0' || pos < INT_MIN || pos > INT_MAX ||
+        std::to_string((int)pos) != rest)
+      continue;
+    w.phased.emplace_back((int)pos, &it->second);
+  }
+  std::sort(w.phased.begin(), w.phased.end(),
+            [](const std::pair<int, const PhasingElement *> &a,
+               const std::pair<int, const PhasingElement *> &b) {
+              return a.first < b.first;
+            });
+  return writeChrs.emplace(chr, std::move(w)).first->second;
+}
+
 void SnpParser::writeDataLine(const std::string &input,
-                              std::ofstream &resultVcf,
+                              std::ostream &resultVcf,
                               PhasingResult &phasingResult) {
-  std::istringstream iss(input);
-  std::vector<std::string> fields((std::istream_iterator<std::string>(iss)),
-                                  std::istream_iterator<std::string>());
+  formatDataLine(input, writeChrLookup(firstField(input), phasingResult),
+                 lineFields, lineOut);
+  resultVcf.write(lineOut.data(), lineOut.size());
+}
+
+// The output line of a VCF data line, "" when the line has no fields. Only
+// reads the parser, so lines can be formatted on several threads.
+void SnpParser::formatDataLine(const std::string &input, const WriteChr &chr,
+                               std::vector<std::string> &fields,
+                               std::string &out) const {
+  out.clear();
+  splitWhitespace(input, fields);
 
   if (fields.size() == 0)
     return;
@@ -613,15 +1016,25 @@ void SnpParser::writeDataLine(const std::string &input,
   // the phased sample's column (--sample); other sample columns are kept
   const size_t sc = sampleCol;
   if (fields.size() <= sc) {
-    resultVcf << input << "\n";
+    out = input;
+    out += '\n';
     return;
   }
 
   int pos = std::stoi(fields[1]);
   int posIdx = pos - 1;
-  std::string key = fields[0] + "_" + std::to_string(posIdx);
 
-  PhasingResult::iterator psElementIter = phasingResult.find(key);
+  // the phased element at this position, if any
+  const PhasingElement *phased = nullptr;
+  {
+    auto it = std::lower_bound(
+        chr.phased.begin(), chr.phased.end(), posIdx,
+        [](const std::pair<int, const PhasingElement *> &a, int p) {
+          return a.first < p;
+        });
+    if (it != chr.phased.end() && it->first == posIdx)
+      phased = it->second;
+  }
 
   // reset GT flag
   if (fields[8].find("GT") != std::string::npos) {
@@ -638,36 +1051,34 @@ void SnpParser::writeDataLine(const std::string &input,
   }
 
   // Check if the variant is extracted from this VCF
-  auto posIter = (*chrVariant)[fields[0]].find(posIdx);
+  std::map<int, SnpVariant>::const_iterator cur = chr.variants->lower_bound(posIdx);
+  bool inVcf = cur != chr.variants->end() && cur->first == posIdx;
 
   // Check if this indel was filtered out due to quality
   bool isFilteredIndel = false;
   if (params->phaseIndel && params->indelQuality > 0) {
-    auto filteredIter = filteredIndelPositions.find(fields[0]);
-    if (filteredIter != filteredIndelPositions.end()) {
-      if (filteredIter->second.find(posIdx) != filteredIter->second.end()) {
-        isFilteredIndel = true;
-      }
+    if (chr.filtered != nullptr &&
+        chr.filtered->find(posIdx) != chr.filtered->end()) {
+      isFilteredIndel = true;
     }
   }
 
   // this pos is phase; only the record that was phased (same REF and ALT)
   // gets the phase, not other records at the same position (issue #133)
-  if (psElementIter != phasingResult.end() &&
-      posIter != (*chrVariant)[fields[0]].end() &&
-      posIter->second.Ref == fields[3] && posIter->second.Alt == fields[4]) {
+  if (phased != nullptr && inVcf && cur->second.Ref == fields[3] &&
+      cur->second.Alt == fields[4]) {
     // add PS flag and value
-    setSamplePs(fields, sc, std::to_string((*psElementIter).second.block));
+    setSamplePs(fields, sc, std::to_string(phased->block));
 
     int modify_start = findFieldValueStart(fields[8], fields[sc], "GT");
     // direct modify GT value
-    fields[sc][modify_start] = (*psElementIter).second.RAstatus[0];
+    fields[sc][modify_start] = phased->RAstatus[0];
     fields[sc][modify_start + 1] = '|';
-    fields[sc][modify_start + 2] = (*psElementIter).second.RAstatus[2];
+    fields[sc][modify_start + 2] = phased->RAstatus[2];
 
     // Attach PE / H1 / H2 to INFO for phased positions only.
     // Rule: if INFO was ".", replace it; otherwise append with ';'.
-    appendPeHapInfoToInfoField(fields[7], (*psElementIter).second);
+    appendPeHapInfoToInfoField(fields[7], *phased);
   }
   // this pos has not been phased
   else {
@@ -683,13 +1094,12 @@ void SnpParser::writeDataLine(const std::string &input,
     fields[6] = "INDEL_QUAL_FILTERED";
   }
 
-  for (std::vector<std::string>::iterator fieldIter = fields.begin();
-       fieldIter != fields.end(); ++fieldIter) {
-    if (fieldIter != fields.begin())
-      resultVcf << "\t";
-    resultVcf << (*fieldIter);
+  for (size_t i = 0; i < fields.size(); i++) {
+    if (i != 0)
+      out += '\t';
+    out += fields[i];
   }
-  resultVcf << "\n";
+  out += '\n';
 }
 
 bool SnpParser::findSNP(std::string chr, int position) {
@@ -709,8 +1119,7 @@ bool SnpParser::findSNP(std::string chr, int position) {
 }
 
 void SnpParser::filterSNP(std::string chr,
-                          std::vector<ReadVariant> &readVariantVec,
-                          std::string &chr_reference) {
+                          std::vector<ReadVariant> &readVariantVec) {
 
   // pos, <allele, <strand, True>
   std::map<int, std::map<int, std::map<int, bool>>> posAlleleStrand;
@@ -751,8 +1160,7 @@ void SnpParser::filterSNP(std::string chr,
     for (std::map<int, SnpVariant>::iterator posIter =
              (*chrIter).second.begin();
          posIter != (*chrIter).second.end(); posIter++) {
-      consecutiveAllele[(*posIter).first] =
-          homopolymerLength((*posIter).first, chr_reference);
+      consecutiveAllele[(*posIter).first] = (*posIter).second.homopolymer;
     }
     std::map<int, SnpVariant>::iterator currSNPIter = (*chrIter).second.begin();
     std::map<int, SnpVariant>::iterator nextSNPIter = std::next(currSNPIter, 1);
@@ -798,6 +1206,24 @@ void SnpParser::filterSNP(std::string chr,
   }
 }
 
+// value of an INFO key, matching the whole key between ';'
+static bool getInfoValue(const std::string &info, const std::string &key,
+                         std::string &value) {
+  size_t start = 0;
+  while (start < info.size()) {
+    size_t end = info.find(';', start);
+    if (end == std::string::npos)
+      end = info.size();
+    if (end - start > key.size() && info.compare(start, key.size(), key) == 0 &&
+        info[start + key.size()] == '=') {
+      value = info.substr(start + key.size() + 1, end - start - key.size() - 1);
+      return true;
+    }
+    start = end + 1;
+  }
+  return false;
+}
+
 // SV
 SVParser::SVParser(PhasingParameters &in_params, SnpParser &in_snpFile) {
   params = &in_params;
@@ -812,6 +1238,9 @@ SVParser::SVParser(PhasingParameters &in_params, SnpParser &in_snpFile) {
     // .vcf
     unCompressParser(params->svFile);
   }
+
+  for (auto &chrRecords : chrDeletionRecords)
+    std::sort(chrRecords.second.begin(), chrRecords.second.end());
 
   // erase SV pos if this pos appear two or more times
   for (std::map<std::string, std::map<int, bool>>::iterator chrIter =
@@ -837,9 +1266,8 @@ void SVParser::parserProcess(std::string &input) {
   if (input.substr(0, 1) == "#")
     return;
 
-  std::istringstream iss(input);
-  std::vector<std::string> fields((std::istream_iterator<std::string>(iss)),
-                                  std::istream_iterator<std::string>());
+  std::vector<std::string> &fields = lineFields;
+  splitWhitespace(input, fields);
 
   if (fields.size() == 0)
     return;
@@ -868,6 +1296,22 @@ void SVParser::parserProcess(std::string &input) {
     filter = true;
   }
 
+  // every deletion record, whatever its genotype and whether phase uses it,
+  // so that a read's split junction is given to the nearest of them
+  // (issue #126)
+  std::string recordSvlen;
+  if (getInfoValue(fields[7], "SVLEN", recordSvlen)) {
+    char *svlenEnd;
+    long long recordLength = std::strtoll(recordSvlen.c_str(), &svlenEnd, 10);
+    std::string recordType;
+    bool recordIsDeletion = getInfoValue(fields[7], "SVTYPE", recordType)
+                                ? recordType == "DEL"
+                                : recordLength < 0;
+    if (svlenEnd != recordSvlen.c_str() && recordIsDeletion &&
+        recordLength != 0 && recordLength > -INT_MAX && recordLength < INT_MAX)
+      chrDeletionRecords[chr].emplace_back(start, (int)std::llabs(recordLength));
+  }
+
   if (filter) {
     return;
   }
@@ -880,6 +1324,23 @@ void SVParser::parserProcess(std::string &input) {
     size_t semiPos = info.find(';', svlenPos);
     int svlen = std::stoi(info.substr(svlenPos, semiPos - svlenPos));
   (*chrVariant)[chr][start][svlen] = true;
+
+    // SV type and the reads the SV caller found supporting the SV (issue #126)
+    SVReadSupport &support = chrSVSupport[chr][start];
+    std::string svtype;
+    if (getInfoValue(info, "SVTYPE", svtype))
+      support.isDeletion = (svtype == "DEL");
+    else
+      support.isDeletion = (svlen < 0);
+    std::string rnames;
+    if (getInfoValue(info, "RNAMES", rnames)) {
+      std::istringstream rnamesStream(rnames);
+      std::string readName;
+      while (std::getline(rnamesStream, readName, ','))
+        if (!readName.empty() && readName != ".")
+          support.readNames.insert(readName);
+      support.hasReadNames = !support.readNames.empty();
+    }
   }
 }
 
@@ -894,6 +1355,24 @@ std::map<int, std::map<int, bool>> SVParser::getVariants(std::string chrName) {
   return targetVariants;
 }
 
+const std::map<int, SVReadSupport> *
+SVParser::getReadSupport(const std::string &chrName) const {
+  std::map<std::string, std::map<int, SVReadSupport>>::const_iterator chrIter =
+      chrSVSupport.find(chrName);
+  if (chrIter == chrSVSupport.end())
+    return nullptr;
+  return &(*chrIter).second;
+}
+
+const std::vector<std::pair<int, int>> *
+SVParser::getDeletionRecords(const std::string &chrName) const {
+  std::map<std::string, std::vector<std::pair<int, int>>>::const_iterator
+      chrIter = chrDeletionRecords.find(chrName);
+  if (chrIter == chrDeletionRecords.end())
+    return nullptr;
+  return &(*chrIter).second;
+}
+
 void SVParser::writeResult(PhasingResult &phasingResult,
                            const std::string &outPrefix) {
   dispatchWriteResult(params->svFile, outPrefix + "_SV.vcf",
@@ -901,7 +1380,7 @@ void SVParser::writeResult(PhasingResult &phasingResult,
 }
 
 void SVParser::writeMetaHeader(const std::string &input, bool &ps_def,
-                               std::ofstream &resultVcf) {
+                               std::ostream &resultVcf) {
   if (input.substr(0, 16) == "##FORMAT=<ID=PS,") {
     ps_def = true;
   }
@@ -917,11 +1396,10 @@ void SVParser::writeMetaHeader(const std::string &input, bool &ps_def,
 }
 
 void SVParser::writeDataLine(const std::string &input,
-                               std::ofstream &resultVcf,
+                               std::ostream &resultVcf,
                                PhasingResult &phasingResult) {
-  std::istringstream iss(input);
-  std::vector<std::string> fields((std::istream_iterator<std::string>(iss)),
-                                  std::istream_iterator<std::string>());
+  std::vector<std::string> &fields = lineFields;
+  splitWhitespace(input, fields);
 
   if (fields.size() == 0)
     return;
@@ -998,13 +1476,7 @@ void SVParser::writeDataLine(const std::string &input,
     fields[8] = fields[8] + ":PS";
     fields[9] = fields[9] + ":.";
   }
-  for (std::vector<std::string>::iterator fieldIter = fields.begin();
-       fieldIter != fields.end(); ++fieldIter) {
-    if (fieldIter != fields.begin())
-      resultVcf << "\t";
-    resultVcf << (*fieldIter);
-  }
-  resultVcf << "\n";
+  writeFields(resultVcf);
 }
 
 bool SVParser::findSV(std::string chr, int position) {
@@ -1024,34 +1496,29 @@ bool SVParser::findSV(std::string chr, int position) {
 }
 BamParser::BamParser(std::string inputChrName,
                      std::vector<std::string> inputBamFileVec,
-                     SnpParser &snpMap, SVParser &svFile, METHParser &modFile,
-                     const std::string &ref_string)
+                     SnpParser &snpMap, SVParser &svFile, METHParser &modFile)
     : chrName(inputChrName), BamFileVec(inputBamFileVec) {
 
-  currentVariants = new std::map<int, SnpVariant>;
   currentSV = new std::map<int, std::map<int, bool>>;
-  currentMod = new std::map<int, std::map<std::string, ModVariant>>;
 
-  initSnpVariants(snpMap, ref_string);
+  initSnpVariants(snpMap);
   initSvVariants(svFile);
   initModVariants(modFile);
 }
 
 BamParser::~BamParser() {
-  delete currentVariants;
   delete currentSV;
-  delete currentMod;
 }
 
-void BamParser::initSnpVariants(SnpParser &snpMap, const std::string &ref_string) {
+void BamParser::initSnpVariants(SnpParser &snpMap) {
   // use chromosome to find recorded snp map
-  (*currentVariants) = snpMap.getVariants_markindel(chrName, ref_string);
-  // set skip variant start iterator
-  firstVariantIter = currentVariants->begin();
-  if (firstVariantIter == currentVariants->end()) {
+  currentVariants = snpMap.chrVariants(chrName);
+  if (currentVariants == nullptr || currentVariants->empty()) {
     std::cerr << "error chromosome name or empty map: " << chrName << "\n";
     exit(1);
   }
+  // set skip variant start iterator
+  firstVariantIter = currentVariants->begin();
 }
 
 void BamParser::initSvVariants(SVParser &svFile) {
@@ -1061,15 +1528,19 @@ void BamParser::initSvVariants(SVParser &svFile) {
     int start = chrPair.first;
     for (const auto &endPair : chrPair.second) {
       int svlen = endPair.first;
-      SV_map[chrName].emplace_back(start, svlen);
+      svList.emplace_back(start, svlen);
     }
   }
-  firstSVIter = SV_map[chrName].begin();
+  firstSVIter = svList.begin();
+  currentSVSupport = svFile.getReadSupport(chrName);
+  currentDeletionRecords = svFile.getDeletionRecords(chrName);
 }
 
 void BamParser::initModVariants(METHParser &modFile) {
   // set current chromosome MOD map
-  (*currentMod) = modFile.getVariants(chrName);
+  currentMod = modFile.chrVariants(chrName);
+  if (currentMod == nullptr)
+    currentMod = &emptyMod;
   firstModIter = currentMod->begin();
 }
 
@@ -1094,7 +1565,7 @@ void BamParser::direct_detect_alleles(int lastSNPPos, htsThreadPool &threadPool,
                                       PhasingParameters params,
                                       std::vector<ReadVariant> &readVariantVec,
                                       ClipCount &clipCount,
-                                      const std::string &ref_string) {
+                                      bool hasReference) {
 
   // record SNP start iter
   std::map<int, SnpVariant>::iterator tmpFirstVariantIter = firstVariantIter;
@@ -1111,8 +1582,37 @@ void BamParser::direct_detect_alleles(int lastSNPPos, htsThreadPool &threadPool,
     firstModIter = tmpFirstModIter;
 
     processBamFile(bamFile, lastSNPPos, threadPool, params, readVariantVec,
-                   clipCount, ref_string);
+                   clipCount, hasReference);
   }
+  rankReadNames(readVariantVec);
+}
+
+void BamParser::rankReadNames(std::vector<ReadVariant> &readVariantVec) {
+  const size_t n = nameStart.size();
+  nameStart.push_back(readNames.size());
+  // compares as std::string does: bytes, then length
+  auto less = [&](uint32_t a, uint32_t b) {
+    const size_t la = nameStart[a + 1] - nameStart[a];
+    const size_t lb = nameStart[b + 1] - nameStart[b];
+    const int c = std::memcmp(readNames.data() + nameStart[a],
+                              readNames.data() + nameStart[b], std::min(la, lb));
+    return c != 0 ? c < 0 : la < lb;
+  };
+  std::vector<uint32_t> order(n);
+  for (size_t i = 0; i < n; i++)
+    order[i] = i;
+  std::sort(order.begin(), order.end(), less);
+  std::vector<uint32_t> rank(n);
+  uint32_t r = 0;
+  for (size_t i = 0; i < n; i++) {
+    if (i > 0 && less(order[i - 1], order[i]))
+      r++;
+    rank[order[i]] = r;
+  }
+  for (ReadVariant &read : readVariantVec)
+    read.read_id = rank[read.read_id];
+  std::string().swap(readNames);
+  std::vector<size_t>().swap(nameStart);
 }
 
 void BamParser::processBamFile(const std::string &bamFile, int lastSNPPos,
@@ -1120,7 +1620,7 @@ void BamParser::processBamFile(const std::string &bamFile, int lastSNPPos,
                                 const PhasingParameters &params,
                                 std::vector<ReadVariant> &readVariantVec,
                                 ClipCount &clipCount,
-                                const std::string &ref_string) {
+                                bool hasReference) {
   // open bam file
   samFile *fp_in = hts_open(bamFile.c_str(), "r");
   // load reference file
@@ -1138,6 +1638,9 @@ void BamParser::processBamFile(const std::string &bamFile, int lastSNPPos,
 
   std::string range = chrName + ":1-" + std::to_string(lastSNPPos);
   hts_itr_t *iter = sam_itr_querys(idx, bamHdr, range.c_str());
+  // the iterator keeps its own chunk offsets, so the whole-BAM index is not
+  // held while the chromosome is read
+  hts_idx_destroy(idx);
 
   hts_set_opt(fp_in, HTS_OPT_THREAD_POOL, &threadPool);
   int result;
@@ -1146,10 +1649,11 @@ void BamParser::processBamFile(const std::string &bamFile, int lastSNPPos,
       continue;
     }
 
-      get_snp(*bamHdr, *aln, readVariantVec, clipCount, ref_string,
-            params.isONT, params.svWindow, params.svThreshold);
+      get_snp(*bamHdr, *aln, readVariantVec, clipCount, hasReference,
+            params.isONT, params.svWindow, params.svThreshold,
+            params.mappingQuality);
   }
-  hts_idx_destroy(idx);
+  hts_itr_destroy(iter);
   bam_hdr_destroy(bamHdr);
   bam_destroy1(aln);
   sam_close(fp_in);
@@ -1158,16 +1662,19 @@ void BamParser::processBamFile(const std::string &bamFile, int lastSNPPos,
 // Returns true if get_snp() should return immediately (read bounds exceeded).
 bool BamParser::handleDeletionHomopolymerSNP(
     const bam1_t &aln, int ref_pos, int query_pos, int del_len,
-    const std::string &ref_string,
     std::map<int, SnpVariant>::iterator &currentVariantIter,
     ReadVariant &tmpReadResult) {
 
+  // no variant left on this chromosome (end() must not be dereferenced)
+  if (currentVariantIter == currentVariants->end()) {
+    return false;
+  }
   if (ref_pos + del_len + 1 == (*currentVariantIter).first) {
     return false;
   } else if ((*currentVariantIter).first >= ref_pos &&
              (*currentVariantIter).first < ref_pos + del_len) {
     // check snp in homopolymer
-    if (homopolymerLength((*currentVariantIter).first, ref_string) >= 3) {
+    if ((*currentVariantIter).second.homopolymer >= 3) {
       int refAlleleLen = (*currentVariantIter).second.Ref.length();
       int altAlleleLen = (*currentVariantIter).second.Alt.length();
       int base_q = 0;
@@ -1304,8 +1811,357 @@ void BamParser::handleModVariant(
   }
 }
 
+// SV evidence from split alignments (issue #126): minimap2 reports a large
+// deletion as a primary and a supplementary alignment (SA tag) rather than as a
+// CIGAR D, so the alignment that reaches the SV ends, clipped, at its breakpoint.
+// Breakpoint tolerance (bp) of the split-alignment junction; the aligner may
+// extend an alignment over microhomology, which is added on top of it.
+static const int SV_JUNCTION_TOLERANCE = 50;
+// largest query overlap of two segments of a split read accepted at a junction
+static const int SV_MAX_QUERY_OVERLAP = 1000;
+// An alignment shows the reference at an SV if it is aligned at least this
+// many bp on both sides of the SV position; such alignments are judged by the
+// CIGAR alone, as before.
+static const int SV_REF_FLANK = 100;
+// a clip longer than this marks a break in the alignment (as in getClip)
+static const int SV_MIN_BREAK_CLIP = 5;
+// a split junction whose breakpoints both lie within this distance of the
+// SV's may be the same deletion called at a slightly different place, and an
+// alignment clipped within this distance (or |SVLEN|) past the SV may be the
+// upstream part of a carrier whose alignment ran on over a repeat
+static const int SV_MAX_JUNCTION_SHIFT = 1000;
+// For a record without RNAMES, a split junction of the same size whose
+// breakpoints both lie within this distance of the SV's is taken as this
+// deletion with imprecise breakpoints, unless another deletion record of that
+// size lies within this distance more of the junction (pairs of deletions too
+// close to tell apart).
+static const int SV_NEAR_JUNCTION = 150;
+
+// Aligned part of an alignment: reference span [refStart, refEnd), the S/H
+// clip at each end, and the query offset just past the last aligned base
+// (in the orientation of the alignment).
+struct SVAlignedSpan {
+  int refStart = 0;
+  int refEnd = 0;
+  int leadClip = 0;
+  int trailClip = 0;
+  int queryEnd = 0;
+};
+
+static SVAlignedSpan getAlignedSpan(const bam1_t &aln) {
+  const uint32_t *cigar = bam_get_cigar(&aln);
+  int n = aln.core.n_cigar;
+  SVAlignedSpan span;
+  span.refStart = static_cast<int>(aln.core.pos);
+  span.refEnd = static_cast<int>(bam_endpos(&aln));
+  int first = 0;
+  while (first < n && (bam_cigar_op(cigar[first]) == BAM_CSOFT_CLIP ||
+                       bam_cigar_op(cigar[first]) == BAM_CHARD_CLIP))
+    span.leadClip += bam_cigar_oplen(cigar[first++]);
+  int last = n - 1;
+  while (last >= first && (bam_cigar_op(cigar[last]) == BAM_CSOFT_CLIP ||
+                           bam_cigar_op(cigar[last]) == BAM_CHARD_CLIP))
+    span.trailClip += bam_cigar_oplen(cigar[last--]);
+  span.queryEnd = span.leadClip;
+  for (int i = first; i <= last; i++) {
+    // M, I, =, X consume the query
+    if (bam_cigar_type(bam_cigar_op(cigar[i])) & 1)
+      span.queryEnd += bam_cigar_oplen(cigar[i]);
+  }
+  return span;
+}
+
+// One SA segment of the read: 0-based reference start and the query interval
+// it aligns (in the orientation of the alignment).
+struct SVSplitSegment {
+  int refStart = 0;
+  int queryStart = 0;
+  int queryEnd = 0;
+};
+
+// SA segments on the same contig and strand as the alignment, with mapping
+// quality >= mappingQuality, that align a later part of the read.
+static std::vector<SVSplitSegment>
+getDownstreamSegments(const bam1_t &aln, const SVAlignedSpan &span,
+                      const std::string &chrName, int mappingQuality) {
+  std::vector<SVSplitSegment> segments;
+  uint8_t *saData = bam_aux_get(&aln, "SA");
+  if (saData == NULL)
+    return segments;
+  const char *sa = bam_aux2Z(saData);
+  if (sa == NULL)
+    return segments;
+  char strand = bam_is_rev(&aln) ? '-' : '+';
+  // SA:Z:(rname,pos,strand,CIGAR,mapQ,NM;)+
+  std::istringstream saStream(sa);
+  std::string entry;
+  while (std::getline(saStream, entry, ';')) {
+    std::vector<std::string> fields;
+    std::istringstream entryStream(entry);
+    std::string field;
+    while (std::getline(entryStream, field, ','))
+      fields.push_back(field);
+    if (fields.size() < 6 || fields[0] != chrName || fields[2].size() != 1 ||
+        fields[2][0] != strand)
+      continue;
+    char *mapqEnd;
+    long mapq = std::strtol(fields[4].c_str(), &mapqEnd, 10);
+    if (mapqEnd == fields[4].c_str() || *mapqEnd != '\0' ||
+        mapq < mappingQuality)
+      continue;
+    char *posEnd;
+    long saPos = std::strtol(fields[1].c_str(), &posEnd, 10);
+    if (posEnd == fields[1].c_str() || *posEnd != '\0' || saPos < 1 ||
+        saPos > INT_MAX)
+      continue;
+    SVSplitSegment segment;
+    segment.refStart = (int)saPos - 1;
+    long long queryStart = 0;
+    long long queryEnd = 0;
+    bool leading = true;
+    bool valid = !fields[3].empty();
+    const char *op = fields[3].c_str();
+    while (valid && *op) {
+      char *opEnd;
+      long len = std::strtol(op, &opEnd, 10);
+      // a BAM CIGAR operation is at most 2^28 - 1 long
+      if (opEnd == op || *opEnd == '\0' || len < 0 || len >= (1L << 28)) {
+        valid = false;
+        break;
+      }
+      char type = *opEnd;
+      if (type == 'S' || type == 'H') {
+        if (leading)
+          queryStart += len;
+      } else {
+        if (leading)
+          queryEnd = queryStart;
+        leading = false;
+        if (type == 'M' || type == 'I' || type == '=' || type == 'X')
+          queryEnd += len;
+      }
+      op = opEnd + 1;
+    }
+    if (!valid || leading || queryEnd > INT_MAX)
+      continue;
+    segment.queryStart = static_cast<int>(queryStart);
+    segment.queryEnd = static_cast<int>(queryEnd);
+    if (segment.queryEnd > span.queryEnd)
+      segments.push_back(segment);
+  }
+  return segments;
+}
+
+// Deleting ref[a, a + length) or ref[b, b + length) leaves the same sequence
+// when the bases between the two starts repeat length bases later, i.e. the
+// two are one deletion placed at different points of a repeat. For each
+// anchor b, the starts a for which this holds form one interval around b.
+void SVDeletionRepeats::build(const std::map<int, std::map<int, bool>> &svs,
+                              const std::string &ref) {
+  anchors.clear();
+  refLength = ref.size();
+  auto repeats = [&](long long i, long long length) {
+    return std::toupper((unsigned char)ref[i]) ==
+           std::toupper((unsigned char)ref[i + length]);
+  };
+  for (const auto &sv : svs) {
+    for (const auto &lengthEntry : sv.second) {
+      long long length = std::llabs((long long)lengthEntry.first);
+      if (length <= 0 || length > INT_MAX)
+        continue;
+      // starts farther than this from the anchor are not asked about
+      long long reach = std::max<long long>(maxShift, length) + 1;
+      for (int b : {sv.first, sv.first - 1}) {
+        long long high = b;
+        while (high < b + reach && high >= 0 &&
+               (size_t)(high + length) < refLength && repeats(high, length))
+          high++;
+        long long low = b;
+        while (low > b - reach && low - 1 >= 0 &&
+               (size_t)(low - 1 + length) < refLength && repeats(low - 1, length))
+          low--;
+        anchors.push_back({b, (int)length, (int)low, (int)high});
+      }
+    }
+  }
+  std::sort(anchors.begin(), anchors.end());
+}
+
+bool SVDeletionRepeats::sameDeletion(int a, int b, int length) const {
+  if (length <= 0)
+    return false;
+  long long first = std::min(a, b);
+  long long last = std::max(a, b);
+  if (first < 0 || (size_t)last + (size_t)length > refLength)
+    return false;
+  Anchor key{b, length, 0, 0};
+  std::vector<Anchor>::const_iterator it =
+      std::lower_bound(anchors.begin(), anchors.end(), key);
+  if (it == anchors.end() || it->pos != b || it->length != length)
+    return false;
+  return it->low <= a && a <= it->high;
+}
+
+// Distance from a record position to the left breakpoint of a split junction,
+// which lies anywhere in [junctionStart, junctionEnd] when the two segments of
+// the read share sequence (microhomology or a repeat).
+static long long junctionDistance(long long position, long long junctionStart,
+                                  long long junctionEnd) {
+  if (position < junctionStart)
+    return junctionStart - position;
+  if (position > junctionEnd)
+    return position - junctionEnd;
+  return 0;
+}
+
+// Another deletion record of the SV VCF (deletionRecords: position, |SVLEN|;
+// phased by phase or not), of the same size as a read's split junction, lies
+// closer to the junction than distance: the read carries that deletion rather
+// than a shifted copy of the SV being evaluated.
+static bool otherDeletionFitsJunction(
+    const std::vector<std::pair<int, int>> *deletionRecords, int svStart,
+    long long junctionStart, long long junctionEnd, long long junctionDeletion,
+    long long distance, double svThreshold) {
+  if (deletionRecords == nullptr || distance <= 0)
+    return false;
+  long long low = std::min<long long>(
+      std::max<long long>(junctionStart - distance + 1, INT_MIN), INT_MAX);
+  std::vector<std::pair<int, int>>::const_iterator record = std::lower_bound(
+      deletionRecords->begin(), deletionRecords->end(),
+      std::make_pair((int)low, INT_MIN));
+  for (; record != deletionRecords->end() &&
+         (long long)(*record).first < junctionEnd + distance;
+       record++) {
+    // records at the SV's own position (the SV itself)
+    if ((*record).first == svStart)
+      continue;
+    double size = (*record).second;
+    if (std::fabs(size - (double)junctionDeletion) > svThreshold * size)
+      continue;
+    if (junctionDistance((*record).first, junctionStart, junctionEnd) < distance)
+      return true;
+  }
+  return false;
+}
+
+// Allele of a deletion at VCF POS = svPos + 1 shown by a split alignment that
+// ends, clipped, near the SV:
+//   1  the read continues after the deletion: the next segment starts
+//      |SVLEN| bases further on the reference
+//   0  the read's own split deletion contains the SV position, so the read
+//      shows the reference allele there (overlapping SVs)
+//   2  a junction of the same size near the SV that cannot be told apart from
+//      it: no evidence for either allele
+//   3  a junction of the same size whose breakpoints both lie within
+//      SV_NEAR_JUNCTION of the SV's, with no other deletion record that close:
+//      most likely this deletion with imprecise breakpoints
+//  -1  none of these
+static int splitAlignmentDeletionAllele(
+    const bam1_t &aln, const SVAlignedSpan &span, int svPos, int svLength,
+    bool isDeletion, double svThreshold, int mappingQuality,
+    const std::string &chrName, const SVDeletionRepeats &repeats,
+    const std::vector<std::pair<int, int>> *deletionRecords) {
+  // only the upstream part of a split read, clipped where it ends
+  if (span.trailClip == 0 || span.refStart > svPos || svLength == INT_MIN)
+    return -1;
+  std::vector<SVSplitSegment> segments =
+      getDownstreamSegments(aln, span, chrName, mappingQuality);
+  int pos = svPos + 1;
+  int delLength = std::abs(svLength);
+  bool sameSizeNearby = false;
+  bool nearJunction = false;
+  for (const SVSplitSegment &segment : segments) {
+    long long queryGap = (long long)segment.queryStart - span.queryEnd;
+    long long overlap = std::max(0LL, -queryGap);
+    long long insertion = std::max(0LL, queryGap);
+    // a deletion between two copies of a long repeat gives segments that
+    // share up to one copy of the read; beyond SV_MAX_QUERY_OVERLAP accept
+    // that only for a deletion that is longer than the shared part
+    if (overlap > SV_MAX_QUERY_OVERLAP && (!isDeletion || overlap >= delLength))
+      continue;
+    long long junctionDeletion = (long long)segment.refStart - span.refEnd + overlap;
+    long long leftOffset = (long long)span.refEnd - pos;
+    long long rightOffset = (long long)segment.refStart - ((long long)pos + delLength);
+    bool sameSize = isDeletion && junctionDeletion > 0 &&
+                    insertion <= std::max(SV_JUNCTION_TOLERANCE,
+                                          (int)(svThreshold * delLength)) &&
+                    (double)std::llabs(junctionDeletion - delLength) <=
+                        svThreshold * delLength;
+    // another deletion record of this size lies closer to the junction
+    long long junctionStart = span.refEnd - overlap;
+    long long ownDistance = junctionDistance(pos, junctionStart, span.refEnd);
+    bool otherFitsBetter = sameSize && otherDeletionFitsJunction(
+        deletionRecords, pos, junctionStart, span.refEnd, junctionDeletion,
+        ownDistance, svThreshold);
+    // this segment forms the junction of the deletion
+    if (sameSize && !otherFitsBetter && leftOffset >= -SV_JUNCTION_TOLERANCE &&
+        leftOffset <= overlap + SV_JUNCTION_TOLERANCE &&
+        rightOffset >= -(overlap + SV_JUNCTION_TOLERANCE) &&
+        rightOffset <= SV_JUNCTION_TOLERANCE)
+      return 1;
+    // the same deletion placed elsewhere in a repeat (e.g. a left-aligned
+    // VCF record): its first deleted base (VCF POS, or POS - 1 for callers
+    // that report the first deleted base) gives the same sequence
+    if (sameSize && !otherFitsBetter && junctionDeletion == delLength &&
+        std::llabs(junctionStart - pos) <=
+            std::max(SV_MAX_JUNCTION_SHIFT, delLength) &&
+        (repeats.sameDeletion((int)junctionStart, pos, delLength) ||
+         repeats.sameDeletion((int)junctionStart, pos - 1, delLength)))
+      return 1;
+    // a junction of the same size that matches one breakpoint, or that is
+    // shifted as a whole (breakpoints in a repeat), may still be this
+    // deletion: it is not evidence for either allele
+    if (sameSize && std::llabs(leftOffset) <= overlap + SV_NEAR_JUNCTION &&
+        std::llabs(rightOffset) <= overlap + SV_NEAR_JUNCTION &&
+        std::llabs(leftOffset) <= SV_MAX_JUNCTION_SHIFT &&
+        std::llabs(rightOffset) <= SV_MAX_JUNCTION_SHIFT &&
+        !otherDeletionFitsJunction(deletionRecords, pos, junctionStart,
+                                   span.refEnd, junctionDeletion,
+                                   ownDistance + SV_NEAR_JUNCTION,
+                                   svThreshold)) {
+      nearJunction = true;
+      continue;
+    }
+    long long tolerance = overlap + SV_JUNCTION_TOLERANCE;
+    if (sameSize && (std::llabs(leftOffset) <= tolerance ||
+                     std::llabs(rightOffset) <= tolerance ||
+                     std::llabs(leftOffset - rightOffset) <= tolerance ||
+                     (std::llabs(leftOffset) <= SV_MAX_JUNCTION_SHIFT &&
+                      std::llabs(rightOffset) <= SV_MAX_JUNCTION_SHIFT)) &&
+        !otherFitsBetter) {
+      sameSizeNearby = true;
+      continue;
+    }
+    // the read's own deletion contains the SV position
+    if (queryGap <= SV_JUNCTION_TOLERANCE &&
+        (long long)segment.refStart - span.refEnd >= 2 * SV_REF_FLANK &&
+        span.refEnd + SV_REF_FLANK <= pos &&
+        pos <= segment.refStart - SV_REF_FLANK)
+      return 0;
+  }
+  return nearJunction ? 3 : sameSizeNearby ? 2 : -1;
+}
+
+// Index of the CIGAR operation that consumes reference position refPos, or -1
+// if the aligned part of the alignment does not reach it.
+static int findReferenceCigarOp(const bam1_t &aln, int refPos) {
+  const uint32_t *cigar = bam_get_cigar(&aln);
+  int pos = static_cast<int>(aln.core.pos);
+  for (int i = 0; i < (int)aln.core.n_cigar; i++) {
+    // M, D, N, =, X consume the reference
+    if (!(bam_cigar_type(bam_cigar_op(cigar[i])) & 2))
+      continue;
+    int len = bam_cigar_oplen(cigar[i]);
+    if (refPos < pos + len)
+      return refPos >= pos ? i : -1;
+    pos += len;
+  }
+  return -1;
+}
+
 void BamParser::handleSVVariant(
     const bam1_t &aln, int cigar_i, int svWindow, double svThreshold,
+    int mappingQuality,
     std::vector<std::pair<int, int>>::iterator &currentSVIter, int &svPos,
     ReadVariant &tmpReadResult) {
 
@@ -1318,8 +2174,18 @@ void BamParser::handleSVVariant(
   int sv_end = sv_start + std::abs(sv_length);
   double sv_region = sv_end - sv_start + 1;
 
-  for (int j = std::max(cigar_i - svWindow, 0);
-       j < std::min(cigar_i + svWindow, aln_core_n_cigar); j++) {
+  // look for an I/D of the SV size around the CIGAR operation that holds the
+  // SV; when the SV was reached on a clip, use the operation that covers the
+  // SV instead (an insertion op is kept: it is usually the SV itself)
+  int center = cigar_i;
+  if (bam_cigar_op(cigar[cigar_i]) == BAM_CSOFT_CLIP ||
+      bam_cigar_op(cigar[cigar_i]) == BAM_CHARD_CLIP) {
+    int covering = findReferenceCigarOp(aln, svPos);
+    if (covering >= 0)
+      center = covering;
+  }
+  for (int j = std::max(center - svWindow, 0);
+       j < std::min(center + svWindow, aln_core_n_cigar); j++) {
     int op = bam_cigar_op(cigar[j]);
     int oplen = bam_cigar_oplen(cigar[j]);
     if (op == BAM_CINS &&
@@ -1334,11 +2200,60 @@ void BamParser::handleSVVariant(
     }
   }
 
-  // use quality -1 to identify SVs
-  tmpReadResult.variantVec.push_back(
-      Variant(svPos, allele, -1, VariantType::SV));
+  // An alignment that does not reach well past the SV on both sides (one that
+  // ends or starts at the SV, often clipped there, or that reached the SV
+  // only on an S/H operation) does not show the reference allele. Decide it
+  // from its split alignment or from the SV caller's RNAMES, or skip it.
+  bool hasCall = true;
+  if (allele == 0) {
+    SVAlignedSpan span = getAlignedSpan(aln);
+    int pos = svPos + 1;
+    bool spans =
+        span.refStart <= pos - SV_REF_FLANK && span.refEnd >= pos + SV_REF_FLANK;
+    // an alignment that does reach past the SV but is clipped soon after it
+    // may be the upstream part of a carrier whose alignment ran on over a
+    // repeat; it keeps its REF call unless split or RNAMES evidence says ALT
+    bool clippedAfter =
+        span.trailClip > SV_MIN_BREAK_CLIP &&
+        span.refEnd - pos <= std::max<long long>(SV_MAX_JUNCTION_SHIFT,
+                                                 std::llabs((long long)sv_length));
+    if (!spans || clippedAfter) {
+      const SVReadSupport *support = NULL;
+      if (currentSVSupport != nullptr) {
+        std::map<int, SVReadSupport>::const_iterator supportIter =
+            currentSVSupport->find(sv_start);
+        if (supportIter != currentSVSupport->end())
+          support = &(*supportIter).second;
+      }
+      int splitAllele = -1;
+      if (support != NULL)
+        splitAllele = splitAlignmentDeletionAllele(
+            aln, span, svPos, sv_length, support->isDeletion, svThreshold,
+            mappingQuality, chrName, deletionRepeats, currentDeletionRecords);
+      if (support != NULL && support->hasReadNames) {
+        // the SV caller listed the reads that carry the SV (RNAMES): only
+        // those count as ALT; a junction it did not list is no evidence
+        if (span.refStart <= svPos &&
+            support->readNames.count(bam_get_qname(&aln)) != 0)
+          allele = 1;
+        else if (splitAllele == 1 || splitAllele == 2 || splitAllele == 3 ||
+                 (splitAllele == -1 && !spans))
+          hasCall = false;
+      } else if (splitAllele == 1 || splitAllele == 3) {
+        allele = 1;
+      } else if (splitAllele == 2 || (splitAllele == -1 && !spans)) {
+        hasCall = false;
+      }
+    }
+  }
+
+  if (hasCall) {
+    // use quality -1 to identify SVs
+    tmpReadResult.variantVec.push_back(
+        Variant(svPos, allele, -1, VariantType::SV));
+  }
   currentSVIter++;
-  if (currentSVIter != SV_map[chrName].end()) {
+  if (currentSVIter != svList.end()) {
     svPos = (*currentSVIter).first - 1;
   } else {
     svPos = INT_MAX;
@@ -1347,12 +2262,11 @@ void BamParser::handleSVVariant(
 
 void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln,
                         std::vector<ReadVariant> &readVariantVec,
-                        ClipCount &clipCount, const std::string &ref_string,
-                        bool isONT, int svWindow, double svThreshold) {
+                        ClipCount &clipCount, bool hasReference,
+                        bool isONT, int svWindow, double svThreshold,
+                        int mappingQuality) {
 
   ReadVariant tmpReadResult;
-  tmpReadResult.read_name = bam_get_qname(&aln);
-  tmpReadResult.source_id = bamHdr.target_name[aln.core.tid];
   tmpReadResult.reference_start = aln.core.pos;
   tmpReadResult.is_reverse = bam_is_rev(&aln);
 
@@ -1368,7 +2282,7 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln,
     firstVariantIter++;
 
   // Skip structure variants that are to the left of this read
-  while (firstSVIter != SV_map[chrName].end() && (*firstSVIter).first < ref_pos)
+  while (firstSVIter != svList.end() && (*firstSVIter).first < ref_pos)
     firstSVIter++;
 
   // Skip modify that are to the left of this read
@@ -1404,7 +2318,7 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln,
     int modPos = (currentModIter != currentMod->end()) ? (*currentModIter).first
                                                        : INT_MAX;
     int svPos =
-        (currentSVIter != SV_map[chrName].end()) ? (*currentSVIter).first - 1
+        (currentSVIter != svList.end()) ? (*currentSVIter).first - 1
                                                  : INT_MAX;
     int variantPos = (currentVariantIter != currentVariants->end())
                          ? (*currentVariantIter).first
@@ -1428,7 +2342,7 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln,
     // Determine if any variant is included in the current CIGAR operator
     while ((currentModIter != currentMod->end() &&
             modPos < ref_pos + cigar_oplen) ||
-           (currentSVIter != SV_map[chrName].end() &&
+           (currentSVIter != svList.end() &&
             svPos < ref_pos + cigar_oplen) ||
            (currentVariantIter != currentVariants->end() &&
             variantPos < ref_pos + cigar_oplen)) {
@@ -1436,7 +2350,7 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln,
       // modification's position is minimal (or equal, MOD takes priority)
       if ((currentVariantIter == currentVariants->end() ||
            modPos <= variantPos) &&
-          (currentSVIter == SV_map[chrName].end() || modPos <= svPos) &&
+          (currentSVIter == svList.end() || modPos <= svPos) &&
           currentModIter != currentMod->end()) {
 
         handleModVariant(aln, variantPos, currentModIter, modPos, tmpReadResult);
@@ -1445,15 +2359,16 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln,
       else if ((currentVariantIter == currentVariants->end() ||
                 svPos <= variantPos) &&
                (currentModIter == currentMod->end() || svPos < modPos) &&
-               currentSVIter != SV_map[chrName].end()) {
+               currentSVIter != svList.end()) {
         // If this read not contain SV, it means this read is the same as
         // reference genome. default this read the same as ref
 
-        handleSVVariant(aln, i, svWindow, svThreshold, currentSVIter, svPos, tmpReadResult);
+        handleSVVariant(aln, i, svWindow, svThreshold, mappingQuality,
+                        currentSVIter, svPos, tmpReadResult);
       }
 
       // SNP's position is minimal
-      else if ((currentSVIter == SV_map[chrName].end() || variantPos < svPos) &&
+      else if ((currentSVIter == svList.end() || variantPos < svPos) &&
                (currentModIter == currentMod->end() || variantPos < modPos) &&
                currentVariantIter != currentVariants->end()) {
 
@@ -1490,9 +2405,9 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln,
     } else if (cigar_op == 2) {
       // If a reference is given, check whether any SNP falls in a homopolymer
       // region spanned by this deletion and handle it specially.
-      if (ref_string != "") {
+      if (hasReference) {
         if (handleDeletionHomopolymerSNP(aln, ref_pos, query_pos, cigar_oplen,
-                                         ref_string, currentVariantIter,
+                                         currentVariantIter,
                                          tmpReadResult))
           return;
       }
@@ -1522,6 +2437,9 @@ void BamParser::get_snp(const bam_hdr_t &bamHdr, const bam1_t &aln,
   }
 
   if (tmpReadResult.variantVec.size() > 0) {
+    tmpReadResult.read_id = nameStart.size();
+    nameStart.push_back(readNames.size());
+    readNames += bam_get_qname(&aln);
     readVariantVec.push_back(tmpReadResult);
   }
 }
@@ -1565,7 +2483,7 @@ void METHParser::writeResult(PhasingResult &phasingResult,
 }
 
 void METHParser::writeMetaHeader(const std::string &input, bool &ps_def,
-                                 std::ofstream &resultVcf) {
+                                 std::ostream &resultVcf) {
   if (input.substr(0, 16) == "##FORMAT=<ID=PS,") {
     ps_def = true;
   }
@@ -1587,9 +2505,8 @@ void METHParser::parserProcess(std::string &input) {
   if (input[0] == '#')
     return;
 
-  std::istringstream iss(input);
-  std::vector<std::string> fields((std::istream_iterator<std::string>(iss)),
-                                  std::istream_iterator<std::string>());
+  std::vector<std::string> &fields = lineFields;
+  splitWhitespace(input, fields);
 
   if (fields.size() == 0) {
     return;
@@ -1638,11 +2555,10 @@ void METHParser::parserProcess(std::string &input) {
 }
 
 void METHParser::writeDataLine(const std::string &input,
-                                   std::ofstream &resultVcf,
+                                   std::ostream &resultVcf,
                                    PhasingResult &phasingResult) {
-  std::istringstream iss(input);
-  std::vector<std::string> fields((std::istream_iterator<std::string>(iss)),
-                                  std::istream_iterator<std::string>());
+  std::vector<std::string> &fields = lineFields;
+  splitWhitespace(input, fields);
 
   if (fields.size() == 0)
     return;
@@ -1723,13 +2639,13 @@ void METHParser::writeDataLine(const std::string &input,
     fields[8] = fields[8] + ":PS";
     fields[9] = fields[9] + ":.";
   }
-  for (std::vector<std::string>::iterator fieldIter = fields.begin();
-       fieldIter != fields.end(); ++fieldIter) {
-    if (fieldIter != fields.begin())
-      resultVcf << "\t";
-    resultVcf << (*fieldIter);
-  }
-  resultVcf << "\n";
+  writeFields(resultVcf);
+}
+
+std::map<int, std::map<std::string, ModVariant>> *
+METHParser::chrVariants(const std::string &chrName) {
+  auto chrIter = chrVariant->find(chrName);
+  return chrIter == chrVariant->end() ? nullptr : &chrIter->second;
 }
 
 std::map<int, std::map<std::string, ModVariant>>
