@@ -129,7 +129,7 @@ optional arguments:
 
 parse alignment arguments:
    -q, --mappingQuality=Num               filter alignment if mapping quality is lower than threshold. default:1
-   -x, --mismatchRate=Num                 mark reads as false if mismatchRate of them are higher than threshold. default:3
+   -x, --mismatchRate=Num                 no longer used; accepted for compatibility.
 
 phasing graph arguments:
    -p, --baseQuality=[0~90]               change edge's weight to --edgeWeight if base quality is lower than the threshold. default:12
@@ -141,7 +141,10 @@ phasing graph arguments:
                                           two combinations are similar. default:0.7
    -L, --overlapThreshold=[0~1]           filtering different alignments of the same read if there is overlap. default:0.2
    -w, --sv-window=NUM                    window size for evaluating surrounding CIGAR operations. default:20
-   -h, --sv-threshold=[0~1]               relative difference threshold for read to support a SV. default:0.10
+   -h, --sv-threshold=[0~1]               relative difference threshold for read to support a SV.
+                                          default: 0.20 (--ont), 0.10 (--pb)
+   --sv-join-blocks                       let an SV be the only link between two phase blocks (longer
+                                          blocks, more wrong joins). default: False
 
 haplotag read correction arguments:
    -m, --readConfidence=[0.5~1]           The confidence of a read being assigned to any haplotype. default:0.65
@@ -150,7 +153,7 @@ haplotag read correction arguments:
 GNN arguments:
    --disableGNN                           phase without the GNN model. default: False
    --gnnBreakThreshold=[0~1]              unphase a variant when its GNN error probability exceeds
-                                          this value. default:0.30
+                                          this value. default:0.35
    --gnnPeThreshold=[0~1]                 phasing entropy at which a variant is checked by the GNN. default:0.80
    --gnnWindow=[1~63]                     variants on each side of a checked variant given to the GNN. default:20
    --gnnRespectBridge                     do not unphase bridge variants. default: False
@@ -282,12 +285,12 @@ phasing arguments:
       -m, --modThreshold=[0~1]      value extracted from MM tag and ML tag.
                                     above the threshold means modification occurred. default: 0.8
       -u, --unModThreshold=[0~1]    value extracted from MM tag and ML tag.
-                                    above the threshold means no modification occurred. default: 0.2
+                                    below the threshold means no modification occurred. default: 0.2
       -e, --heterRatio=[0~1]        modified and unmodified scales.
-                                    a higher threshold means that the two quantities need to be closer. default: 0.7
+                                    a higher threshold means that the two quantities need to be closer. default: 0.6
       -i, --noiseRatio=[0~1]        not being judged as modified and unmodified is noise.
                                     higher threshold means lower noise needs. default: 0.2
-      -a, --connectAdjacent=Num     connect adjacent N METHs. default:6
+      -a, --connectAdjacent=Num     connect adjacent N METHs. default:20
       -c, --connectConfidence=[0~1] determine the confidence of phasing two ASMs.
                                     higher threshold requires greater consistency in the reads. default: 0.9
 ```

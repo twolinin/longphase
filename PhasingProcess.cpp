@@ -10,11 +10,14 @@
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
+#include <climits>
 #include <thread>
 #include <set>
 #include <htslib/vcf.h>
 #include <htslib/hts.h>
 #include <htslib/faidx.h>
+#include <htslib/hfile.h>
+#include <htslib/kseq.h>
 
 // Feature counts come from the generated weight header, so the code and the
 // model can never disagree: a mismatch is a compile error.
@@ -66,6 +69,7 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
     if (!params.svFile.empty()) {
         std::cerr<< "SV Windowsize      : " << params.svWindow << "\n";
         std::cerr<< "SV Threshold       : " << params.svThreshold << "\n";
+        std::cerr<< "SV Join Blocks     : " << ( params.svJoinBlocks ? "True" : "False" ) << "\n";
     }
     std::cerr<< "Use GNN            : " << ( params.enableGNN ? "True" : "False" ) << "\n";
     if (params.enableGNN) {
@@ -97,16 +101,6 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
     METHParser modFile(params, snpFile, svFile);
 	std::cerr<< difftime(time(NULL), begin) << "s\n";
  
-    // parsing ref fasta 
-    begin = time(NULL);
-    std::cerr<< "reading reference ... ";
-    std::vector<int> last_pos;
-    for(auto chr :snpFile.getChrVec()){
-        last_pos.push_back(snpFile.getLastSNP(chr));
-    }
-    FastaParser fastaParser(params.fastaFile, snpFile.getChrVec(), last_pos, params.numThreads);
-    std::cerr<< difftime(time(NULL), begin) << "s\n";
-
     // get all detected chromosome
     std::vector<std::string> chrName = snpFile.getChrVec();
 
@@ -119,7 +113,7 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
     }
     // Graph edges for the GNN, per chromosome; pre-created for the
     // same reason as chrPhasingResult.
-    std::map<std::string, std::vector<DotEdge> > chrGnnEdges;
+    std::map<std::string, GnnEdgeList> chrGnnEdges;
     if (params.enableGNN) {
         for (std::vector<std::string>::iterator chrIter = chrName.begin(); chrIter != chrName.end(); chrIter++) {
             chrGnnEdges[*chrIter];
@@ -135,6 +129,7 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
     }
 
     begin = time(NULL);
+    std::mutex referenceMutex;
     
     // loop all chromosome
     #pragma omp parallel for schedule(dynamic) num_threads(params.numThreads)
@@ -149,22 +144,33 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
             continue;
         }
 
-	    // fetch chromosome string
-        std::string &chr_reference = fastaParser.chrString.at(*chrIter);
+        // The reference is only read near the variants: mark them, then free
+        // it. One chromosome's reference is held at a time.
+        // (a mutex, not omp critical: waiting threads sleep instead of spinning)
+        bool hasReference;
+        SVDeletionRepeats deletionRepeats;
+        {
+            std::lock_guard<std::mutex> lock(referenceMutex);
+            std::string chr_reference = loadChrReference(params.fastaFile, *chrIter, lastSNPpos);
+            snpFile.markChrVariants(*chrIter, chr_reference);
+            deletionRepeats.build(svFile.getVariants(*chrIter), chr_reference);
+            hasReference = !chr_reference.empty();
+        }
         // create a bam parser object and prepare to fetch varint from each vcf file
-	    BamParser *bamParser = new BamParser((*chrIter), params.bamFile, snpFile, svFile, modFile, chr_reference);
+	    BamParser *bamParser = new BamParser((*chrIter), params.bamFile, snpFile, svFile, modFile);
+        bamParser->setDeletionRepeats(std::move(deletionRepeats));
         // use to store variant
         std::vector<ReadVariant> readVariantVec;
         // use to store clip count
         ClipCount clipCount;
         // run fetch variant process
-        bamParser->direct_detect_alleles(lastSNPpos, threadPool, params, readVariantVec, clipCount, chr_reference);
+        bamParser->direct_detect_alleles(lastSNPpos, threadPool, params, readVariantVec, clipCount, hasReference);
         // free memory
         delete bamParser;
         
         // filter variants prone to switch errors in ONT sequencing.
         if(params.isONT){
-            snpFile.filterSNP((*chrIter), readVariantVec, chr_reference);
+            snpFile.filterSNP((*chrIter), readVariantVec);
         }
 
         // bam files are partial file or no read support this chromosome's SNP
@@ -176,7 +182,7 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
         
 
         // create a graph object and prepare to phasing.
-        VairiantGraph *vGraph = new VairiantGraph(chr_reference, params, (*chrIter));
+        VairiantGraph *vGraph = new VairiantGraph(params, (*chrIter));
         // trans read-snp info to edge info
         vGraph->addEdge(readVariantVec, *clip);
         // run main algorithm
@@ -239,7 +245,6 @@ PhasingProcess::PhasingProcess(PhasingParameters params)
 
     if(params.enableGNN){
         // Free the largest phase data before running the GNN.
-        std::map<std::string, std::string>().swap(fastaParser.chrString);
         PhasingResult().swap(mergedPhasingResult);
         ChrPhasingResult().swap(chrPhasingResult);
 
@@ -449,6 +454,13 @@ void GNNModule::setSamplePS(bcf_hdr_t* hdr, bcf1_t* rec, int si, int32_t ps) {
     free(v);
 }
 
+namespace {
+// readVcfRecords: records per batch, and threads; reading and writing the
+// records on one thread limit the gain from more threads
+constexpr size_t kVcfBatch = 1024;
+constexpr int kVcfThreads = 8;
+}
+
 void GNNModule::parseVCF() {
     htsFile* fp = hts_open(params_.vcf_path.c_str(), "r");
     if (!fp) {
@@ -460,22 +472,27 @@ void GNNModule::parseVCF() {
         std::cerr << "[GNN] ERROR: cannot read VCF header of " << params_.vcf_path << "\n";
         std::exit(EXIT_FAILURE);
     }
-    bcf1_t* rec = bcf_init();
     int n = 0;
     const int si = sampleIndex(hdr);
-    while (bcf_read(fp, hdr, rec) == 0) {
+    // the variant of each record of a batch, if it is a phased heterozygote
+    std::vector<VariantInfo> got(kVcfBatch);
+    std::vector<char> keep(kVcfBatch);
+    readVcfRecords(fp, hdr, std::min(params_.threads, kVcfThreads), kVcfBatch,
+        [&](size_t i, bcf_hdr_t* hdr, bcf1_t* rec) {
+        keep[i] = 0;
         bcf_unpack(rec, BCF_UN_ALL);
         int32_t* gt = nullptr; int ng = 0;
-        if (bcf_get_genotypes(hdr, rec, &gt, &ng) < 0) continue;
+        if (bcf_get_genotypes(hdr, rec, &gt, &ng) < 0) return;
         const int ploidy = ng / bcf_hdr_nsamples(hdr);
-        if (ploidy < 2) { free(gt); continue; }
+        if (ploidy < 2) { free(gt); return; }
         int32_t* sg = gt + si * ploidy;
-        if (!bcf_gt_is_phased(sg[1])) { free(gt); continue; }
+        if (!bcf_gt_is_phased(sg[1])) { free(gt); return; }
         int a0 = bcf_gt_allele(sg[0]), a1 = bcf_gt_allele(sg[1]);
         free(gt);
-        if (a0 == a1) continue;
+        if (a0 == a1) return;
 
-        VariantInfo vi;
+        VariantInfo& vi = got[i];
+        vi = VariantInfo();
         vi.chrom = bcf_hdr_id2name(hdr, rec->rid);
         vi.pos = rec->pos; vi.gt_ref = a0; vi.gt_alt = a1;
         vi.is_phased = true; vi.pe = vi.h1 = vi.h2 = 0; vi.ps = -1;
@@ -492,10 +509,14 @@ void GNNModule::parseVCF() {
         free(ps);
         vi.hp_len = vi.gc_content = vi.str_context = vi.seq_entropy = 0;
         vi.vtype = (vi.indel_len == 0) ? GVT_SNV : GVT_INDEL;
-        variants_[vi.chrom].push_back(vi);
+        keep[i] = 1;
+    },
+        [&](size_t i, bcf_hdr_t*, bcf1_t*) {
+        if (!keep[i]) return;
+        variants_[got[i].chrom].push_back(got[i]);
         n++;
-    }
-    bcf_destroy(rec); bcf_hdr_destroy(hdr); hts_close(fp);
+    });
+    bcf_hdr_destroy(hdr); hts_close(fp);
     for (auto& kv : variants_) {
         auto& vl = kv.second;
         std::sort(vl.begin(), vl.end(),
@@ -507,55 +528,45 @@ void GNNModule::parseVCF() {
 // ═══════════════════════════════════════════════════════════
 // Graph edges from phase
 // ═══════════════════════════════════════════════════════════
-void GNNModule::setDotEdges(std::map<std::string, std::vector<DotEdge>>&& edges) {
+void GNNModule::setDotEdges(std::map<std::string, GnnEdgeList>&& edges) {
     pending_edges_ = std::move(edges);
 }
 
 void GNNModule::loadDotEdges() {
-    // Collect chromosome list and pre-initialize dot_edges_ map
-    std::vector<std::string> chroms;
+    // Take over the edges of each chromosome with variants
+    size_t total = 0;
     for (auto& kv : variants_) {
         const std::string& ch = kv.first;
-        chroms.push_back(ch);
-        dot_edges_[ch]; // pre-create entry to avoid concurrent map insertion
+        auto& em = dot_edges_[ch];
+        auto pit = pending_edges_.find(ch);
+        if (pit == pending_edges_.end()) continue;
+        em.swap(pit->second);
+        em.finish();
+        total += em.edgeCount();
     }
-
-    // Index all chromosomes in parallel
-    std::atomic<int> total{0};
-    std::vector<std::thread> threads;
-    std::atomic<size_t> cidx{0};
-
-    int n_threads = std::min(params_.threads, (int)chroms.size());
-    for (int t = 0; t < n_threads; ++t) {
-        threads.emplace_back([&]() {
-            while (true) {
-                size_t i = cidx.fetch_add(1);
-                if (i >= chroms.size()) return;
-                auto& ch = chroms[i];
-                auto pit = pending_edges_.find(ch);
-                if (pit == pending_edges_.end()) continue;
-                const std::vector<DotEdge>& edges = pit->second;
-
-                // phase emits all edges of a source position together, so
-                // store each run at its exact size.
-                auto& em = dot_edges_[ch];
-                size_t r = 0;
-                while (r < edges.size()) {
-                    size_t e = r + 1;
-                    while (e < edges.size() && edges[e].src_pos == edges[r].src_pos) ++e;
-                    auto& v = em[edges[r].src_pos];
-                    if (v.empty()) v.assign(edges.begin() + r, edges.begin() + e);
-                    else v.insert(v.end(), edges.begin() + r, edges.begin() + e);
-                    r = e;
-                }
-                total += (int)edges.size();
-                std::vector<DotEdge>().swap(pit->second);
-            }
-        });
-    }
-    for (auto& t : threads) t.join();
     pending_edges_.clear();
-    std::cerr << "  " << total.load() << " graph edges\n";
+    std::cerr << "  " << total << " graph edges\n";
+}
+
+void GnnEdgeList::finish() {
+    if (sorted) return;
+    // order the groups by source position; a stable sort keeps the groups
+    // of one source in the order they were added
+    std::vector<size_t> order(src.size());
+    for (size_t i = 0; i < order.size(); ++i) order[i] = i;
+    std::stable_sort(order.begin(), order.end(),
+                     [&](size_t x, size_t y) { return src[x] < src[y]; });
+    GnnEdgeList out;
+    out.links.reserve(links.size());
+    for (size_t i : order) {
+        size_t b = start[i], e = i + 1 < start.size() ? start[i + 1] : links.size();
+        out.src.push_back(src[i]);
+        out.weight.push_back(weight[i]);
+        out.start.push_back(out.links.size());
+        out.links.insert(out.links.end(), links.begin() + b, links.begin() + e);
+    }
+    swap(out);
+    sorted = true;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -569,12 +580,12 @@ void GNNModule::computeGenomicFeatures() {
 
     for (int t = 0; t < n_threads; ++t) {
         threads.emplace_back([&]() {
-            // Each thread gets its own faidx handle
-            faidx_t* fai = fai_load(params_.reference_path.c_str());
-            if (!fai) return;
+            // Each thread gets its own reader
+            FastaReader reader(params_.reference_path);
+            if (!reader.loaded()) return;
             while (true) {
                 size_t i = cidx.fetch_add(1);
-                if (i >= chroms.size()) { fai_destroy(fai); return; }
+                if (i >= chroms.size()) return;
                 auto& ch = chroms[i];
                 for (auto& v : variants_[ch]) {
                     // The model was trained with these four features set
@@ -583,19 +594,16 @@ void GNNModule::computeGenomicFeatures() {
                     if (v.vtype == GVT_SV) continue;
                     int len = 0;
                     int s1 = std::max(0, v.pos - HP_RADIUS);
-                    char* seq = faidx_fetch_seq(fai, ch.c_str(), s1, v.pos+HP_RADIUS, &len);
-                    if (seq && len > 0) {
-                        std::string ss(seq, len);
+                    std::string ss = reader.fetch(ch, s1, v.pos+HP_RADIUS, len, true);
+                    if (len > 0) {
                         v.seq_entropy = calcSeqEntropy(ss);
                         v.hp_len = (float)calcHPLength(ss, v.pos-s1);
                         v.str_context = calcSTRContext(ss, v.pos-s1);
-                        free(seq);
                     }
                     int s2 = std::max(0, v.pos - GC_RADIUS);
-                    seq = faidx_fetch_seq(fai, ch.c_str(), s2, v.pos+GC_RADIUS, &len);
-                    if (seq && len > 0) {
-                        v.gc_content = calcGCContent(std::string(seq, len));
-                        free(seq);
+                    ss = reader.fetch(ch, s2, v.pos+GC_RADIUS, len, true);
+                    if (len > 0) {
+                        v.gc_content = calcGCContent(ss);
                     }
                 }
             }
@@ -621,16 +629,39 @@ void GNNModule::processChromosome(const std::string& chrom, int tidx,
     int wi_end   = std::min((int)vlist.size() - 1, tidx + params_.window);
 
     std::vector<const VariantInfo*> wvars;
-    std::unordered_set<int> wpos_set;
-    std::unordered_map<int, const VariantInfo*> pos_to_var;
+    // the window's positions, sorted and distinct; a position's index in wpos
+    // keys the per-position values below
+    std::vector<int> wpos;
     for (int i = wi_start; i <= wi_end; ++i) {
         wvars.push_back(&vlist[i]);
-        wpos_set.insert(vlist[i].pos);
-        pos_to_var[vlist[i].pos] = &vlist[i];
+        wpos.push_back(vlist[i].pos);
     }
+    std::sort(wpos.begin(), wpos.end());
+    wpos.erase(std::unique(wpos.begin(), wpos.end()), wpos.end());
+    const int nk = (int)wpos.size();
+    // index of a position in wpos, -1 outside the window
+    auto wk = [&](int pos) -> int {
+        auto it = std::lower_bound(wpos.begin(), wpos.end(), pos);
+        return (it != wpos.end() && *it == pos) ? (int)(it - wpos.begin()) : -1;
+    };
     int n_var = (int)wvars.size();
     int N = n_var * 2;
     if (N > MAX_NODES) { skipped_windows_.fetch_add(1); return; }
+    // the position index of each window variant; the last variant at a
+    // position stands for it
+    std::vector<int> kv(n_var);
+    std::vector<const VariantInfo*> pos_to_var(nk);
+    for (int i = 0; i < n_var; ++i) {
+        kv[i] = wk(wvars[i]->pos);
+        pos_to_var[kv[i]] = wvars[i];
+    }
+    // the edges of each position
+    std::vector<char> has_edges(nk);
+    std::vector<GnnEdgeList::Range> edges_of(nk);
+    for (int k = 0; k < nk; ++k) {
+        has_edges[k] = edge_map.count(wpos[k]) > 0;
+        if (has_edges[k]) edges_of[k] = edge_map.at(wpos[k]);
+    }
 
     float max_offset = 1.0f;
     for (auto* v : wvars) {
@@ -639,36 +670,43 @@ void GNNModule::processChromosome(const std::string& chrom, int tidx,
     }
 
     // h1/h2 from DOT first edge per allele
-    std::unordered_map<int, float> dot_h1, dot_h2;
-    for (auto* v : wvars) {
-        if (!edge_map.count(v->pos)) continue;
-        for (auto& e : edge_map.at(v->pos)) {
-            if (e.src_allele == 1 && !dot_h1.count(v->pos)) dot_h1[v->pos] = e.weight;
-            else if (e.src_allele == 2 && !dot_h2.count(v->pos)) dot_h2[v->pos] = e.weight;
+    std::vector<char> has_h1(nk, 0), has_h2(nk, 0);
+    std::vector<float> dot_h1(nk), dot_h2(nk);
+    for (int i = 0; i < n_var; ++i) {
+        const int k = kv[i];
+        if (!has_edges[k]) continue;
+        for (const GnnEdge& e : edges_of[k]) {
+            if (e.src_allele == 1 && !has_h1[k]) { dot_h1[k] = e.weight; has_h1[k] = 1; }
+            else if (e.src_allele == 2 && !has_h2[k]) { dot_h2[k] = e.weight; has_h2[k] = 1; }
         }
     }
 
     // out_degree, out_weight_std
-    std::unordered_map<int, float> out_deg, out_wstd;
-    for (auto* v : wvars) {
-        if (!edge_map.count(v->pos)) { out_deg[v->pos]=0; out_wstd[v->pos]=0; continue; }
-        std::set<int> dsts; std::vector<float> ws;
-        for (auto& e : edge_map.at(v->pos)) { dsts.insert(e.dst_pos); ws.push_back(e.weight); }
-        out_deg[v->pos] = std::min((float)dsts.size()/10.0f, 1.0f);
+    std::vector<float> out_deg(nk), out_wstd(nk);
+    std::vector<int> dsts; std::vector<float> ws;
+    for (int i = 0; i < n_var; ++i) {
+        const int k = kv[i];
+        if (!has_edges[k]) { out_deg[k]=0; out_wstd[k]=0; continue; }
+        dsts.clear(); ws.clear();
+        for (const GnnEdge& e : edges_of[k]) { dsts.push_back(e.dst_pos); ws.push_back(e.weight); }
+        // the number of distinct targets
+        std::sort(dsts.begin(), dsts.end());
+        const size_t n_dst = std::unique(dsts.begin(), dsts.end()) - dsts.begin();
+        out_deg[k] = std::min((float)n_dst/10.0f, 1.0f);
         if (ws.size() > 1) {
             float mu=0; for(float w:ws) mu+=w; mu/=ws.size();
             float var=0; for(float w:ws) var+=(w-mu)*(w-mu); var/=ws.size();
-            out_wstd[v->pos] = std::min(std::sqrt(var)/100.0f, 1.0f);
-        } else out_wstd[v->pos] = 0;
+            out_wstd[k] = std::min(std::sqrt(var)/100.0f, 1.0f);
+        } else out_wstd[k] = 0;
     }
 
     // window_mean_votes (VCF h1+h2, full chromosome ±10)
-    std::unordered_map<int, float> wmean;
+    std::vector<float> wmean(nk);
     for (int i = wi_start; i <= wi_end; ++i) {
         int lo = std::max(0, i-10), hi = std::min((int)vlist.size()-1, i+10);
         float sum=0; int cnt=0;
         for (int j=lo; j<=hi; ++j) { sum += vlist[j].h1 + vlist[j].h2; cnt++; }
-        wmean[vlist[i].pos] = cnt > 0 ? sum/cnt : 1.0f;
+        wmean[kv[i - wi_start]] = cnt > 0 ? sum/cnt : 1.0f;
     }
 
     // Neighbor density lambda
@@ -697,86 +735,86 @@ void GNNModule::processChromosome(const std::string& chrom, int tidx,
     // The window holds a few dozen variants, so recomputing per window is
     // cheaper than the chromosome-wide pass this replaces, and it is what
     // the model was trained on.
-    std::unordered_map<int, std::unordered_set<int>> pos_adj;
-    for (int pos : wpos_set) {
-        if (!edge_map.count(pos)) continue;
-        for (auto& e : edge_map.at(pos)) {
-            if (!wpos_set.count(e.dst_pos)) continue;
-            if (e.src_pos == e.dst_pos) continue;
-            pos_adj[e.src_pos].insert(e.dst_pos);
-            pos_adj[e.dst_pos].insert(e.src_pos);
+    // pos_adj[a * nk + b]: positions a and b are joined; dst_k: the target's
+    // position index of each edge, in edge order, -1 outside the window
+    std::vector<char> pos_adj((size_t)nk * nk, 0), has_nb(nk, 0);
+    std::vector<std::vector<int>> dst_k(nk);
+    for (int a = 0; a < nk; ++a) {
+        if (!has_edges[a]) continue;
+        for (const GnnEdge& e : edges_of[a]) {
+            const int b = wk(e.dst_pos);
+            dst_k[a].push_back(b);
+            if (b < 0 || b == a) continue;
+            pos_adj[(size_t)a * nk + b] = pos_adj[(size_t)b * nk + a] = 1;
+            has_nb[a] = has_nb[b] = 1;
         }
     }
 
-    // Connected components of wpos_set, optionally with one node removed.
+    // Connected components of the window, optionally with one position removed.
+    std::vector<char> vis(nk);
+    std::vector<int> stack;
     auto n_components = [&](int exclude) -> int {
-        std::unordered_set<int> vis;
+        std::fill(vis.begin(), vis.end(), 0);
         int count = 0;
-        for (int start : wpos_set) {
-            if (start == exclude) continue;
-            if (vis.count(start)) continue;
+        for (int start = 0; start < nk; ++start) {
+            if (start == exclude || vis[start]) continue;
             ++count;
-            std::vector<int> q{start};
-            while (!q.empty()) {
-                int node = q.back(); q.pop_back();
-                if (vis.count(node)) continue;
-                vis.insert(node);
-                auto it = pos_adj.find(node);
-                if (it == pos_adj.end()) continue;
-                for (int nb : it->second)
-                    if (nb != exclude && wpos_set.count(nb) && !vis.count(nb))
-                        q.push_back(nb);
+            stack.assign(1, start);
+            while (!stack.empty()) {
+                int node = stack.back(); stack.pop_back();
+                if (vis[node]) continue;
+                vis[node] = 1;
+                for (int nb = 0; nb < nk; ++nb)
+                    if (pos_adj[(size_t)node * nk + nb] && nb != exclude && !vis[nb])
+                        stack.push_back(nb);
             }
         }
         return count;
     };
 
     const int comp_before = n_components(-1);
-    std::unordered_set<int> bridge_set;
-    for (int pos : wpos_set) {
-        if (wpos_set.size() <= 1) break;
-        auto it = pos_adj.find(pos);
-        if (it == pos_adj.end()) continue;
+    std::vector<char> bridge(nk, 0);
+    for (int k = 0; k < nk; ++k) {
+        if (nk <= 1) break;
         // Needs at least one neighbour that survives the removal.
-        bool has_active = false;
-        for (int nb : it->second)
-            if (nb != pos && wpos_set.count(nb)) { has_active = true; break; }
-        if (!has_active) continue;
-        if (n_components(pos) > comp_before) bridge_set.insert(pos);
+        if (!has_nb[k]) continue;
+        if (n_components(k) > comp_before) bridge[k] = 1;
     }
 
-    // out_wsum for weight_ratio
-    std::unordered_map<int64_t, float> out_wsum;
-    auto make_key = [](int pos, int al) -> int64_t { return ((int64_t)pos << 4) | al; };
-    for (int pos : wpos_set) {
-        if (!edge_map.count(pos)) continue;
-        for (auto& e : edge_map.at(pos)) {
-            if (!wpos_set.count(e.dst_pos)) continue;
-            out_wsum[make_key(e.src_pos, e.src_allele)] += e.weight;
+    // out_wsum for weight_ratio, per position and source allele
+    std::vector<std::array<float, 2>> out_wsum(nk, std::array<float, 2>{{0.0f, 0.0f}});
+    for (int a = 0; a < nk; ++a) {
+        if (!has_edges[a]) continue;
+        size_t t = 0;
+        for (const GnnEdge& e : edges_of[a]) {
+            if (dst_k[a][t++] < 0) continue;
+            out_wsum[a][e.src_allele - 1] += e.weight;
         }
     }
 
     // ── Node features [N × NODE_FEAT_DIM] ──
     std::vector<float> nf(N * NODE_FEAT_DIM, 0.0f);
-    std::unordered_map<int64_t, int> pa_to_nid;
+    // node of each position and allele: the last variant at the position
+    std::vector<std::array<int, 2>> pa_to_nid(nk, std::array<int, 2>{{-1, -1}});
 
     for (int i = 0; i < n_var; ++i) {
         const auto* v = wvars[i];
-        float h1v = dot_h1.count(v->pos) ? dot_h1[v->pos] : v->h1;
-        float h2v = dot_h2.count(v->pos) ? dot_h2[v->pos] : v->h2;
+        const int k = kv[i];
+        float h1v = has_h1[k] ? dot_h1[k] : v->h1;
+        float h2v = has_h2[k] ? dot_h2[k] : v->h2;
         float total = h1v + h2v;
         float vote_r = total > 0 ? std::max(h1v,h2v)/total : 0.0f;
         float log_tot = std::log2(1.0f+total);
         float lcd = std::log10(1.0f + std::abs((float)(v->pos-center_pos)));
         float ps_blk = std::log1p((float)(ps_count.count(v->ps)?ps_count.at(v->ps):1))
                        / std::log1p(100.0f);
-        float wm = wmean.count(v->pos) ? wmean[v->pos] : 1.0f;
+        float wm = wmean[k];
         float rvd = std::log2(total / (wm+EPS) + EPS);
-        float bridge_f = bridge_set.count(v->pos) ? 1.0f : 0.0f;
+        float bridge_f = bridge[k] ? 1.0f : 0.0f;
 
         for (int a = 0; a < 2; ++a) {
             int allele = a+1, nid = i*2+a;
-            pa_to_nid[make_key(v->pos, allele)] = nid;
+            pa_to_nid[k][a] = nid;
             int hp_val = (allele==1) ? v->gt_ref : v->gt_alt;
             float* f = &nf[nid * NODE_FEAT_DIM];
             f[0]=v->pe; f[1]=(float)hp_val; f[2]=(float)v->gt_ref; f[3]=(float)v->gt_alt;
@@ -786,9 +824,9 @@ void GNNModule::processChromosome(const std::string& chrom, int tidx,
             f[8]=h1v; f[9]=h2v; f[10]=total; f[11]=vote_r;
             f[12]=log_tot; f[13]=std::log1p(std::max(0.0f,h1v)); f[14]=std::log1p(std::max(0.0f,h2v));
             f[15]=v->hp_len; f[16]=v->gc_content; f[17]=v->str_context; f[18]=v->seq_entropy;
-            f[19]=neigh_dens(v->pos); f[20]=out_deg[v->pos]; f[21]=ps_blk;
+            f[19]=neigh_dens(v->pos); f[20]=out_deg[k]; f[21]=ps_blk;
             f[22]=lcd; f[23]=dist_indel(v->pos); f[24]=rvd;
-            f[25]=out_wstd[v->pos]; f[26]=bridge_f;
+            f[25]=out_wstd[k]; f[26]=bridge_f;
             // v21 cophasing: variant type indicators
             f[27]=(v->vtype==GVT_SNV)?1.0f:0.0f;
             f[28]=(v->vtype==GVT_INDEL)?1.0f:0.0f;
@@ -801,23 +839,26 @@ void GNNModule::processChromosome(const std::string& chrom, int tidx,
     std::vector<float> adj(N*N, 0.0f);
     std::vector<float> ef(N*N*EDGE_FEAT_DIM, 0.0f);
 
-    for (int pos : wpos_set) {
-        if (!edge_map.count(pos)) continue;
-        for (auto& e : edge_map.at(pos)) {
-            if (!wpos_set.count(e.dst_pos)) continue;
-            auto sit = pa_to_nid.find(make_key(e.src_pos, e.src_allele));
-            auto dit = pa_to_nid.find(make_key(e.dst_pos, e.dst_allele));
-            if (sit == pa_to_nid.end() || dit == pa_to_nid.end()) continue;
-            int sn = sit->second, dn = dit->second;
+    // A cell (row, col) is written only by edges of one source position, in
+    // their order, so the order of the positions does not matter.
+    for (int a = 0; a < nk; ++a) {
+        if (!has_edges[a]) continue;
+        const int pos = wpos[a];
+        size_t t = 0;
+        for (const GnnEdge& e : edges_of[a]) {
+            const int b = dst_k[a][t++];
+            if (b < 0) continue;
+            int sn = pa_to_nid[a][e.src_allele - 1], dn = pa_to_nid[b][e.dst_allele - 1];
+            if (sn < 0 || dn < 0) continue;
             float same_hp = (e.src_allele == e.dst_allele) ? 1.0f : 0.0f;
-            auto* sv = pos_to_var[e.src_pos]; auto* dv = pos_to_var[e.dst_pos];
+            auto* sv = pos_to_var[a]; auto* dv = pos_to_var[b];
             float inter_ps = (sv && dv && sv->ps != dv->ps) ? 1.0f : 0.0f;
-            float wsum = out_wsum[make_key(e.src_pos, e.src_allele)];
+            float wsum = out_wsum[a][e.src_allele - 1];
             int row = dn, col = sn;
             adj[row*N+col] = 1.0f;
             float* ep = &ef[(row*N+col)*EDGE_FEAT_DIM];
             ep[0] = 1.0f/(1.0f+std::exp(-e.weight));
-            ep[1] = std::log10(1.0f+std::abs((float)(e.dst_pos-e.src_pos)));
+            ep[1] = std::log10(1.0f+std::abs((float)(e.dst_pos-pos)));
             ep[2] = std::log1p(e.weight);
             ep[3] = same_hp; ep[4] = inter_ps;
             ep[5] = e.weight/(wsum+EPS);
@@ -864,7 +905,7 @@ void GNNModule::processChromosome(const std::string& chrom, int tidx,
         if (wvars[i]->keep_phase) continue;
         int n1=i*2, n2=i*2+1;
         float p_err = (op[n1*2+1]+op[n2*2+1])/2.0f;
-        bool br = bridge_set.count(wvars[i]->pos) > 0;
+        bool br = bridge[kv[i]] != 0;
         std::lock_guard<std::mutex> lk(pred_mutex_);
         auto& pr = predictions_[chrom][wvars[i]->pos];
         pr.prob_error = (pr.prob_error*pr.count + p_err)/(pr.count+1);
@@ -916,68 +957,13 @@ void GNNModule::computeBlockSplits() {
                 pos_to_ps[v.pos] = v.ps;
             }
 
-            // Build adjacency (only same-PS, both-phased edges)
-            std::unordered_map<int, std::vector<int>> adj;
-            for (auto& kv_src : em) {
-                const auto& src = kv_src.first;
-                auto& elist = kv_src.second;
-                if (unphase_pos.count(src)) continue;
-                auto it_s = pos_to_ps.find(src);
-                if (it_s == pos_to_ps.end()) continue;
-                for (auto& e : elist) {
-                    int dst = e.dst_pos;
-                    if (unphase_pos.count(dst)) continue;
-                    auto it_d = pos_to_ps.find(dst);
-                    if (it_d == pos_to_ps.end()) continue;
-                    if (it_s->second != it_d->second) continue;
-                    adj[src].push_back(dst);
-                    adj[dst].push_back(src);
-                }
-            }
-            // A 5mC site merged into another site's graph node has no edges
-            // of its own; it is connected through that node.
-            for (auto& v : vl) {
-                if (v.link_pos < 0) continue;
-                auto it_s = pos_to_ps.find(v.pos);
-                auto it_d = pos_to_ps.find(v.link_pos);
-                if (it_s == pos_to_ps.end() || it_d == pos_to_ps.end()) continue;
-                if (it_s->second != it_d->second) continue;
-                adj[v.pos].push_back(v.link_pos);
-                adj[v.link_pos].push_back(v.pos);
-            }
-
             std::unordered_map<int, int> local_reassign;
             int local_splits = 0, local_new = 0;
 
-            // Per-PS connected components via BFS
-            for (auto& kv_ps : ps_blocks) {
-                auto& positions = kv_ps.second;
-                if (positions.size() <= 1) continue;
-
-                std::unordered_set<int> pos_set(positions.begin(), positions.end());
-                std::unordered_set<int> visited;
-                std::vector<std::vector<int>> components;
-
-                for (int start : positions) {
-                    if (visited.count(start)) continue;
-                    std::vector<int> comp;
-                    std::vector<int> queue = {start};
-                    while (!queue.empty()) {
-                        int node = queue.back(); queue.pop_back();
-                        if (visited.count(node)) continue;
-                        visited.insert(node);
-                        comp.push_back(node);
-                        auto it = adj.find(node);
-                        if (it != adj.end())
-                            for (int nb : it->second)
-                                if (!visited.count(nb) && pos_set.count(nb))
-                                    queue.push_back(nb);
-                    }
-                    components.push_back(std::move(comp));
-                }
-
-                if (components.size() <= 1) continue;
-
+            // components: positions of each connected part of a PS block, in
+            // the order the parts are first reached from the block's positions
+            auto split = [&](std::vector<std::vector<int>>& components) {
+                if (components.size() <= 1) return;
                 // Sort: largest component keeps original PS
                 std::sort(components.begin(), components.end(),
                           [](const std::vector<int>& a, const std::vector<int>& b){
@@ -991,6 +977,90 @@ void GNNModule::computeBlockSplits() {
                     for (int pos : components[i])
                         local_reassign[pos] = new_ps;
                 }
+            };
+
+            // Graph nodes are positions, joined by same-PS, both-phased edges
+            // (and 5mC links); a position's PS is that of its last record.
+            std::vector<int> nodes;
+            nodes.reserve(pos_to_ps.size());
+            for (auto& kv : pos_to_ps) nodes.push_back(kv.first);
+            std::sort(nodes.begin(), nodes.end());
+            auto node_of = [&](int pos) {
+                auto it = std::lower_bound(nodes.begin(), nodes.end(), pos);
+                return (it != nodes.end() && *it == pos) ? (int)(it - nodes.begin()) : -1;
+            };
+            std::vector<int> node_ps(nodes.size());
+            for (size_t i = 0; i < nodes.size(); ++i) node_ps[i] = pos_to_ps[nodes[i]];
+            // A position with records in several blocks is "stale" in the blocks
+            // other than its PS: there it is connected only through edges to
+            // other positions that are stale in the same block.
+            std::vector<char> stale(nodes.size(), 0);
+            for (auto& kv_ps : ps_blocks)
+                for (int pos : kv_ps.second) {
+                    const int i = node_of(pos);
+                    if (node_ps[i] != kv_ps.first) stale[i] = 1;
+                }
+
+            std::vector<int> parent(nodes.size());
+            for (size_t i = 0; i < parent.size(); ++i) parent[i] = (int)i;
+            auto find = [](std::vector<int>& par, int i) {
+                while (par[i] != i) i = par[i] = par[par[i]];
+                return i;
+            };
+            auto unite = [&](std::vector<int>& par, int i, int j) {
+                i = find(par, i); j = find(par, j);
+                if (i != j) par[std::max(i, j)] = std::min(i, j);
+            };
+            std::vector<std::pair<int, int>> stale_edges;   // both ways
+            auto join = [&](int s, int d) {
+                if (s < 0 || d < 0 || node_ps[s] != node_ps[d]) return;
+                unite(parent, s, d);
+                if (stale[s] && stale[d]) {
+                    stale_edges.emplace_back(s, d);
+                    stale_edges.emplace_back(d, s);
+                }
+            };
+            for (size_t gi = 0; gi < em.groups(); ++gi) {
+                const int s = node_of(em.src[gi]);
+                if (s < 0) continue;
+                for (const GnnEdge& e : em.group(gi)) join(s, node_of(e.dst_pos));
+            }
+            for (auto& v : vl)
+                if (v.link_pos >= 0) join(node_of(v.pos), node_of(v.link_pos));
+            std::sort(stale_edges.begin(), stale_edges.end());
+
+            // Per-PS connected components, numbered in the order the block's
+            // positions first reach them
+            std::vector<int> comp_of(nodes.size(), -1);  // root -> component (roots differ between blocks)
+            std::vector<int> seen(nodes.size(), -1);     // last block that listed the position
+            std::vector<int> loc(nodes.size(), -1);      // index among the block's stale positions
+            int bi = 0;
+            for (auto& kv_ps : ps_blocks) {
+                auto& positions = kv_ps.second;
+                ++bi;
+                if (positions.size() <= 1) continue;
+                std::vector<int> order, stale_here;
+                for (int pos : positions) {
+                    const int i = node_of(pos);
+                    if (seen[i] == bi) continue;
+                    seen[i] = bi;
+                    order.push_back(i);
+                    if (node_ps[i] != kv_ps.first) { loc[i] = (int)stale_here.size(); stale_here.push_back(i); }
+                }
+                std::vector<int> lpar(stale_here.size()), lcomp(stale_here.size(), -1);
+                for (size_t k = 0; k < lpar.size(); ++k) lpar[k] = (int)k;
+                for (int i : stale_here)
+                    for (auto it = std::lower_bound(stale_edges.begin(), stale_edges.end(), std::make_pair(i, INT_MIN));
+                         it != stale_edges.end() && it->first == i; ++it)
+                        if (loc[it->second] >= 0) unite(lpar, loc[i], loc[it->second]);
+                std::vector<std::vector<int>> components;
+                for (int i : order) {
+                    int& c = loc[i] < 0 ? comp_of[find(parent, i)] : lcomp[find(lpar, loc[i])];
+                    if (c < 0) { c = (int)components.size(); components.emplace_back(); }
+                    components[c].push_back(nodes[i]);
+                }
+                for (int i : stale_here) loc[i] = -1;
+                split(components);
             }
 
             if (!local_reassign.empty()) {
@@ -1113,71 +1183,93 @@ void GNNModule::writeOutputVCF(const std::string& in_path, const std::string& ou
         std::cerr << "[GNN] ERROR: failed to write VCF header to " << out_path << "\n";
         std::exit(EXIT_FAILURE);
     }
-    bcf1_t* rec = bcf_init();
     int nu = 0, nsplit = 0, norphan = 0;
     // --sample applies to the SNP VCF; the SV and 5mC VCFs written by phase
     // carry the phase in their first sample column
     const int si = (in_path == params_.vcf_path) ? sampleIndex(hdr) : 0;
     const int nsmpl = bcf_hdr_nsamples(hdr);
-    while (bcf_read(ifp, hdr, rec) == 0) {
+    // Each record of a batch is changed and formatted as VCF text (as
+    // bcf_write does) on the threads, then written in order.
+    struct Out {
+        kstring_t text = KS_INITIALIZE;
+        bool formatted;
+        char unph, orphan, split;
+    };
+    std::vector<Out> out(kVcfBatch);
+    readVcfRecords(ifp, hdr, std::min(params_.threads, kVcfThreads), kVcfBatch,
+        [&](size_t i, bcf_hdr_t* hdr, bcf1_t* rec) {
+        Out& o = out[i];
+        o.unph = o.orphan = o.split = 0;
         bcf_unpack(rec, BCF_UN_ALL);
         // Only the phased record at a position is the one the GNN saw; other
         // records at the same position are written unchanged (issue #133).
+        bool phased = false;
         {
             int32_t* gt=nullptr; int ng=0;
-            bool phased = false;
             if (bcf_get_genotypes(hdr,rec,&gt,&ng) > 0 && ng / nsmpl >= 2)
                 phased = bcf_gt_is_phased(gt[si * (ng / nsmpl) + 1]);
             free(gt);
-            if (!phased) {
-                if (bcf_write(ofp, hdr, rec) < 0) {
-                    std::cerr << "[GNN] ERROR: failed to write record to " << out_path << "\n";
-                    std::exit(EXIT_FAILURE);
+        }
+        if (phased) {
+            std::string ch = bcf_hdr_id2name(hdr, rec->rid);
+            bool unph = false;
+            auto pch = predictions_.find(ch);
+            if (pch != predictions_.end()) {
+                auto pit = pch->second.find(rec->pos);
+                if (pit != pch->second.end() && shouldUnphase(pit->second)) unph = true;
+            }
+            if (!unph) {
+                auto och = orphans_.find(ch);
+                if (och != orphans_.end() && och->second.count(rec->pos)) {
+                    unph = true;
+                    o.orphan = 1;
                 }
-                continue;
+            }
+            if (unph) {
+                int32_t* gt=nullptr; int ng=0;
+                if (bcf_get_genotypes(hdr,rec,&gt,&ng) > 0 && ng / nsmpl >= 2) {
+                    // An unphased genotype carries no order, and the VCF spec
+                    // writes it ascending, so sort the alleles rather than
+                    // leaving "1/0" behind.
+                    int32_t* sg = gt + si * (ng / nsmpl);
+                    int a0 = bcf_gt_allele(sg[0]), a1 = bcf_gt_allele(sg[1]);
+                    if (a0 > a1) std::swap(a0, a1);
+                    sg[0]=bcf_gt_unphased(a0);
+                    sg[1]=bcf_gt_unphased(a1);
+                    bcf_update_genotypes(hdr,rec,gt,ng);
+                }
+                free(gt);
+                setSamplePS(hdr, rec, si, bcf_int32_missing);
+                o.unph = 1;
+            } else if (params_.split_blocks) {
+                // Variant stays phased but its block was split → new PS
+                auto rch = ps_reassign_.find(ch);
+                if (rch != ps_reassign_.end()) {
+                    auto it = rch->second.find(rec->pos);
+                    if (it != rch->second.end()) {
+                        setSamplePS(hdr, rec, si, it->second);
+                        o.split = 1;
+                    }
+                }
             }
         }
-        std::string ch = bcf_hdr_id2name(hdr, rec->rid);
-        bool unph = false;
-        if (predictions_.count(ch) && predictions_[ch].count(rec->pos)) {
-            auto& pr = predictions_[ch][rec->pos];
-            if (shouldUnphase(pr)) unph = true;
-        }
-        if (!unph && orphans_.count(ch) && orphans_[ch].count(rec->pos)) {
-            unph = true;
-            norphan++;
-        }
-        if (unph) {
-            int32_t* gt=nullptr; int ng=0;
-            if (bcf_get_genotypes(hdr,rec,&gt,&ng) > 0 && ng / nsmpl >= 2) {
-                // An unphased genotype carries no order, and the VCF spec
-                // writes it ascending, so sort the alleles rather than
-                // leaving "1/0" behind.
-                int32_t* sg = gt + si * (ng / nsmpl);
-                int a0 = bcf_gt_allele(sg[0]), a1 = bcf_gt_allele(sg[1]);
-                if (a0 > a1) std::swap(a0, a1);
-                sg[0]=bcf_gt_unphased(a0);
-                sg[1]=bcf_gt_unphased(a1);
-                bcf_update_genotypes(hdr,rec,gt,ng);
-            }
-            free(gt);
-            setSamplePS(hdr, rec, si, bcf_int32_missing);
-            nu++;
-        } else if (params_.split_blocks && ps_reassign_.count(ch)) {
-            // Variant stays phased but its block was split → new PS
-            auto& rmap = ps_reassign_[ch];
-            auto it = rmap.find(rec->pos);
-            if (it != rmap.end()) {
-                setSamplePS(hdr, rec, si, it->second);
-                nsplit++;
-            }
-        }
-        if (bcf_write(ofp, hdr, rec) < 0) {
+        o.text.l = 0;
+        o.formatted = !(hdr->dirty && bcf_hdr_sync(hdr) < 0)
+                      && bcf_hdr_nsamples(hdr) == rec->n_sample
+                      && vcf_format(hdr, rec, &o.text) == 0;
+    },
+        [&](size_t i, bcf_hdr_t* hdr, bcf1_t* rec) {
+        Out& o = out[i];
+        nu += o.unph; norphan += o.orphan; nsplit += o.split;
+        // bcf_write reports why the record could not be formatted
+        if (!o.formatted && bcf_write(ofp, hdr, rec) == 0) return;
+        if (!o.formatted || hwrite(ofp->fp.hfile, o.text.s, o.text.l) != (ssize_t)o.text.l) {
             std::cerr << "[GNN] ERROR: failed to write record to " << out_path << "\n";
             std::exit(EXIT_FAILURE);
         }
-    }
-    bcf_destroy(rec); bcf_hdr_destroy(hdr);
+    });
+    for (auto& o : out) free(o.text.s);
+    bcf_hdr_destroy(hdr);
     hts_close(ifp);
     if (hts_close(ofp) != 0) {
         std::cerr << "[GNN] ERROR: failed to close " << out_path << "\n";
@@ -1202,37 +1294,39 @@ void GNNModule::parseSecondaryVCF(const std::string& path, GnnVariantType vtype)
         std::cerr << "[GNN] ERROR: cannot read VCF header of " << path << "\n";
         std::exit(EXIT_FAILURE);
     }
-    bcf1_t* rec = bcf_init();
     int n = 0;
     // Run of consecutive heterozygous 5mC positions, as phase merges them
-    int run_rid = -1, run_start = -1, run_last = -2;
-    while (bcf_read(fp, hdr, rec) == 0) {
+    // (a run is on one contig: same contig name, same header id)
+    bool run_any = false;
+    std::string run_chrom;
+    int run_start = -1, run_last = -2;
+    // each record of a batch: heterozygous, phased, and its variant
+    std::vector<VariantInfo> got(kVcfBatch);
+    std::vector<char> het(kVcfBatch), phased(kVcfBatch);
+    readVcfRecords(fp, hdr, std::min(params_.threads, kVcfThreads), kVcfBatch,
+        [&](size_t i, bcf_hdr_t* hdr, bcf1_t* rec) {
+        het[i] = 0;
         bcf_unpack(rec, BCF_UN_ALL);
         int32_t* gt = nullptr; int ng = 0;
-        if (bcf_get_genotypes(hdr, rec, &gt, &ng) < 0) continue;
-        if (ng < 2) { free(gt); continue; }
-        bool phased = bcf_gt_is_phased(gt[1]);
+        if (bcf_get_genotypes(hdr, rec, &gt, &ng) < 0) return;
+        if (ng < 2) { free(gt); return; }
+        bool ph = bcf_gt_is_phased(gt[1]);
         int a0 = bcf_gt_allele(gt[0]), a1 = bcf_gt_allele(gt[1]);
         free(gt);
-        if (a0 == a1) continue;
-        int link_pos = -1;
-        if (vtype == GVT_METHYL) {
-            if (rec->rid != run_rid || rec->pos != run_last + 1)
-                run_start = (int)rec->pos;
-            run_rid = rec->rid;
-            run_last = (int)rec->pos;
-            if (run_start != rec->pos) link_pos = run_start;
-        }
-        if (!phased) continue;
-        VariantInfo vi;
+        if (a0 == a1) return;
+        het[i] = 1;
+        phased[i] = ph;
+        VariantInfo& vi = got[i];
+        vi = VariantInfo();
         vi.chrom = bcf_hdr_id2name(hdr, rec->rid);
-        vi.pos = rec->pos; vi.gt_ref = a0; vi.gt_alt = a1;
+        vi.pos = rec->pos;
+        if (!ph) return;
+        vi.gt_ref = a0; vi.gt_alt = a1;
         vi.is_phased = true; vi.pe = vi.h1 = vi.h2 = 0; vi.ps = -1;
         int rl = (int)strlen(rec->d.allele[0]);
         int al = rec->n_allele > 1 ? (int)strlen(rec->d.allele[1]) : rl;
         vi.indel_len = abs(al - rl);
         vi.vtype = vtype;
-        vi.link_pos = link_pos;
         float* fv = nullptr; int nv = 0;
         if (bcf_get_info_float(hdr, rec, "PE", &fv, &nv) > 0) { vi.pe = fv[0]; free(fv); fv=nullptr; nv=0; }
         if (bcf_get_info_float(hdr, rec, "H1", &fv, &nv) > 0) { vi.h1 = fv[0]; free(fv); fv=nullptr; nv=0; }
@@ -1263,10 +1357,25 @@ void GNNModule::parseSecondaryVCF(const std::string& path, GnnVariantType vtype)
             vi.keep_phase = deletion && svLength >= GNN_KEEP_SV_LENGTH;
         }
         free(svPe);
+    },
+        [&](size_t i, bcf_hdr_t*, bcf1_t*) {
+        if (!het[i]) return;
+        VariantInfo& vi = got[i];
+        int link_pos = -1;
+        if (vtype == GVT_METHYL) {
+            if (!run_any || vi.chrom != run_chrom || vi.pos != run_last + 1)
+                run_start = vi.pos;
+            if (!run_any || vi.chrom != run_chrom) run_chrom = vi.chrom;
+            run_any = true;
+            run_last = vi.pos;
+            if (run_start != vi.pos) link_pos = run_start;
+        }
+        if (!phased[i]) return;
+        vi.link_pos = link_pos;
         variants_[vi.chrom].push_back(vi);
         n++;
-    }
-    bcf_destroy(rec); bcf_hdr_destroy(hdr); hts_close(fp);
+    });
+    bcf_hdr_destroy(hdr); hts_close(fp);
     const char* tname[] = {"SNV","INDEL","SV","METHYL"};
     std::cerr << "  " << n << " phased " << tname[vtype] << " variants\n";
 }
@@ -1293,10 +1402,11 @@ float GNNModule::calcGCContent(const std::string& s) {
 float GNNModule::calcSTRContext(const std::string& s, int c) {
     if(s.size()<6||c<0||c>=(int)s.size()) return 0;
     int st=std::max(0,c-HP_RADIUS), en=std::min((int)s.size(),c+HP_RADIUS+1);
-    std::string w=s.substr(st,en-st); int best=0;
-    for(int ul=2;ul<=4;++ul) for(int i=0;i+ul<=(int)w.size();++i){
-        std::string u=w.substr(i,ul); if(u.find('N')!=std::string::npos) continue;
-        int cnt=0; for(int j=i;j+ul<=(int)w.size();j+=ul) if(w.substr(j,ul)==u)cnt++;else break;
+    const char* w=s.data()+st; const int wl=en-st; int best=0;
+    // unit w[i, i+ul) without N, repeated back to back from i
+    for(int ul=2;ul<=4;++ul) for(int i=0;i+ul<=wl;++i){
+        if(std::memchr(w+i,'N',ul)) continue;
+        int cnt=0; for(int j=i;j+ul<=wl;j+=ul) if(std::memcmp(w+j,w+i,ul)==0)cnt++;else break;
         if(cnt>=2&&cnt>best)best=cnt;}
     return std::min((float)best/10.0f,1.0f);
 }

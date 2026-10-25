@@ -7,11 +7,18 @@
 
 
 #define PROGRAM_BIN "longphase"
-#define VERSION "2.1.1"
+#define VERSION "2.1.2"
 
 
 
 static std::string version = VERSION;
+
+// jemalloc: purge freed pages from a background thread. Without it, memory freed by a finished
+// chromosome stays resident in that thread's arena, so the peak is the sum of all chromosomes
+// rather than of those in progress. MALLOC_CONF in the environment still overrides this.
+extern "C" {
+const char *malloc_conf = "background_thread:true";
+}
 
 static const char *STRIDE_USAGE_MESSAGE =
 "LongPhase Ver " VERSION "\n"

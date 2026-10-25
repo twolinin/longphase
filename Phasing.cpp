@@ -29,7 +29,7 @@ static const char *CORRECT_USAGE_MESSAGE =
 
 "parse alignment arguments:\n"
 "   -q, --mappingQuality=Num               filter alignment if mapping quality is lower than threshold. default:1\n"
-"   -x, --mismatchRate=Num                 mark reads as false if mismatchRate of them are higher than threshold. default:3\n\n"
+"   -x, --mismatchRate=Num                 no longer used; accepted for compatibility.\n\n"
 
 "phasing graph arguments:\n"
 "   -p, --baseQuality=[0~90]               change edge's weight to --edgeWeight if base quality is lower than the threshold. default:12\n"
@@ -41,7 +41,10 @@ static const char *CORRECT_USAGE_MESSAGE =
 "                                          two combinations are similar. default:0.7\n"
 "   -L, --overlapThreshold=[0~1]           filtering different alignments of the same read if there is overlap. default:0.2\n"
 "   -w, --sv-window=NUM                    window size for evaluating surrounding CIGAR operations. default:20\n"
-"   -h, --sv-threshold=[0~1]               relative difference threshold for read to support a SV. default:0.10\n\n"
+"   -h, --sv-threshold=[0~1]               relative difference threshold for read to support a SV.\n"
+"                                          default: 0.20 (--ont), 0.10 (--pb)\n"
+"   --sv-join-blocks                       let an SV be the only link between two phase blocks (longer\n"
+"                                          blocks, more wrong joins). default: False\n\n"
 
 "haplotag read correction arguments:\n"
 "   -m, --readConfidence=[0.5~1]           The confidence of a read being assigned to any haplotype. default:0.65\n"
@@ -63,7 +66,7 @@ static const char* shortopts = "s:b:o:t:r:d:1:a:q:x:p:e:n:m:L:w:h:";
 
 enum { OPT_HELP = 1 , DOT_FILE, SV_FILE, MOD_FILE, IS_ONT, IS_PB, PHASE_INDEL, INDEL_QUALITY, VERSION,
        DISABLE_GNN, GNN_BREAK_THRESHOLD, GNN_PE_THRESHOLD, GNN_WINDOW, GNN_RESPECT_BRIDGE, GNN_NO_SPLIT_BLOCKS,
-       SAMPLE};
+       SAMPLE, SV_JOIN_BLOCKS};
 
 static const struct option longopts[] = { 
     { "help",                 no_argument,        NULL, OPT_HELP },
@@ -91,6 +94,10 @@ static const struct option longopts[] = {
     { "snpConfidence",        required_argument,  NULL, 'n' },
     { "readConfidence",       required_argument,  NULL, 'm' },
     { "overlapThreshold",     required_argument,  NULL, 'L' },
+    { "sv-window",            required_argument,  NULL, 'w' },
+    { "sv-threshold",         required_argument,  NULL, 'h' },
+    { "sv-join-blocks",       no_argument,        NULL, SV_JOIN_BLOCKS },
+    // earlier names, still accepted
     { "svWindow",             required_argument,  NULL, 'w' },
     { "svThreshold",          required_argument,  NULL, 'h' },
     { "disableGNN",           no_argument,        NULL, DISABLE_GNN },
@@ -129,6 +136,9 @@ namespace opt
     static double overlapThreshold = 0.2;
     static int svWindow = 20;
     static double svThreshold = 0.1;
+    // set from the platform (--ont 0.2, --pb 0.1) unless -h is given
+    static bool svThresholdGiven = false;
+    static bool svJoinBlocks = false;
     static bool enableGNN = true;
     static float gnnBreakThreshold = 0.35f;
     static float gnnPeThreshold = 0.80f;
@@ -162,7 +172,7 @@ void PhasingOptions(int argc, char** argv)
         case 'n': arg >> opt::snpConfidence; break;
         case 'm': arg >> opt::readConfidence; break;
         case 'w': arg >> opt::svWindow; break;
-        case 'h': arg >> opt::svThreshold; break;
+        case 'h': arg >> opt::svThreshold; opt::svThresholdGiven = true; break;
         case 'L': arg >> opt::overlapThreshold; break;
         case 'b': {
             std::string bamFile;
@@ -177,16 +187,19 @@ void PhasingOptions(int argc, char** argv)
         case DOT_FILE: opt::generateDot=true; break;
         case IS_ONT: opt::isONT=true; break;
         case IS_PB: opt::isPB=true; break;
+        case SV_JOIN_BLOCKS: opt::svJoinBlocks=true; break;
         case DISABLE_GNN: opt::enableGNN=false; break;
         case GNN_BREAK_THRESHOLD: arg >> opt::gnnBreakThreshold; break;
         case GNN_PE_THRESHOLD: arg >> opt::gnnPeThreshold; break;
         case GNN_WINDOW: arg >> opt::gnnWindow; break;
         case GNN_RESPECT_BRIDGE: opt::gnnRespectBridge=true; break;
         case GNN_NO_SPLIT_BLOCKS: opt::gnnSplitBlocks=false; break;
+        case VERSION: break;
         
         case OPT_HELP:
             std::cout << CORRECT_USAGE_MESSAGE;
             exit(EXIT_SUCCESS);
+        default: die = true; break;
         }
     }
     
@@ -225,6 +238,23 @@ void PhasingOptions(int argc, char** argv)
         die = true;
     }
     
+    if( !opt::bamFile.empty() )
+    {
+        for (const std::string &bamFile : opt::bamFile)
+        {
+            std::ifstream openFile( bamFile.c_str() );
+            if( !openFile.is_open() )
+            {
+                std::cerr<< "File " << bamFile << " not exist.\n\n";
+                die = true;
+            }
+        }
+    }
+    else{
+        std::cerr << SUBPROGRAM ": missing bam file.\n";
+        die = true;
+    }
+
     if( opt::fastaFile != "")
     {
         std::ifstream openFile( opt::fastaFile.c_str() );
@@ -263,7 +293,7 @@ void PhasingOptions(int argc, char** argv)
     if ( opt::mappingQuality < 0 ){
         std::cerr << SUBPROGRAM " invalid mappingQuality. value: " 
                   << opt::mappingQuality 
-                  << "\n please check -m, --mappingQuality=Num\n";
+                  << "\n please check -q, --mappingQuality=Num\n";
         die = true;
     }
     
@@ -277,7 +307,7 @@ void PhasingOptions(int argc, char** argv)
     if ( opt::baseQuality < 0 ){
         std::cerr << SUBPROGRAM " invalid baseQuality. value: "
                   << opt::baseQuality
-                  << "\n please check -m, --mappingQuality=[0~90]\n";
+                  << "\n please check -p, --baseQuality=[0~90]\n";
         die = true;
     }
 
@@ -285,20 +315,6 @@ void PhasingOptions(int argc, char** argv)
         std::cerr << SUBPROGRAM " invalid edgeWeight. value: "
                   << opt::edgeWeight
                   << "\n please check -e, --edgeWeight=[0~1]\n";
-        die = true;
-    }
-
-    if ( opt::baseQuality < 0 ){
-        std::cerr << SUBPROGRAM " invalid baseQuality. value: "
-                  << opt::baseQuality
-                  << "\n please check -m, --mappingQuality=[0~90]\n";
-        die = true;
-    }
-
-    if ( opt::edgeWeight < 0 ){
-        std::cerr << SUBPROGRAM " invalid edgeWeight. value: "
-                  << opt::edgeWeight
-                  << "\n please check -m, --edgeWeight=[0~1]\n";
         die = true;
     }
 
@@ -328,6 +344,10 @@ void PhasingOptions(int argc, char** argv)
                   << opt::snpConfidence 
                   << "\n please check -n, --snpConfidence=[0.5~1]\n";
         die = true;
+    }
+
+    if( !opt::svThresholdGiven ){
+        opt::svThreshold = opt::isONT ? 0.2 : 0.1;
     }
 
     if( opt::svFile != ""){
@@ -414,6 +434,7 @@ int PhasingMain(int argc, char** argv, std::string in_version)
     
     ecParams.svWindow=opt::svWindow;
     ecParams.svThreshold=opt::svThreshold;
+    ecParams.svJoinBlocks=opt::svJoinBlocks;
 
     ecParams.enableGNN=opt::enableGNN;
     ecParams.gnnBreakThreshold=opt::gnnBreakThreshold;
