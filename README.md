@@ -461,16 +461,16 @@ minimap2 -ax map-ont -y reference.fasta methylcall.raw.fastq
 
 ## Speed
 LongPhase can phase a human genome within one minute.
-phase (wall-clock / peak memory) | LongPhase v2.1.2 -t 24 | LongPhase v2.1.2 -t 1 | WhatsHap 2.8
+HG002 ONT R10.4.1 | LongPhase -t 24 | LongPhase -t 1 | WhatsHap
 -- | -- | -- | --
-HG002 ONT R10.4.1 10x | 15s / 2.5G | 2m31s / 1.2G | 25m40s / 1.6G
-HG002 ONT R10.4.1 20x | 23s / 3.0G | 4m06s / 1.2G | 1h23m22s / 2.3G
-HG002 ONT R10.4.1 30x | 29s / 3.3G | 5m41s / 1.3G | 1h50m39s / 2.9G
-HG002 ONT R10.4.1 40x | 37s / 3.8G | 7m19s / 1.4G | 2h04m20s / 3.4G
-HG002 ONT R10.4.1 50x | 44s / 4.3G | 8m55s / 1.4G | 2h18m40s / 3.9G
-HG002 ONT R10.4.1 60x | 51s / 4.5G | 10m23s / 1.2G | 2h27m29s / 4.5G
+10x | 15s / 2.5G | 2.5m / 1.2G | 26m / 1.6G
+20x | 23s / 3.0G | 4.1m / 1.2G | 83m / 2.3G
+30x | 29s / 3.3G | 5.7m / 1.3G | 111m / 2.9G
+40x | 37s / 3.8G | 7.3m / 1.4G | 124m / 3.4G
+50x | 44s / 4.3G | 8.9m / 1.4G | 139m / 3.9G
+60x | 51s / 4.5G | 10.4m / 1.2G | 147m / 4.5G
 
-*SNP-only phasing (`longphase phase --ont`, `whatshap phase`), wall-clock time and peak memory, one run at a time with the page cache cleared before each run. Input and output files were on an M.2 NVMe SSD (Crucial T710, 4 TB, ext4) and the CPU was an AMD Ryzen 9 9950X3D (16 cores, 32 threads). WhatsHap runs on one thread. On one thread LongPhase is 10–20× faster than WhatsHap and uses less memory; with 24 threads it is 100–230× faster.
+*Wall-clock time / peak memory of SNP-only phasing (LongPhase v2.1.2, WhatsHap 2.8, which runs on one thread), one run at a time with the page cache cleared. Files on an NVMe SSD (ext4), CPU AMD Ryzen 9 9950X3D.
 
 *If the device is running low on memory, you can control memory usage by reducing the number of threads (-t).
 
